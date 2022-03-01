@@ -5,7 +5,7 @@
 ![TensorFlow](https://img.shields.io/badge/TensorFlow-%23FF6F00.svg?style=for-the-badge&logo=TensorFlow&logoColor=white)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)
 [![MIT license](https://img.shields.io/badge/License-MIT-blue.svg)](https://lbesson.mit-license.org/)
-![Github All Releases](https://img.shields.io/github/downloads/gmgeorg/psps/total.svg)
+![Github All Releases](https://img.shields.io/github/downloads/gmgeorg/pypsps/total.svg)
 
 ```python
 from pypsps.keras import models
@@ -28,7 +28,7 @@ guarantee balancedness within the strata (block).
 ## Implementation
 
 `pypsps` implements the causal learning algorithm proposed in Kelly, Kong, Goerg
-(2022) as customer layers, metrics, and causal loss function. It is fully
+(2022) as custom layers, metrics, and causal loss functions. It is fully
 compatible with the `tf.keras` API and all losses, layers, metrics can be used
 for building comprehensive causal learning graphs suitable for any kind of causal
 data / inference problem.
@@ -87,7 +87,7 @@ preds = model.predict(inputs)
 outcome_pred, scale, propensity_score, weights = utils.split_y_pred(preds)
 
 pred_ate = inference.predict_ate(model, ks_data.features)
-print("ATE\n\t true: %.1f \n\tnaive: %.1f \n\t pypsps: %.1f" % (
+print("ATE\n\t true: %.1f \n\tnaive: %.1f \n\t PSPS: %.1f" % (
     ks_data.true_ate, ks_data.naive_ate(), pred_ate)
     )
 pd.DataFrame(history.history)[["loss", "val_loss"]].plot(logy=True); plt.grid()
@@ -97,7 +97,7 @@ pd.DataFrame(history.history)[["loss", "val_loss"]].plot(logy=True); plt.grid()
 ATE
 	 true: 20.0 
 	naive: -1.3 
-	 pypsps: 17.3
+	 PSPS: 17.3
 ```
 
 ![PSPS architecture](imgs/loss_trace.png)
@@ -110,10 +110,10 @@ the `KangSchafer().run()` example above.
 
 ### Example notebooks
 
-* [`notebooks/psps_minimal_working_example.ipynb`](notebooks/psps_minimal_working_example.ipynb):
-  how to use `psps` for estimateing ATE for the Kang-Schafer dataset.
+* [`notebooks/pypsps_minimal_working_example.ipynb`](notebooks/pypsps_minimal_working_example.ipynb):
+  how to use `pypsps` for estimateing ATE for the Kang-Schafer dataset.
 
-* [`notebooks/psps_demo.ipynb`](notebooks/psps_demo.ipynb): more in depth code
+* [`notebooks/pypsps_demo.ipynb`](notebooks/pypsps_demo.ipynb): more in depth code
   examples on simulated and real world datasets.
 
 ## References
@@ -129,7 +129,7 @@ the `KangSchafer().run()` example above.
 This project is licensed under the terms of the [MIT license](LICENSE).
 
 
-**Important:** This is **NOT** an official Google code release of pypsps from the
+**Important:** This is **NOT** an official Google code release of PSPS from the
 original research paper; the repo here is not related to Google in any way.
 This is simply a re-implementation of the Google research
 [pre-print](https://research.google/pubs/pub49197/), with additional
