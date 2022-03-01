@@ -1,0 +1,6 @@
+tensorflow>=2.4.0
+numpy>=1.11.0
+pandas>=1.0.0
+tqdm>=4.62
+tensorflow-addons>=0.15.0
+git+git://github.com/gmgeorg/pypress@main#egg=pypress
