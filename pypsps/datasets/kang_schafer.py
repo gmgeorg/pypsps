@@ -16,29 +16,27 @@ class KangSchafer(base.BaseSimulator):
 
     def __init__(
         self,
-        n_samples: int,
         true_ate: float = 0.0,
         observe_transformed_features: bool = False,
     ):
         """Initializes a `BaseSimulator` instance that returns a `CausalDataset` at .run().
 
         Args:
-          n_samples: sample size (control + treated).
           true_ate: true ATE. Defaults to 0. as in KangSchafer but allows to specify
             non-zero treatment effect for purpose of simulation.
           observe_transformed_features: if True, it uses the non-linear transformed features
             as the observed features.  This will make a linear model unspecified
             in terms of 'features'.
         """
-        super().__init__(n_samples=n_samples)
+        super().__init__()
         self._true_ate = true_ate
         self._observe_transformed_features = observe_transformed_features
 
-    def run(self) -> base.CausalDataset:
+    def sample(self, n_samples: int) -> base.CausalDataset:
         """Implements the Kang-Schafer simulation."""
 
         z_arr = pd.DataFrame(
-            np.random.normal(size=(self._n_samples, 4)),
+            np.random.normal(size=(n_samples, 4)),
             columns=["z" + str(i) for i in range(1, 5)],
         )
 
@@ -50,7 +48,7 @@ class KangSchafer(base.BaseSimulator):
             210.0
             + np.dot(z_arr, np.array([27.4, 13.7, 13.7, 13.7]))
             + self._true_ate * treatment
-            + np.random.normal(size=(self._n_samples,)),
+            + np.random.normal(size=(n_samples,)),
             name="outcome",
         )
 

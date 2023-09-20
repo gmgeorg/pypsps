@@ -69,7 +69,7 @@ from pypsps.keras import models
 from pypsps import datasets, inference, utils
 
 np.random.seed(10)
-ks_data = datasets.KangSchafer(n_samples=1000, true_ate=20).run()
+ks_data = datasets.KangSchafer(true_ate=20).sample(n_samples=1000)
 tf.random.set_seed(10)
 model = models.build_toy_model(
     n_states=4, n_features=ks_data.n_features, compile=True, alpha=10.
@@ -105,7 +105,7 @@ ATE
 
 **Recommendation:** If you have your own simulation study or real world dataset,
 wrap it into a `datasets.base.CausalDataset()` class and proceed as above for
-the `KangSchafer().run()` example above.
+the `KangSchafer().sample()` example above.
 
 
 ### Example notebooks

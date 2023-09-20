@@ -51,23 +51,20 @@ class LuncefordDavidian(base.BaseSimulator):
 
     def __init__(
         self,
-        n_samples: int,
         association: Association,
     ):
-        super().__init__(n_samples=n_samples)
+        super().__init__()
         if isinstance(association, str):
             association = Association(association)
         self._association = association
 
-    def run(self) -> base.CausalDataset:
+    def sample(self, n_samples: int) -> base.CausalDataset:
         """Implements the Lunceford Davidian simulation."""
-        x3 = pd.Series(
-            np.random.binomial(n=1, p=0.25, size=(self._n_samples,)), name="x3"
-        )
+        x3 = pd.Series(np.random.binomial(n=1, p=0.25, size=(n_samples,)), name="x3")
         prob_z3 = 0.75 * x3 + 0.25 * (1 - x3)
         z3 = pd.Series(np.random.binomial(n=1, p=prob_z3), name="z3")
 
-        x1x2z1z2 = np.zeros(shape=(self._n_samples, 4))
+        x1x2z1z2 = np.zeros(shape=(n_samples, 4))
         x3_eq_0 = x3 == 0
         x3_eq_1 = x3 == 1
         x1x2z1z2[x3_eq_0, :] = np.random.multivariate_normal(
@@ -89,7 +86,7 @@ class LuncefordDavidian(base.BaseSimulator):
             )
         )
         treatment = np.random.binomial(n=1, p=propensity_score)
-        noise = np.random.normal(size=(self._n_samples,))
+        noise = np.random.normal(size=(n_samples,))
 
         xi_tmp = XI_LOOKUP[self._association]
         outcome = (

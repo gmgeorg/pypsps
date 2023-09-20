@@ -1,6 +1,6 @@
 """Base module for all (simulated) datasets."""
 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 import abc
 import pandas as pd
@@ -101,13 +101,18 @@ class CausalDataset(object):
 class BaseSimulator(abc.ABC):
     """Base class for simulating causal datasets."""
 
-    def __init__(self, n_samples: int, **kwargs):
+    def __init__(self, **kwargs):
         """Initializes the class."""
         super().__init__(**kwargs)
-        assert n_samples > 0
-        self._n_samples = n_samples
 
     @abc.abstractmethod
-    def run(self, **kwargs) -> CausalDataset:
-        """Implements the simulation and adds ._causal_dataset."""
-        raise NotImplementedError("_run() needs to be implemented.")
+    def sample(self, n_samples: int, **kwargs) -> CausalDataset:
+        """Implements the simulation and adds ._causal_dataset.
+
+        Args:
+            n_samples: sample size (control + treated).
+
+        Returns:
+             A CausalDataset with n_samples observations.
+        """
+        raise NotImplementedError("sample() needs to be implemented.")
