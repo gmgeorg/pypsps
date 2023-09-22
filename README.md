@@ -118,7 +118,7 @@ the `KangSchafer().sample()` example above.
 
 ## References
 
-[Kelly, Kong, and Goerg (2022)](https://openreview.net/forum?id=0r8nrBEOcs),
+[Kelly, Kong, and Goerg (2022)](https://proceedings.mlr.press/v177/kelly22a.html),
  **Predictive State Propensity Subclassification (PSPS): A causal inference
  algorithm for data-driven propensity score stratification**, Proceedings of MLR
  for the *Causal Learning and Reasoning (CLEAR) 2022*. 
