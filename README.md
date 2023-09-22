@@ -18,7 +18,7 @@ tf.keras.utils.plot_model(model)
 
 *Predictive State Propensity Subclassification* (**PSPS**) is a causal deep
 learning algorithm for observational (non-randomized) data proposed by [Kelly,
-Kong, and Goerg (2022)](https://openreview.net/forum?id=0r8nrBEOcs). PSPS
+Kong, and Goerg (2022)](https://proceedings.mlr.press/v177/kelly22a.html). PSPS
 decomposes the joint distribution of Pr(outcome, treatment | features) by
 conditioning on intermediate predictive states from Pr(treatment | features).
 These predictive state representations are trained simultaneously to the outcome
