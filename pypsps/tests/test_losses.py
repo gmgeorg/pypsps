@@ -58,6 +58,7 @@ def test_psps_model_and_causal_loss():
         reduction="auto",
     )
 
+    np.random.seed(10)
     ks_data = datasets.KangSchafer(true_ate=10).sample(n_samples=1000)
 
     inputs, outputs = ks_data.to_keras_inputs_outputs()
