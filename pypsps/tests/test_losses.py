@@ -79,17 +79,17 @@ def test_psps_model_and_causal_loss():
 
 
 def test_end_to_end_dataset_model_fit():
-    np.random.seed(10)
+    np.random.seed(13)
     ks_data = datasets.KangSchafer(true_ate=10).sample(n_samples=1000)
-    tf.random.set_seed(10)
+    tf.random.set_seed(13)
     model = models.build_toy_model(
-        n_states=3, n_features=ks_data.features.shape[1], compile=True
+        n_states=5, n_features=ks_data.features.shape[1], compile=True
     )
     inputs, outputs = ks_data.to_keras_inputs_outputs()
     history = model.fit(
         inputs,
         outputs,
-        epochs=2,
+        epochs=5,
         batch_size=64,
         verbose=2,
         validation_split=0.2,

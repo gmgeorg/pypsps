@@ -36,7 +36,7 @@ def _negloglik(y, mu, sigma):
     return negloglik_element
 
 
-@tf.keras.utils.register_keras_serializable(package="psps")
+@tf.keras.utils.register_keras_serializable(package="pypsps")
 class NegloglikNormal(tf.keras.losses.Loss):
     """Computes the negative log-likelihood of y ~ N(mu, sigma^2)."""
 
@@ -70,7 +70,7 @@ def negloglik_normal(y_true, y_pred):
     return tf.reduce_sum(negloglik_normal_each(y_true, y_pred))
 
 
-@tf.keras.utils.register_keras_serializable(package="psps")
+@tf.keras.utils.register_keras_serializable(package="pypsps")
 class OutcomeLoss(tf.keras.losses.Loss):
     """Computes outcome loss for a pypsps model with multi-output predictions.
 
@@ -132,7 +132,7 @@ class OutcomeLoss(tf.keras.losses.Loss):
         )
 
 
-@tf.keras.utils.register_keras_serializable(package="psps")
+@tf.keras.utils.register_keras_serializable(package="pypsps")
 class TreatmentLoss(tf.keras.losses.Loss):
     """Implements treatment loss for output of pypsps predictions."""
 
@@ -145,7 +145,7 @@ class TreatmentLoss(tf.keras.losses.Loss):
         return self._loss(y_true[:, 1], utils.split_y_pred(y_pred)[0])
 
 
-@tf.keras.utils.register_keras_serializable(package="psps")
+@tf.keras.utils.register_keras_serializable(package="pypsps")
 class CausalLoss(tf.keras.losses.Loss):
     """PSPS causal loss is the sum of outcome loss + treatment loss."""
 
