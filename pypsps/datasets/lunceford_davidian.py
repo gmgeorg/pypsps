@@ -58,7 +58,7 @@ class LuncefordDavidian(base.BaseSimulator):
             association = Association(association)
         self._association = association
 
-    def sample(self, n_samples: int) -> base.CausalDataset:
+    def sample(self, n_samples: int, **kwargs) -> base.CausalDataset:
         """Implements the Lunceford Davidian simulation."""
         x3 = pd.Series(np.random.binomial(n=1, p=0.25, size=(n_samples,)), name="x3")
         prob_z3 = 0.75 * x3 + 0.25 * (1 - x3)
