@@ -21,9 +21,10 @@ def split_y_pred(y_pred) -> Tuple:
     """Splits y_pred into a tuple of (means, scale, propensity score, predictive state weights)."""
 
     n_states = get_n_states(y_pred)
-    outcome_pred = y_pred[:, :n_states]
+    prop_score = y_pred[:, 0:1]
+    outcome_pred = y_pred[:, 1 : (n_states + 1)]
     weights = y_pred[:, -n_states:]
-    const_scale = y_pred[:, n_states : (2 * n_states)]
-    prop_score = y_pred[:, (2 * n_states + 1) : (2 * n_states + 2)]
+    const_scale = y_pred[:, (1 + n_states) : (1 + 2 * n_states)]
+    # prop_score = y_pred[:, (2 * n_states + 1) : (2 * n_states + 2)]
 
-    return outcome_pred, const_scale, prop_score, weights
+    return prop_score, outcome_pred, const_scale, weights

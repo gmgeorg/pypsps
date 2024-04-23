@@ -1,6 +1,5 @@
 """Module for pypsps losses."""
 
-
 from typing import Callable, Optional, Tuple
 
 import warnings
@@ -101,7 +100,7 @@ class OutcomeLoss(tf.keras.losses.Loss):
           * predictive state weights (P(state j | X)  [ N x J ]
         """
         n_states = utils.get_n_states(y_pred)
-        outcome_pred, const_scale, _, weights = utils.split_y_pred(y_pred)
+        _, outcome_pred, const_scale, weights = utils.split_y_pred(y_pred)
 
         outcome_true = y_true[:, 0]
 
@@ -143,7 +142,7 @@ class TreatmentLoss(tf.keras.losses.Loss):
 
     def call(self, y_true, y_pred):
         """Evaluates loss on treatment label and predicted treatment of y_pred (propensity score)."""
-        return self._loss(y_true[:, 1], utils.split_y_pred(y_pred)[2])
+        return self._loss(y_true[:, 1], utils.split_y_pred(y_pred)[0])
 
 
 @tf.keras.utils.register_keras_serializable(package="psps")

@@ -9,7 +9,7 @@ from .. import datasets
 
 def test_kang_schafer():
     np.random.seed(123)
-    ks_data = datasets.KangSchafer(n_samples=1000, true_ate=10).run()
+    ks_data = datasets.KangSchafer(true_ate=10).sample(n_samples=1000)
     df = ks_data.to_data_frame()
     assert isinstance(df, pd.DataFrame)
     assert df.shape[0] == 1000
@@ -22,7 +22,7 @@ def test_kang_schafer():
 )
 def test_lunceford_davidian(association, expected_ate):
     np.random.seed(123)
-    ld_data = datasets.LuncefordDavidian(n_samples=100, association=association).run()
+    ld_data = datasets.LuncefordDavidian(association=association).sample(n_samples=100)
     df = ld_data.to_data_frame()
     assert isinstance(df, pd.DataFrame)
     assert df.shape[0] == 100

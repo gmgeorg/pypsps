@@ -1,6 +1,5 @@
 """Test module for loss functions."""
 
-
 from typing import Tuple
 
 import numpy as np
@@ -59,7 +58,7 @@ def test_psps_model_and_causal_loss():
         reduction="auto",
     )
 
-    ks_data = datasets.KangSchafer(n_samples=1000, true_ate=10).run()
+    ks_data = datasets.KangSchafer(true_ate=10).sample(n_samples=1000)
 
     inputs, outputs = ks_data.to_keras_inputs_outputs()
     assert outputs.shape == (1000, 2)
@@ -69,7 +68,7 @@ def test_psps_model_and_causal_loss():
         n_states=3, n_features=ks_data.n_features, compile=True
     )
     preds = model.predict(inputs)
-    outcome_pred, const_scale, propensity_score, weights = utils.split_y_pred(preds)
+    propensity_score, outcome_pred, const_scale, weights = utils.split_y_pred(preds)
 
     assert outcome_pred.shape == (1000, 3)  # (obs, states)
     assert const_scale.shape == (1000, 3)
@@ -81,7 +80,7 @@ def test_psps_model_and_causal_loss():
 
 def test_end_to_end_dataset_model_fit():
     np.random.seed(10)
-    ks_data = datasets.KangSchafer(n_samples=1000, true_ate=10).run()
+    ks_data = datasets.KangSchafer(true_ate=10).sample(n_samples=1000)
     tf.random.set_seed(10)
     model = models.build_toy_model(
         n_states=3, n_features=ks_data.features.shape[1], compile=True

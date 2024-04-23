@@ -57,7 +57,7 @@ def predict_ute(model: tf.keras.Model, features: Any) -> Union[pd.Series, np.nda
     y_pred0 = predict_counterfactual(model, features, np.zeros(shape=features.shape[0]))
     y_pred1 = predict_counterfactual(model, features, np.ones(shape=features.shape[0]))
 
-    outcome_pred0, _, _, weights = utils.split_y_pred(y_pred0)
+    _, outcome_pred0, _, weights = utils.split_y_pred(y_pred0)
     outcome_pred1 = utils.split_y_pred(y_pred1)[0]
 
     utes = outcome_pred1 - outcome_pred0

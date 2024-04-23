@@ -108,7 +108,7 @@ def build_toy_model(
     outcome_hidden = tf.keras.layers.Concatenate()([outcome_hidden, feat_treat])
 
     outcome_preds = []
-    constant_scale_preds = []
+    scale_preds = []
     # One outcome model per state.
     for state_id in range(n_states):
         outcome_preds.append(
@@ -119,19 +119,19 @@ def build_toy_model(
             )
         )
 
-        constant_scale_preds.append(
+        # In this toy model use a constant scale estimate (BiasOnly); if needed
+        # change this to a scale parameter that changes as a function of inputs / hidden layers.
+        scale_preds.append(
             tf.keras.activations.softplus(
                 layers.BiasOnly(name="scale_logit_" + str(state_id))(feat_treat)
             )
         )
 
     outcome_comb = tfk.layers.Concatenate(name="outcome_pred_combined")(outcome_preds)
-    constant_scale_comb = tfk.layers.Concatenate(name="constant_scale_combined")(
-        constant_scale_preds
-    )
+    scale_comb = tfk.layers.Concatenate(name="constant_scale_combined")(scale_preds)
 
     outputs_concat = tfk.layers.Concatenate(name="output_tensor")(
-        [outcome_comb, constant_scale_comb, prop_score, pred_states]
+        [prop_score, outcome_comb, scale_comb, pred_states]
     )
 
     model = tfk.models.Model(inputs=[features, treat], outputs=outputs_concat)
