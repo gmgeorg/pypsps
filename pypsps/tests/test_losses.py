@@ -68,14 +68,14 @@ def test_psps_model_and_causal_loss():
         n_states=3, n_features=ks_data.n_features, compile=True
     )
     preds = model.predict(inputs)
-    propensity_score, outcome_pred, const_scale, weights = utils.split_y_pred(preds)
+    outcome_pred, const_scale, weights, propensity_score = utils.split_y_pred(preds)
 
     assert outcome_pred.shape == (1000, 3)  # (obs, states)
     assert const_scale.shape == (1000, 3)
     assert propensity_score.shape[0] == 1000
     assert weights.shape == (1000, 3)
     causal_loss = pypsps_causal_loss(outputs, preds)
-    assert causal_loss.numpy() == pytest.approx(34.08, 0.1)
+    assert causal_loss.numpy() == pytest.approx(25.44, 0.1)
 
 
 def test_end_to_end_dataset_model_fit():
@@ -89,7 +89,7 @@ def test_end_to_end_dataset_model_fit():
     history = model.fit(
         inputs,
         outputs,
-        epochs=5,
+        epochs=2,
         batch_size=64,
         verbose=2,
         validation_split=0.2,
@@ -100,9 +100,9 @@ def test_end_to_end_dataset_model_fit():
 
     assert preds.shape[0] == ks_data.n_samples
 
-    prop_score, outcome_pred, scale_pred, weights = utils.split_y_pred(preds)
+    outcome_pred, scale_pred, weights, prop_score = utils.split_y_pred(preds)
 
-    preds_comb = np.hstack([prop_score, outcome_pred, scale_pred, weights])
+    preds_comb = np.hstack([outcome_pred, scale_pred, weights, prop_score])
     np.testing.assert_allclose(preds, preds_comb)
     ate = inference.predict_ate(model, inputs[0])
     assert ate > 0

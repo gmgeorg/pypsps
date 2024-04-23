@@ -24,12 +24,11 @@ def split_y_pred(y_pred: _Y_PRED_DTYPE) -> Tuple:
     """Splits y_pred into a tuple of (propensity score, means, scale, predictive state weights)."""
 
     n_states = get_n_states(y_pred)
-    prop_score = y_pred[:, 0:1]
-    outcome_pred = y_pred[:, 1 : (n_states + 1)]
-    weights = y_pred[:, -n_states:]
-    scale_pred = y_pred[:, (1 + n_states) : (1 + 2 * n_states)]
-
-    return prop_score, outcome_pred, scale_pred, weights
+    outcome_pred = y_pred[:, :n_states]
+    weights = y_pred[:, -(n_states + 1) : -1]
+    scale_pred = y_pred[:, (n_states) : (2 * n_states)]
+    prop_score = y_pred[:, -1:]
+    return outcome_pred, scale_pred, weights, prop_score
 
 
 def agg_outcome_pred(y_pred: _Y_PRED_DTYPE) -> np.ndarray:

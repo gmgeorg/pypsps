@@ -131,7 +131,7 @@ def build_toy_model(
     scale_comb = tfk.layers.Concatenate(name="constant_scale_combined")(scale_preds)
 
     outputs_concat = tfk.layers.Concatenate(name="output_tensor")(
-        [prop_score, outcome_comb, scale_comb, pred_states]
+        [outcome_comb, scale_comb, pred_states, prop_score]
     )
 
     model = tfk.models.Model(inputs=[features, treat], outputs=outputs_concat)
