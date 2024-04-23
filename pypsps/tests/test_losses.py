@@ -97,7 +97,12 @@ def test_end_to_end_dataset_model_fit():
     l = history.history["loss"]
     assert l[0] > l[-1]
     preds = model.predict(inputs)
+
     assert preds.shape[0] == ks_data.n_samples
 
+    prop_score, outcome_pred, scale_pred, weights = utils.split_y_pred(preds)
+
+    preds_comb = np.hstack([prop_score, outcome_pred, scale_pred, weights])
+    np.testing.assert_allclose(preds, preds_comb)
     ate = inference.predict_ate(model, inputs[0])
     assert ate > 0

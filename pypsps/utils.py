@@ -27,9 +27,9 @@ def split_y_pred(y_pred: _Y_PRED_DTYPE) -> Tuple:
     prop_score = y_pred[:, 0:1]
     outcome_pred = y_pred[:, 1 : (n_states + 1)]
     weights = y_pred[:, -n_states:]
-    const_scale = y_pred[:, (1 + n_states) : (1 + 2 * n_states)]
+    scale_pred = y_pred[:, (1 + n_states) : (1 + 2 * n_states)]
 
-    return prop_score, outcome_pred, const_scale, weights
+    return prop_score, outcome_pred, scale_pred, weights
 
 
 def agg_outcome_pred(y_pred: _Y_PRED_DTYPE) -> np.ndarray:

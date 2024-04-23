@@ -100,7 +100,7 @@ class OutcomeLoss(tf.keras.losses.Loss):
           * predictive state weights (P(state j | X)  [ N x J ]
         """
         n_states = utils.get_n_states(y_pred)
-        _, outcome_pred, const_scale, weights = utils.split_y_pred(y_pred)
+        _, outcome_pred, scale_pred, weights = utils.split_y_pred(y_pred)
 
         outcome_true = y_true[:, 0]
 
@@ -108,7 +108,7 @@ class OutcomeLoss(tf.keras.losses.Loss):
         for j in range(n_states):
             weighted_loss += weights[:, j] * self._loss(
                 outcome_true,
-                tf.stack([outcome_pred[:, j], const_scale[:, j]], axis=1),
+                tf.stack([outcome_pred[:, j], scale_pred[:, j]], axis=1),
             )
 
         if self.reduction == tf.keras.losses.Reduction.NONE:
