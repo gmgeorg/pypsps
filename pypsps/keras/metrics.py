@@ -4,7 +4,7 @@ import tensorflow as tf
 from pypsps import utils
 
 
-# @tf.keras.utils.register_keras_serializable(package="pypsps")
+@tf.keras.utils.register_keras_serializable(package="pypsps")
 def propensity_score_crossentropy(y_true: tf.Tensor, y_pred: tf.Tensor):
     """Computes cross entropy for the propensity score. Used as a metric in pypsps model."""
     _, _, _, propensity_score = utils.split_y_pred(y_pred)
@@ -14,7 +14,7 @@ def propensity_score_crossentropy(y_true: tf.Tensor, y_pred: tf.Tensor):
     )
 
 
-# @tf.keras.utils.register_keras_serializable(package="pypsps")
+@tf.keras.utils.register_keras_serializable(package="pypsps")
 class PropensityScoreBinaryCrossentropy(tf.keras.metrics.BinaryCrossentropy):
     """Computes cross entropy for the propensity score. Used as a metric in pypsps model."""
 
@@ -27,7 +27,7 @@ class PropensityScoreBinaryCrossentropy(tf.keras.metrics.BinaryCrossentropy):
         )
 
 
-# @tf.keras.utils.register_keras_serializable(package="pypsps")
+@tf.keras.utils.register_keras_serializable(package="pypsps")
 class PropensityScoreAUC(tf.keras.metrics.AUC):
     """AUC computed on the ouptut for propensity part."""
 
