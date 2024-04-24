@@ -20,13 +20,15 @@ def get_n_states(y_pred: _Y_PRED_DTYPE) -> int:
     return n_states
 
 
-def split_y_pred(y_pred: _Y_PRED_DTYPE) -> Tuple:
+def split_y_pred(
+    y_pred: _Y_PRED_DTYPE,
+) -> Tuple[_Y_PRED_DTYPE, _Y_PRED_DTYPE, _Y_PRED_DTYPE, _Y_PRED_DTYPE]:
     """Splits y_pred into a tuple of (propensity score, means, scale, predictive state weights)."""
 
     n_states = get_n_states(y_pred)
     outcome_pred = y_pred[:, :n_states]
     weights = y_pred[:, -(n_states + 1) : -1]
-    scale_pred = y_pred[:, (n_states) : (2 * n_states)]
+    scale_pred = y_pred[:, n_states : (2 * n_states)]
     prop_score = y_pred[:, -1:]
     return outcome_pred, scale_pred, weights, prop_score
 
@@ -40,5 +42,9 @@ def agg_outcome_pred(y_pred: _Y_PRED_DTYPE) -> np.ndarray:
     """
     _, outcome_pred, _, weights = split_y_pred(y_pred)
 
-    weighted_outcome = (weights * outcome_pred).sum(axis=1)[:, np.newaxis]
+    if isinstance(weights, np.ndarray):
+        weighted_outcome = (weights * outcome_pred).sum(axis=1)[:, np.newaxis]
+    else:
+        weighted_outcome = tf.sum(weights * outcome_pred, axis=1)
+
     return weighted_outcome

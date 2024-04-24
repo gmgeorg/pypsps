@@ -95,8 +95,8 @@ def test_end_to_end_dataset_model_fit():
         verbose=2,
         validation_split=0.2,
     )
-    l = history.history["loss"]
-    assert l[0] > l[-1]
+    losses = history.history["loss"]
+    assert losses[0] > losses[-1]
     preds = model.predict(inputs)
 
     assert preds.shape[0] == ks_data.n_samples

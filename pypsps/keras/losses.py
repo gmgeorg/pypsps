@@ -17,18 +17,18 @@ for i in range(3):
     distrs.append(tfp.distributions.Normal(
     np.float32(y_pred_j[i, 0]), np.float32(y_pred_j[i, 1]), validate_args=False, allow_nan_stats=True, name='Normal'
 ))
-    
 
 def negloglik(y, rv_y):
     print(y, rv_y.parameters)
     return -rv_y.log_prob(y)
-    
+
 # Compare to tfp loglik
 [negloglik(y_true_j[i], d) for i, d in enumerate(distrs)]
 """
 
 
-def _negloglik(y, mu, sigma):
+def _negloglik(y: tf.Tensor, mu, sigma) -> tf.Tensor:
+    """Computes negative log-likelihood of data y ~ Normal(mu, sigma)."""
     negloglik_element = tf.math.log(2.0 * math.pi) / 2.0 + tf.math.log(sigma)
     negloglik_element += 0.5 * tf.square((y - mu) / sigma)
     return negloglik_element
