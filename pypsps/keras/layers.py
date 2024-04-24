@@ -25,7 +25,7 @@ class BiasOnly(tf.keras.layers.Layer):
     def build(self, input_shape):
         """Builds the layer based on input_shape."""
         self._constant = self.add_weight(
-            "constant",
+            name="constant",
             shape=[
                 self._units,
             ],

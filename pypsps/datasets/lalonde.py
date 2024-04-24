@@ -3,7 +3,6 @@
 See also here for details
 https://rugg2.github.io/Lalonde%20dataset%20-%20Causal%20Inference.html
 """
-import logging
 from typing import Dict
 import os
 import pandas as pd

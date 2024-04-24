@@ -1,12 +1,10 @@
 """Module for pypsps losses."""
 
-from typing import Callable, Optional, Tuple
+from typing import Optional
 
 import warnings
 
 import tensorflow as tf
-import numpy as np
-import tensorflow_probability as tfp
 import math
 from pypsps import utils
 
@@ -19,18 +17,18 @@ for i in range(3):
     distrs.append(tfp.distributions.Normal(
     np.float32(y_pred_j[i, 0]), np.float32(y_pred_j[i, 1]), validate_args=False, allow_nan_stats=True, name='Normal'
 ))
-    
 
 def negloglik(y, rv_y):
     print(y, rv_y.parameters)
     return -rv_y.log_prob(y)
-    
+
 # Compare to tfp loglik
 [negloglik(y_true_j[i], d) for i, d in enumerate(distrs)]
 """
 
 
-def _negloglik(y, mu, sigma):
+def _negloglik(y: tf.Tensor, mu, sigma) -> tf.Tensor:
+    """Computes negative log-likelihood of data y ~ Normal(mu, sigma)."""
     negloglik_element = tf.math.log(2.0 * math.pi) / 2.0 + tf.math.log(sigma)
     negloglik_element += 0.5 * tf.square((y - mu) / sigma)
     return negloglik_element
@@ -50,10 +48,7 @@ class NegloglikNormal(tf.keras.losses.Loss):
             return losses
         if self.reduction == tf.keras.losses.Reduction.SUM:
             return tf.reduce_sum(losses)
-        if self.reduction in (
-            tf.keras.losses.Reduction.AUTO,
-            tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE,
-        ):
+        if self.reduction in (tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE,):
             return tf.reduce_mean(losses)
         raise NotImplementedError("reduction='%s' is not implemented", self.reduction)
 
@@ -120,10 +115,7 @@ class OutcomeLoss(tf.keras.losses.Loss):
 
         # Divide by batch sample size; note that sum of all weights = n_samples
         # since weights are softmax per row.
-        if self.reduction in (
-            tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE,
-            tf.keras.losses.Reduction.AUTO,
-        ):
+        if self.reduction in (tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE):
             weighted_loss /= tf.reduce_sum(weights)
             return weighted_loss
 

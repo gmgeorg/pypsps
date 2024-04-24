@@ -35,10 +35,11 @@ def _build_binary_continuous_causal_loss(
 ) -> losses.CausalLoss:
     """Builds an example of binary treatment & continuous outcome causal loss."""
     psps_outcome_loss = losses.OutcomeLoss(
-        loss=losses.NegloglikNormal(reduction="none"), reduction="auto"
+        loss=losses.NegloglikNormal(reduction="none"), reduction="sum_over_batch_size"
     )
     psps_treat_loss = losses.TreatmentLoss(
-        loss=tf.keras.losses.BinaryCrossentropy(reduction="none"), reduction="auto"
+        loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
+        reduction="sum_over_batch_size",
     )
     psps_causal_loss = losses.CausalLoss(
         outcome_loss=psps_outcome_loss,
@@ -48,7 +49,7 @@ def _build_binary_continuous_causal_loss(
         predictive_states_regularizer=pypress.keras.regularizers.DegreesOfFreedom(
             10.0, df=n_states - 1
         ),
-        reduction="auto",
+        reduction="sum_over_batch_size",
     )
     return psps_causal_loss
 

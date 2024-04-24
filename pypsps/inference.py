@@ -4,7 +4,7 @@ Inference for now only supports binary treatment (i.e., switch between 0 / 1 to 
 counterfactual predictions).
 """
 
-from typing import Tuple, Any, Union
+from typing import Any, Union
 
 import numpy as np
 import pandas as pd
