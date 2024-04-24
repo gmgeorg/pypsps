@@ -1,6 +1,5 @@
 """Module for pypsps losses."""
 
-
 from typing import Callable, Optional, Tuple
 
 import warnings
@@ -37,7 +36,7 @@ def _negloglik(y, mu, sigma):
     return negloglik_element
 
 
-@tf.keras.utils.register_keras_serializable(package="psps")
+@tf.keras.utils.register_keras_serializable(package="pypsps")
 class NegloglikNormal(tf.keras.losses.Loss):
     """Computes the negative log-likelihood of y ~ N(mu, sigma^2)."""
 
@@ -71,7 +70,7 @@ def negloglik_normal(y_true, y_pred):
     return tf.reduce_sum(negloglik_normal_each(y_true, y_pred))
 
 
-@tf.keras.utils.register_keras_serializable(package="psps")
+@tf.keras.utils.register_keras_serializable(package="pypsps")
 class OutcomeLoss(tf.keras.losses.Loss):
     """Computes outcome loss for a pypsps model with multi-output predictions.
 
@@ -101,7 +100,7 @@ class OutcomeLoss(tf.keras.losses.Loss):
           * predictive state weights (P(state j | X)  [ N x J ]
         """
         n_states = utils.get_n_states(y_pred)
-        outcome_pred, const_scale, _, weights = utils.split_y_pred(y_pred)
+        outcome_pred, scale_pred, weights, _ = utils.split_y_pred(y_pred)
 
         outcome_true = y_true[:, 0]
 
@@ -109,7 +108,7 @@ class OutcomeLoss(tf.keras.losses.Loss):
         for j in range(n_states):
             weighted_loss += weights[:, j] * self._loss(
                 outcome_true,
-                tf.stack([outcome_pred[:, j], const_scale[:, j]], axis=1),
+                tf.stack([outcome_pred[:, j], scale_pred[:, j]], axis=1),
             )
 
         if self.reduction == tf.keras.losses.Reduction.NONE:
@@ -133,7 +132,7 @@ class OutcomeLoss(tf.keras.losses.Loss):
         )
 
 
-@tf.keras.utils.register_keras_serializable(package="psps")
+@tf.keras.utils.register_keras_serializable(package="pypsps")
 class TreatmentLoss(tf.keras.losses.Loss):
     """Implements treatment loss for output of pypsps predictions."""
 
@@ -143,10 +142,10 @@ class TreatmentLoss(tf.keras.losses.Loss):
 
     def call(self, y_true, y_pred):
         """Evaluates loss on treatment label and predicted treatment of y_pred (propensity score)."""
-        return self._loss(y_true[:, 1], utils.split_y_pred(y_pred)[2])
+        return self._loss(y_true[:, 1], utils.split_y_pred(y_pred)[-1])
 
 
-@tf.keras.utils.register_keras_serializable(package="psps")
+@tf.keras.utils.register_keras_serializable(package="pypsps")
 class CausalLoss(tf.keras.losses.Loss):
     """PSPS causal loss is the sum of outcome loss + treatment loss."""
 

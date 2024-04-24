@@ -32,7 +32,7 @@ class KangSchafer(base.BaseSimulator):
         self._true_ate = true_ate
         self._observe_transformed_features = observe_transformed_features
 
-    def sample(self, n_samples: int) -> base.CausalDataset:
+    def sample(self, n_samples: int, **kwargs) -> base.CausalDataset:
         """Implements the Kang-Schafer simulation."""
 
         z_arr = pd.DataFrame(

@@ -1,6 +1,5 @@
 """Test module for loss functions."""
 
-
 from typing import Tuple
 
 import numpy as np
@@ -59,7 +58,8 @@ def test_psps_model_and_causal_loss():
         reduction="auto",
     )
 
-    ks_data = datasets.KangSchafer(n_samples=1000, true_ate=10).run()
+    np.random.seed(10)
+    ks_data = datasets.KangSchafer(true_ate=10).sample(n_samples=1000)
 
     inputs, outputs = ks_data.to_keras_inputs_outputs()
     assert outputs.shape == (1000, 2)
@@ -69,22 +69,22 @@ def test_psps_model_and_causal_loss():
         n_states=3, n_features=ks_data.n_features, compile=True
     )
     preds = model.predict(inputs)
-    outcome_pred, const_scale, propensity_score, weights = utils.split_y_pred(preds)
+    outcome_pred, const_scale, weights, propensity_score = utils.split_y_pred(preds)
 
     assert outcome_pred.shape == (1000, 3)  # (obs, states)
     assert const_scale.shape == (1000, 3)
     assert propensity_score.shape[0] == 1000
     assert weights.shape == (1000, 3)
     causal_loss = pypsps_causal_loss(outputs, preds)
-    assert causal_loss.numpy() == pytest.approx(34.08, 0.1)
+    assert causal_loss.numpy() == pytest.approx(25.44, 0.1)
 
 
 def test_end_to_end_dataset_model_fit():
-    np.random.seed(10)
-    ks_data = datasets.KangSchafer(n_samples=1000, true_ate=10).run()
-    tf.random.set_seed(10)
+    np.random.seed(13)
+    ks_data = datasets.KangSchafer(true_ate=10).sample(n_samples=1000)
+    tf.random.set_seed(13)
     model = models.build_toy_model(
-        n_states=3, n_features=ks_data.features.shape[1], compile=True
+        n_states=5, n_features=ks_data.features.shape[1], compile=True
     )
     inputs, outputs = ks_data.to_keras_inputs_outputs()
     history = model.fit(
@@ -98,7 +98,12 @@ def test_end_to_end_dataset_model_fit():
     l = history.history["loss"]
     assert l[0] > l[-1]
     preds = model.predict(inputs)
+
     assert preds.shape[0] == ks_data.n_samples
 
+    outcome_pred, scale_pred, weights, prop_score = utils.split_y_pred(preds)
+
+    preds_comb = np.hstack([outcome_pred, scale_pred, weights, prop_score])
+    np.testing.assert_allclose(preds, preds_comb)
     ate = inference.predict_ate(model, inputs[0])
     assert ate > 0

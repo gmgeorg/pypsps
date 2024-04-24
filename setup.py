@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="pypsps",
-    version="0.0.1",
+    version="0.0.2",
     url="https://github.com/gmgeorg/pypsps.git",
     author="Georg M. Goerg",
     author_email="im@gmge.org",
@@ -11,9 +11,9 @@ setup(
     install_requires=[
         "pypress",
         "numpy >= 1.11.0",
-        "tensorflow >= 2.4.0",
+        "tensorflow >= 2.11.0",
         "pandas >= 1.0.0",
         "tensorflow-addons>=0.15.0",
     ],
-    dependency_links=["git+ssh://git@github.com/gmgeorg/pypress.git#egg=pypress-0.0.1"],
+    dependency_links=["git+ssh://git@github.com/gmgeorg/pypress.git#egg=pypress-0.0.2"],
 )
