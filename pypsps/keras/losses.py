@@ -1,12 +1,10 @@
 """Module for pypsps losses."""
 
-from typing import Callable, Optional, Tuple
+from typing import Optional
 
 import warnings
 
 import tensorflow as tf
-import numpy as np
-import tensorflow_probability as tfp
 import math
 from pypsps import utils
 
@@ -50,10 +48,7 @@ class NegloglikNormal(tf.keras.losses.Loss):
             return losses
         if self.reduction == tf.keras.losses.Reduction.SUM:
             return tf.reduce_sum(losses)
-        if self.reduction in (
-            tf.keras.losses.Reduction.AUTO,
-            tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE,
-        ):
+        if self.reduction in (tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE,):
             return tf.reduce_mean(losses)
         raise NotImplementedError("reduction='%s' is not implemented", self.reduction)
 
@@ -120,10 +115,7 @@ class OutcomeLoss(tf.keras.losses.Loss):
 
         # Divide by batch sample size; note that sum of all weights = n_samples
         # since weights are softmax per row.
-        if self.reduction in (
-            tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE,
-            tf.keras.losses.Reduction.AUTO,
-        ):
+        if self.reduction in (tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE):
             weighted_loss /= tf.reduce_sum(weights)
             return weighted_loss
 

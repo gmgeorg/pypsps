@@ -8,7 +8,7 @@ from pypsps import utils
 def propensity_score_crossentropy(y_true: tf.Tensor, y_pred: tf.Tensor):
     """Computes cross entropy for the propensity score. Used as a metric in pypsps model."""
     _, _, _, propensity_score = utils.split_y_pred(y_pred)
-    treatment_true = y_true[:, 1]
+    treatment_true = y_true[:, 0:1]
     return tf.keras.metrics.binary_crossentropy(
         y_true=treatment_true, y_pred=propensity_score
     )
@@ -21,7 +21,7 @@ class PropensityScoreBinaryCrossentropy(tf.keras.metrics.BinaryCrossentropy):
     def update_state(self, y_true, y_pred, sample_weight=None):
         """Updates state."""
         _, _, _, propensity_score = utils.split_y_pred(y_pred)
-        treatment_true = y_true[:, 1]
+        treatment_true = y_true[:, 0:1]
         super().update_state(
             y_true=treatment_true, y_pred=propensity_score, sample_weight=sample_weight
         )
@@ -34,7 +34,7 @@ class PropensityScoreAUC(tf.keras.metrics.AUC):
     def update_state(self, y_true, y_pred, sample_weight=None):
         """Updates state"""
         _, _, _, propensity_score = utils.split_y_pred(y_pred)
-        treatment_true = y_true[:, 1]
+        treatment_true = y_true[:, 0:1]
         super().update_state(
             y_true=treatment_true, y_pred=propensity_score, sample_weight=sample_weight
         )

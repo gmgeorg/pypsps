@@ -4,17 +4,11 @@ from typing import Tuple
 
 import numpy as np
 import pytest
-import pandas as pd
 import tensorflow as tf
 
 from .. import datasets
 from ..keras import losses, models
-from ..keras import layers as pypsps_layers
 from .. import utils, inference
-from ..keras import metrics
-
-from pypress.keras import layers as press_layers
-from pypress.keras import regularizers
 
 
 tfk = tf.keras
@@ -28,7 +22,7 @@ def _test_data() -> Tuple[np.ndarray, np.ndarray]:
 
 @pytest.mark.parametrize(
     "reduction,expected_len",
-    [("auto", 1), ("sum", 1), ("sum_over_batch_size", 1), ("none", 3)],
+    [("sum", 1), ("sum_over_batch_size", 1), ("none", 3)],  # ("auto", 1),
 )
 def test_negloglik_normal_loss(reduction, expected_len):
     y_true, y_pred = _test_data()
@@ -43,11 +37,12 @@ def test_negloglik_normal_loss(reduction, expected_len):
 
 def test_psps_model_and_causal_loss():
     pypsps_outcome_loss = losses.OutcomeLoss(
-        loss=losses.NegloglikNormal(reduction="none"), reduction="auto"
+        loss=losses.NegloglikNormal(reduction="none"), reduction="sum_over_batch_size"
     )
 
     pypsps_treat_loss = losses.TreatmentLoss(
-        loss=tf.keras.losses.BinaryCrossentropy(reduction="none"), reduction="auto"
+        loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
+        reduction="sum_over_batch_size",
     )
     pypsps_causal_loss = losses.CausalLoss(
         outcome_loss=pypsps_outcome_loss,
@@ -55,7 +50,7 @@ def test_psps_model_and_causal_loss():
         alpha=1.0,
         outcome_loss_weight=0.0,
         predictive_states_regularizer=tf.keras.regularizers.l2(0.1),
-        reduction="auto",
+        reduction="sum_over_batch_size",
     )
 
     np.random.seed(10)
@@ -70,6 +65,14 @@ def test_psps_model_and_causal_loss():
     )
     preds = model.predict(inputs)
     outcome_pred, const_scale, weights, propensity_score = utils.split_y_pred(preds)
+
+    print(preds)
+    print(outcome_pred.sum())
+    print(const_scale.sum())
+    print(weights.sum())
+    print(propensity_score.sum())
+
+    print(inputs[0].sum())
 
     assert outcome_pred.shape == (1000, 3)  # (obs, states)
     assert const_scale.shape == (1000, 3)

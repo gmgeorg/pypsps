@@ -1,6 +1,6 @@
 """Base module for all (simulated) datasets."""
 
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple
 
 import abc
 import pandas as pd
