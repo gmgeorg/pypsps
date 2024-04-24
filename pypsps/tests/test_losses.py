@@ -5,6 +5,7 @@ from typing import Tuple
 import numpy as np
 import pytest
 import tensorflow as tf
+import random
 
 from .. import datasets
 from ..keras import losses, models
@@ -36,6 +37,10 @@ def test_negloglik_normal_loss(reduction, expected_len):
 
 
 def test_psps_model_and_causal_loss():
+    tf.random.set_seed(0)
+    random.seed(0)
+    np.random.seed(0)
+
     pypsps_outcome_loss = losses.OutcomeLoss(
         loss=losses.NegloglikNormal(reduction="none"), reduction="sum_over_batch_size"
     )
@@ -66,20 +71,12 @@ def test_psps_model_and_causal_loss():
     preds = model.predict(inputs)
     outcome_pred, const_scale, weights, propensity_score = utils.split_y_pred(preds)
 
-    print(preds)
-    print(outcome_pred.sum())
-    print(const_scale.sum())
-    print(weights.sum())
-    print(propensity_score.sum())
-
-    print(inputs[0].sum())
-
     assert outcome_pred.shape == (1000, 3)  # (obs, states)
     assert const_scale.shape == (1000, 3)
     assert propensity_score.shape[0] == 1000
     assert weights.shape == (1000, 3)
     causal_loss = pypsps_causal_loss(outputs, preds)
-    assert causal_loss.numpy() == pytest.approx(25.44, 0.1)
+    assert causal_loss.numpy() == pytest.approx(25.88, 0.01)
 
 
 def test_end_to_end_dataset_model_fit():
