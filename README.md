@@ -84,7 +84,7 @@ history = model.fit(inputs,
                     callbacks=models.recommended_callbacks(),
                     )
 preds = model.predict(inputs)
-outcome_pred, scale, propensity_score, weights = utils.split_y_pred(preds)
+outcome_pred, scale, weights, propensity_score = utils.split_y_pred(preds)
 
 pred_ate = inference.predict_ate(model, ks_data.features)
 print("ATE\n\t true: %.1f \n\tnaive: %.1f \n\t PSPS: %.1f" % (
