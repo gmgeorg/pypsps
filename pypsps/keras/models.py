@@ -147,8 +147,9 @@ def build_toy_model(
             loss=psps_causal_loss,
             optimizer=tfk.optimizers.Nadam(learning_rate=0.01),
             metrics=[
-                metrics.propensity_score_crossentropy,
+                metrics.PropensityScoreBinaryCrossentropy(),
                 metrics.PropensityScoreAUC(curve="PR"),
+                metrics.OutcomeMeanSquaredError(),
             ],
         )
 
