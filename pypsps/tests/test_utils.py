@@ -1,15 +1,12 @@
 """Test utils"""
 
-from typing import Tuple
-
 import numpy as np
-import pytest
 import tensorflow as tf
 import random
 
 from .. import datasets
-from ..keras import losses, models
-from .. import utils, inference
+from ..keras import models
+from .. import utils
 
 
 def test_split_y_does_not_drop_columns():

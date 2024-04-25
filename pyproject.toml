@@ -13,6 +13,7 @@ python = "^3.10"
 numpy = ">=1.11.0"
 pandas = ">=1.0.0"
 tensorflow = ">=2.11.0"
+tensorflow_probability = ">=0.18.0"
 tqdm = ">=4.62"
 tensorflow-addons = ">=0.15.0"
 pypress = { git = "https://github.com/gmgeorg/pypress.git", rev = "v0.0.2" }

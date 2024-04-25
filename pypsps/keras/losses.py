@@ -6,7 +6,7 @@ import warnings
 
 import tensorflow as tf
 from pypsps import utils
-from pypsps.keras.distributions import base
+from pypsps.keras import neglogliks
 
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")

@@ -2,7 +2,10 @@
 
 import tensorflow as tf
 import math
+import tensorflow_probability as tfp
+import numpy as np
 
+tfd = tfp.distributions
 
 """
 import tensorflow_probability as tfp
@@ -57,6 +60,40 @@ class NegloglikNormal(tf.keras.losses.Loss):
             return losses
         if self.reduction == tf.keras.losses.Reduction.SUM:
             return tf.reduce_sum(losses)
-        if self.reduction in (tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE,):
+        if self.reduction in (
+            tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE,
+            tf.keras.losses.Reduction.AUTO,
+        ):
+            return tf.reduce_mean(losses)
+        raise NotImplementedError("reduction='%s' is not implemented", self.reduction)
+
+
+@tf.keras.utils.register_keras_serializable(package="pypsps")
+class NegloglikLoss(tf.keras.losses.Loss):
+    """Computes the negative log-likelihood of y ~ Distribution."""
+
+    def __init__(self, distribution_constructor: tfd.Distribution, **kwargs):
+        self._distribution_constructor = distribution_constructor
+        super().__init__(**kwargs)
+
+    def call(self, y_true, y_pred):
+        """Implements the loss function call."""
+        if isinstance(y_pred, np.ndarray):
+            n_params = y_pred.shape[1]
+        else:
+            n_params = y_pred.get_shape().as_list()[1]
+
+        y_pred_cols = tf.split(y_pred, n_params, axis=0)
+        distr = self._distribution_constructor(*y_pred_cols)
+        losses = -distr.log_prob(y_true)
+        # losses = _negloglik(y_true, y_pred_mu, y_pred_scale)
+        if self.reduction == tf.keras.losses.Reduction.NONE:
+            return losses
+        if self.reduction == tf.keras.losses.Reduction.SUM:
+            return tf.reduce_sum(losses)
+        if self.reduction in (
+            tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE,
+            tf.keras.losses.Reduction.AUTO,
+        ):
             return tf.reduce_mean(losses)
         raise NotImplementedError("reduction='%s' is not implemented", self.reduction)

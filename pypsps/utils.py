@@ -47,7 +47,7 @@ def agg_outcome_pred(y_pred: _Y_PRED_DTYPE) -> np.ndarray:
     if isinstance(weights, np.ndarray):
         weighted_outcome = (weights * outcome_pred).sum(axis=1)
     else:
-        weighted_outcome = tf.sum(weights * outcome_pred, axis=1)
+        weighted_outcome = tf.reduce_sum(weights * outcome_pred, axis=1)
 
     return weighted_outcome
 
