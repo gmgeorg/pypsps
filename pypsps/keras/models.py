@@ -7,9 +7,9 @@ import tensorflow as tf
 import pypress
 import pypress.keras.layers
 import pypress.keras.regularizers
-from . import losses
-from . import layers
-from . import metrics
+
+from . import losses, layers, metrics
+from pypsps.keras import neglogliks
 
 
 tfk = tf.keras
@@ -35,7 +35,8 @@ def _build_binary_continuous_causal_loss(
 ) -> losses.CausalLoss:
     """Builds an example of binary treatment & continuous outcome causal loss."""
     psps_outcome_loss = losses.OutcomeLoss(
-        loss=losses.NegloglikNormal(reduction="none"), reduction="sum_over_batch_size"
+        loss=neglogliks.NegloglikNormal(reduction="none"),
+        reduction="sum_over_batch_size",
     )
     psps_treat_loss = losses.TreatmentLoss(
         loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
