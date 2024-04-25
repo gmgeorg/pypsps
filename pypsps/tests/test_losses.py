@@ -1,6 +1,5 @@
 """Test module for loss functions."""
 
-
 import numpy as np
 import pytest
 import tensorflow as tf
@@ -81,6 +80,5 @@ def test_end_to_end_dataset_model_fit():
 
     assert preds.shape[0] == ks_data.n_samples
 
-    outcome_pred, scale_pred, weights, prop_score = utils.split_y_pred(preds)
     ate = inference.predict_ate(model, inputs[0])
     assert ate > 0
