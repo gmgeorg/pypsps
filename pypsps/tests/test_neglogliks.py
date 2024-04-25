@@ -4,16 +4,12 @@ from typing import Tuple
 
 import numpy as np
 import pytest
-import tensorflow as tf
-import random
+import tensorflow_probability as tfp
 
-from .. import datasets
-from ..keras import losses, models
 from ..keras import neglogliks
-from .. import utils, inference
 
 
-tfk = tf.keras
+tfd = tfp.distributions
 
 
 def _test_data() -> Tuple[np.ndarray, np.ndarray]:
@@ -35,3 +31,20 @@ def test_negloglik_normal_loss(reduction, expected_len):
         assert not len(loss.numpy().shape)
     else:
         assert loss.shape[0] == expected_len
+
+
+@pytest.mark.parametrize(
+    "reduction",
+    [("sum"), ("sum_over_batch_size"), ("none")],  # ("auto", 1),
+)
+def test_negloglik_loss_class_works(reduction):
+    y_true, y_pred = _test_data()
+    loss_normal = neglogliks.NegloglikNormal(reduction=reduction)(
+        y_true=y_true.astype("float32"), y_pred=y_pred.astype("float32")
+    )
+    loss_class_normal = neglogliks.NegloglikLoss(
+        reduction=reduction, distribution_constructor=tfd.Normal
+    )(y_true=y_true.astype("float32"), y_pred=y_pred.astype("float32"))
+    print(loss_normal)
+    print(loss_class_normal)
+    assert loss_normal.numpy() == pytest.approx(loss_class_normal.numpy(), 0.0001)

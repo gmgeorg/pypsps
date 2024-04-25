@@ -1,6 +1,5 @@
 """Test module for loss functions."""
 
-from typing import Tuple
 
 import numpy as np
 import pytest
