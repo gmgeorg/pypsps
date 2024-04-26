@@ -3,7 +3,7 @@
 import numpy as np
 
 import pandas as pd
-from pypsps.datasets import base
+from . import base
 
 
 class KangSchafer(base.BaseSimulator):

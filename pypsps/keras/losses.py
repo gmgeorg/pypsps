@@ -5,7 +5,8 @@ from typing import Optional
 import warnings
 
 import tensorflow as tf
-from pypsps import utils
+from .. import utils
+from . import neglogliks
 
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")
@@ -100,8 +101,14 @@ class CausalLoss(tf.keras.losses.Loss):
 
     def __init__(
         self,
-        outcome_loss: OutcomeLoss,
-        treatment_loss: TreatmentLoss,
+        outcome_loss: OutcomeLoss = OutcomeLoss(
+            loss=neglogliks.NegloglikNormal(reduction="none"),
+            reduction="sum_over_batch_size",
+        ),
+        treatment_loss: TreatmentLoss = TreatmentLoss(
+            loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
+            reduction="sum_over_batch_size",
+        ),
         alpha: float = 1.0,
         outcome_loss_weight: float = 1.0,
         predictive_states_regularizer: Optional[
@@ -112,8 +119,9 @@ class CausalLoss(tf.keras.losses.Loss):
         """Initializes the causal loss class.
 
         Args:
-            outcome_loss: instance of an outcome loss
-            treatment_loss: instance of a treatment loss
+            outcome_loss: instance of an outcome loss; defaults to a Normal log-likelihood.
+            treatment_loss: instance of a treatment loss; defaults to binary treatment loss
+              (ie binary cross entropy).
             alpha: penalty parameter for the treatment loss. Defaults to 1.0 so
               that total causal loss equals the joint log-likelihood.
             outcome_loss_weight: weight of outcome loss; defaults to 1.0.
