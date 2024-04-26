@@ -1,7 +1,7 @@
 """Module for metrics from pypsps predictions."""
 
 import tensorflow as tf
-from pypsps import utils
+from .. import utils
 
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")

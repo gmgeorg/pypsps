@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import enum
 
-from pypsps.datasets import base
+from . import base
 
 
 class Association(enum.Enum):

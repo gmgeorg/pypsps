@@ -3,11 +3,12 @@
 See also here for details
 https://rugg2.github.io/Lalonde%20dataset%20-%20Causal%20Inference.html
 """
+
 from typing import Dict
 import os
 import pandas as pd
 
-from pypsps.datasets import base
+from . import base
 
 
 _BASE_URL = "http://www.nber.org/~rdehejia/data"
