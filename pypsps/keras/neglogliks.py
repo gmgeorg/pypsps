@@ -1,9 +1,10 @@
 """Module to implement distributions and log-likelihood loss fcts."""
 
-import tensorflow as tf
 import math
-import tensorflow_probability as tfp
+
 import numpy as np
+import tensorflow as tf
+import tensorflow_probability as tfp
 
 tfd = tfp.distributions
 
@@ -42,7 +43,7 @@ class NegloglikLoss(tf.keras.losses.Loss):
         raise NotImplementedError("reduction='%s' is not implemented", self.reduction)
 
 
-def _negloglik(y: tf.Tensor, mu: tf.Tensor, sigma: tf.Tensor) -> tf.Tensor:
+def _negloglik_normal(y: tf.Tensor, mu: tf.Tensor, sigma: tf.Tensor) -> tf.Tensor:
     """Computes negative log-likelihood of data y ~ Normal(mu, sigma)."""
     negloglik_element = tf.math.log(2.0 * math.pi) / 2.0 + tf.math.log(sigma)
     negloglik_element += 0.5 * tf.square((y - mu) / sigma)
@@ -58,7 +59,7 @@ class NegloglikNormal(tf.keras.losses.Loss):
         y_pred_mu = y_pred[:, 0]
         y_pred_scale = y_pred[:, 1]
 
-        losses = _negloglik(y_true, y_pred_mu, y_pred_scale)
+        losses = _negloglik_normal(y_true, y_pred_mu, y_pred_scale)
         if self.reduction == tf.keras.losses.Reduction.NONE:
             return losses
         if self.reduction == tf.keras.losses.Reduction.SUM:

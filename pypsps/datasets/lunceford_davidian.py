@@ -1,8 +1,9 @@
 """Lunceford-Davidian simulation to evaluate observational causal algorithms."""
 
+import enum
+
 import numpy as np
 import pandas as pd
-import enum
 
 from . import base
 
@@ -49,30 +50,24 @@ A1 = np.array([1, 1, -1.0, -1.0])
 class LuncefordDavidian(base.BaseSimulator):
     """Implements Lunceford Davidian simulation."""
 
-    def __init__(
-        self,
-        association: Association,
-    ):
-        super().__init__()
+    def __init__(self, association: Association, **kwargs):
+        super().__init__(**kwargs)
         if isinstance(association, str):
             association = Association(association)
         self._association = association
+        self._rng = np.random.RandomState(self._seed)
 
     def sample(self, n_samples: int, **kwargs) -> base.CausalDataset:
         """Implements the Lunceford Davidian simulation."""
-        x3 = pd.Series(np.random.binomial(n=1, p=0.25, size=(n_samples,)), name="x3")
+        x3 = pd.Series(self._rng.binomial(n=1, p=0.25, size=(n_samples,)), name="x3")
         prob_z3 = 0.75 * x3 + 0.25 * (1 - x3)
-        z3 = pd.Series(np.random.binomial(n=1, p=prob_z3), name="z3")
+        z3 = pd.Series(self._rng.binomial(n=1, p=prob_z3), name="z3")
 
         x1x2z1z2 = np.zeros(shape=(n_samples, 4))
         x3_eq_0 = x3 == 0
         x3_eq_1 = x3 == 1
-        x1x2z1z2[x3_eq_0, :] = np.random.multivariate_normal(
-            A0, B_COV, size=(x3_eq_0.sum())
-        )
-        x1x2z1z2[x3_eq_1, :] = np.random.multivariate_normal(
-            A0, B_COV, size=(x3_eq_1.sum())
-        )
+        x1x2z1z2[x3_eq_0, :] = self._rng.multivariate_normal(A0, B_COV, size=(x3_eq_0.sum()))
+        x1x2z1z2[x3_eq_1, :] = self._rng.multivariate_normal(A0, B_COV, size=(x3_eq_1.sum()))
         x1x2z1z2 = pd.DataFrame(x1x2z1z2, columns=["x1", "x2", "z1", "z2"])
 
         xz = pd.concat([x1x2z1z2, x3, z3], axis=1)
@@ -85,8 +80,8 @@ class LuncefordDavidian(base.BaseSimulator):
                 beta_tmp[1:],
             )
         )
-        treatment = np.random.binomial(n=1, p=propensity_score)
-        noise = np.random.normal(size=(n_samples,))
+        treatment = self._rng.binomial(n=1, p=propensity_score)
+        noise = self._rng.normal(size=(n_samples,))
 
         xi_tmp = XI_LOOKUP[self._association]
         outcome = (

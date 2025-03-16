@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pypsps"
-version = "0.0.5"
+version = "0.0.6"
 description = "Predictive State Propensity Subclassification (PSPS) in Python (keras)"
 authors = ["Georg M. Goerg <im@gmge.org>"]
 license = "MIT"
@@ -16,7 +16,6 @@ tensorflow = ">=2.11.0"
 tensorflow_probability = ">=0.18.0"
 tf-keras = ">=2.14.1"
 tqdm = ">=4.62"
-tensorflow-addons = ">=0.15.0"
 pypress = { git = "https://github.com/gmgeorg/pypress.git", rev = "v0.0.2" }
 
 [tool.poetry.group.dev.dependencies]
@@ -24,6 +23,9 @@ flake8 = "^7.0.0"
 pre-commit = "^3.7.0"
 pytest = ">=6.1.1"
 ruff = "^0.3.7"
+seaborn = "^0.13.2"
+scikit-learn = "^1.6.1"
+optuna = "^4.2.1"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
@@ -32,4 +34,3 @@ build-backend = "poetry.core.masonry.api"
 [tool.ruff]
 line-length = 100
 fix = true
-
