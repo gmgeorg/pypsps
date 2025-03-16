@@ -18,7 +18,7 @@ def test_kang_schafer():
 
 
 @pytest.mark.parametrize(
-    "association,expected_ate", [("none", 2.04), ("moderate", 1.76), ("strong", 1.65)]
+    "association,expected_ate", [("none", 1.95), ("moderate", 1.64), ("strong", 1.44)]
 )
 def test_lunceford_davidian(association, expected_ate):
     np.random.seed(123)

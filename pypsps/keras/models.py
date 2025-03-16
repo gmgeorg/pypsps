@@ -2,31 +2,16 @@
 
 from typing import List, Tuple
 
-import tensorflow as tf
-
 import pypress
 import pypress.keras.layers
 import pypress.keras.regularizers
+import tensorflow as tf
 
-from . import losses, layers, metrics, neglogliks
-
+from . import layers, losses, metrics, neglogliks
 
 tfk = tf.keras
 
-
-def recommended_callbacks(monitor="val_loss") -> List[tf.keras.callbacks.Callback]:
-    """Return a list of recommended callbacks.
-
-    This list is subject to change w/o notice. Do not rely on this in production.
-    """
-    callbacks = [
-        tf.keras.callbacks.EarlyStopping(
-            monitor=monitor, patience=20, restore_best_weights=True
-        ),
-        tf.keras.callbacks.ReduceLROnPlateau(patience=10),
-        tf.keras.callbacks.TerminateOnNaN(),
-    ]
-    return callbacks
+_EPS = 1e-3
 
 
 def _build_binary_continuous_causal_loss(
@@ -37,10 +22,14 @@ def _build_binary_continuous_causal_loss(
     """Builds an example of binary treatment & continuous outcome causal loss."""
     psps_outcome_loss = losses.OutcomeLoss(
         loss=neglogliks.NegloglikNormal(reduction="none"),
+        n_outcome_pred_cols=2,
+        n_treatment_pred_cols=1,
         reduction="sum_over_batch_size",
     )
     psps_treat_loss = losses.TreatmentLoss(
         loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
+        n_outcome_pred_cols=2,
+        n_treatment_pred_cols=1,
         reduction="sum_over_batch_size",
     )
     psps_causal_loss = losses.CausalLoss(
@@ -89,9 +78,7 @@ def build_toy_model(
     treat = tfk.layers.Input(shape=(1,))
 
     features_bn = tfk.layers.BatchNormalization()(features)
-    feat_treat = tfk.layers.Concatenate(name="features_and_treatment")(
-        [features_bn, treat]
-    )
+    feat_treat = tfk.layers.Concatenate(name="features_and_treatment")([features_bn, treat])
 
     ps_hidden = tfk.layers.Dense(10, "relu")(features_bn)
     ps_hidden = tfk.layers.BatchNormalization()(ps_hidden)
@@ -99,9 +86,7 @@ def build_toy_model(
     ps_hidden = tfk.layers.Dense(10, "selu")(ps_hidden)
 
     ps_hidden = tf.keras.layers.Concatenate()([ps_hidden, features_bn])
-    pss = pypress.keras.layers.PredictiveStateSimplex(
-        n_states=n_states, input_dim=n_features
-    )
+    pss = pypress.keras.layers.PredictiveStateSimplex(n_states=n_states, input_dim=n_features)
     pred_states = pss(ps_hidden)
     # Propensity score for binary treatment (--> "sigmoid" activation).
     prop_score = pypress.keras.layers.PredictiveStateMeans(
@@ -120,9 +105,7 @@ def build_toy_model(
     for state_id in range(n_states):
         outcome_preds.append(
             tfk.layers.Dense(1, name="outcome_pred_state_" + str(state_id))(
-                tfk.layers.Dense(5, "selu", name="feat_eng_state_" + str(state_id))(
-                    outcome_hidden
-                )
+                tfk.layers.Dense(5, "selu", name="feat_eng_state_" + str(state_id))(outcome_hidden)
             )
         )
 
@@ -144,7 +127,6 @@ def build_toy_model(
     model = tfk.models.Model(inputs=[features, treat], outputs=outputs_concat)
 
     if compile:
-
         psps_causal_loss = _build_binary_continuous_causal_loss(
             n_states=n_states,
             alpha=alpha,
@@ -201,9 +183,7 @@ def build_model_binary_normal(
     treat = tfk.layers.Input(shape=(1,))
 
     features_bn = tfk.layers.BatchNormalization()(features)
-    feat_treat = tfk.layers.Concatenate(name="features_and_treatment")(
-        [features_bn, treat]
-    )
+    feat_treat = tfk.layers.Concatenate(name="features_and_treatment")([features_bn, treat])
 
     ps_hidden = tf.keras.layers.Dense(
         predictive_state_hidden_layers[0][0], predictive_state_hidden_layers[0][1]
@@ -217,9 +197,7 @@ def build_model_binary_normal(
         ps_hidden = tf.keras.layers.BatchNormalization()(ps_hidden)
 
     ps_hidden = tf.keras.layers.Concatenate()([ps_hidden, features_bn])
-    pss = pypress.keras.layers.PredictiveStateSimplex(
-        n_states=n_states, input_dim=n_features
-    )
+    pss = pypress.keras.layers.PredictiveStateSimplex(n_states=n_states, input_dim=n_features)
     pred_states = pss(ps_hidden)
 
     # Propensity score for binary treatment (--> "sigmoid" activation).
@@ -285,7 +263,6 @@ def build_model_binary_normal(
     model = tfk.models.Model(inputs=[features, treat], outputs=outputs_concat)
 
     if compile:
-
         psps_causal_loss = _build_binary_continuous_causal_loss(
             n_states=n_states,
             alpha=alpha,
