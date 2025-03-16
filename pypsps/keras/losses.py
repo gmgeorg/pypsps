@@ -1,12 +1,11 @@
 """Module for pypsps losses."""
 
+import warnings
 from typing import Optional
 
-import warnings
-
 import tensorflow as tf
+
 from .. import utils
-from . import neglogliks
 
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")
@@ -17,7 +16,13 @@ class OutcomeLoss(tf.keras.losses.Loss):
     where weights are the predictive states embeddings from the propensity model.
     """
 
-    def __init__(self, loss: tf.keras.losses.Loss, n_outcome_pred_cols: int, n_treatment_pred_cols: int = 1, **kwargs):
+    def __init__(
+        self,
+        loss: tf.keras.losses.Loss,
+        n_outcome_pred_cols: int,
+        n_treatment_pred_cols: int = 1,
+        **kwargs,
+    ):
         """Initializes the outcome loss.
 
         Args:
@@ -31,7 +36,6 @@ class OutcomeLoss(tf.keras.losses.Loss):
         self._n_outcome_pred_cols = n_outcome_pred_cols
         self._n_treatment_pred_cols = n_treatment_pred_cols
 
-
     def call(self, y_true, y_pred):
         """Evaluates Causal Loss on (y_true, y_pred) for binary loss and Normal outcomes.
 
@@ -40,12 +44,16 @@ class OutcomeLoss(tf.keras.losses.Loss):
           * predictive state weights (P(state j | X)  [ N x J ]
           * propensity score (P(treatment | X) [ N x 1 ]
         """
-        n_states = utils.get_n_states(y_pred, self._n_outcome_pred_cols, self._n_treatment_pred_cols)
-        outcome_params_pred, weights, _ = utils.split_y_pred(y_pred, 
-                                                                               self._n_outcome_pred_cols, 
-                                                                               self._n_treatment_pred_cols)
+        n_states = utils.get_n_states(
+            y_pred, self._n_outcome_pred_cols, self._n_treatment_pred_cols
+        )
+        outcome_params_pred, weights, _ = utils.split_y_pred(
+            y_pred, self._n_outcome_pred_cols, self._n_treatment_pred_cols
+        )
 
-        outcome_param_preds = utils.split_outcome_pred(outcome_params_pred, n_outcome_pred_cols=self._n_outcome_pred_cols)
+        outcome_param_preds = utils.split_outcome_pred(
+            outcome_params_pred, n_outcome_pred_cols=self._n_outcome_pred_cols
+        )
 
         n_cols_true = utils.get_n_cols(y_true)
         outcome_true = utils.split_y_true(y_true, n_cols_true - 1)[0]
@@ -75,16 +83,20 @@ class OutcomeLoss(tf.keras.losses.Loss):
             weighted_loss /= tf.reduce_sum(weights)
             return weighted_loss
 
-        raise NotImplementedError(
-            "self.reduction='%s' is not implemented", self.reduction
-        )
+        raise NotImplementedError("self.reduction='%s' is not implemented", self.reduction)
 
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")
 class TreatmentLoss(tf.keras.losses.Loss):
     """Implements treatment loss for output of pypsps predictions."""
 
-    def __init__(self, loss: tf.keras.losses.Loss, n_outcome_pred_cols: int = 2, n_treatment_pred_cols: int = 1, **kwargs):
+    def __init__(
+        self,
+        loss: tf.keras.losses.Loss,
+        n_outcome_pred_cols: int = 2,
+        n_treatment_pred_cols: int = 1,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self._loss = loss
         self._n_outcome_pred_cols = n_outcome_pred_cols
@@ -92,7 +104,10 @@ class TreatmentLoss(tf.keras.losses.Loss):
 
     def call(self, y_true, y_pred):
         """Evaluates loss on treatment label and predicted treatment of y_pred (propensity score)."""
-        return self._loss(y_true[:, 1], utils.split_y_pred(y_pred, self._n_outcome_pred_cols, self._n_treatment_pred_cols)[-1])
+        return self._loss(
+            y_true[:, 1],
+            utils.split_y_pred(y_pred, self._n_outcome_pred_cols, self._n_treatment_pred_cols)[-1],
+        )
 
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")
@@ -119,10 +134,8 @@ class CausalLoss(tf.keras.losses.Loss):
         treatment_loss: TreatmentLoss,
         alpha: float = 1.0,
         outcome_loss_weight: float = 1.0,
-        predictive_states_regularizer: Optional[
-            tf.keras.regularizers.Regularizer
-        ] = None,
-        **kwargs
+        predictive_states_regularizer: Optional[tf.keras.regularizers.Regularizer] = None,
+        **kwargs,
     ):
         """Initializes the causal loss class.
 
@@ -168,13 +181,13 @@ class CausalLoss(tf.keras.losses.Loss):
         loss_outcome = self._outcome_loss(y_true, y_pred)
         loss_treatment = self._treatment_loss(y_true, y_pred)
 
-        total_loss = (
-            self._outcome_loss_weight * loss_outcome + self._alpha * loss_treatment
-        )
+        total_loss = self._outcome_loss_weight * loss_outcome + self._alpha * loss_treatment
         if self._predictive_states_regularizer is not None:
-            weights = utils.split_y_pred(y_pred, 
-                                         n_outcome_pred_cols=self._outcome_loss._n_outcome_pred_cols,
-                                         n_treatment_pred_cols=self._outcome_loss._n_treatment_pred_cols)[1]
+            weights = utils.split_y_pred(
+                y_pred,
+                n_outcome_pred_cols=self._outcome_loss._n_outcome_pred_cols,
+                n_treatment_pred_cols=self._outcome_loss._n_treatment_pred_cols,
+            )[1]
             total_loss += self._predictive_states_regularizer(weights)
 
         return total_loss

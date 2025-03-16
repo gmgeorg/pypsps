@@ -1,10 +1,10 @@
 """Base module for all (simulated) datasets."""
 
+import abc
 from typing import Optional, Tuple
 
-import abc
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 
 def expit(x):
@@ -81,9 +81,7 @@ class CausalDataset(object):
 
     def naive_ate(self) -> float:
         """Computes a naive ATE estimate using difference in differences (for binary treatment)."""
-        assert (
-            self.treatments.shape[1] == 1
-        ), "naive_ate() requires a univariate treatment"
+        assert self.treatments.shape[1] == 1, "naive_ate() requires a univariate treatment"
 
         treat_series = self.treatments.iloc[:, 0]
         assert treat_series.nunique() == 2, "naive_ate() requires binary treatment."
@@ -93,17 +91,16 @@ class CausalDataset(object):
 
     def naive_ute(self) -> pd.Series:
         """Computes naive UTE as the same (naive) ATE for each row."""
-        return pd.Series(
-            self.naive_ate(), index=self.treatments.index, name="naive_ute"
-        )
+        return pd.Series(self.naive_ate(), index=self.treatments.index, name="naive_ute")
 
 
 class BaseSimulator(abc.ABC):
     """Base class for simulating causal datasets."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, seed: Optional[int] = None, **kwargs):
         """Initializes the class."""
         super().__init__(**kwargs)
+        self._seed = seed
 
     @abc.abstractmethod
     def sample(self, n_samples: int, **kwargs) -> CausalDataset:

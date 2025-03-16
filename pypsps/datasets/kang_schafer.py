@@ -1,8 +1,8 @@
 """Module for the KangSchafer simulation."""
 
 import numpy as np
-
 import pandas as pd
+
 from . import base
 
 
@@ -18,6 +18,7 @@ class KangSchafer(base.BaseSimulator):
         self,
         true_ate: float = 0.0,
         observe_transformed_features: bool = False,
+        **kwargs,
     ):
         """Initializes a `BaseSimulator` instance that returns a `CausalDataset` at .run().
 
@@ -27,28 +28,30 @@ class KangSchafer(base.BaseSimulator):
           observe_transformed_features: if True, it uses the non-linear transformed features
             as the observed features.  This will make a linear model unspecified
             in terms of 'features'.
+          **kwargs: keyword arguments passed to BaseSimulator class.
         """
-        super().__init__()
+        super().__init__(**kwargs)
         self._true_ate = true_ate
         self._observe_transformed_features = observe_transformed_features
+        self._rng = np.random.RandomState(self._seed)
 
     def sample(self, n_samples: int, **kwargs) -> base.CausalDataset:
         """Implements the Kang-Schafer simulation."""
 
         z_arr = pd.DataFrame(
-            np.random.normal(size=(n_samples, 4)),
+            self._rng.normal(size=(n_samples, 4)),
             columns=["z" + str(i) for i in range(1, 5)],
         )
 
         propensity_score = base.expit(np.dot(z_arr, np.array([-1.0, 0.5, -0.25, -0.1])))
 
-        treatment = pd.Series(np.random.binomial(1, propensity_score), name="treatment")
+        treatment = pd.Series(self._rng.binomial(1, propensity_score), name="treatment")
 
         outcome = pd.Series(
             210.0
             + np.dot(z_arr, np.array([27.4, 13.7, 13.7, 13.7]))
             + self._true_ate * treatment
-            + np.random.normal(size=(n_samples,)),
+            + self._rng.normal(size=(n_samples,)),
             name="outcome",
         )
 
@@ -76,9 +79,7 @@ class KangSchafer(base.BaseSimulator):
                 features=x_arr,
                 latent_features=z_arr,
                 true_ate=self._true_ate,
-                true_ute=pd.Series(
-                    self._true_ate, index=treatment.index, name="true_ute"
-                ),
+                true_ute=pd.Series(self._true_ate, index=treatment.index, name="true_ute"),
                 true_propensity_score=propensity_score,
             )
 

@@ -1,15 +1,13 @@
 """Test module for loss functions."""
 
+import random
+
 import numpy as np
 import pytest
 import tensorflow as tf
-import random
 
-from .. import datasets
-from ..keras import losses, models
-from ..keras import neglogliks
-from .. import utils, inference
-
+from .. import datasets, inference, utils
+from ..keras import losses, models, neglogliks
 
 tfk = tf.keras
 
@@ -48,9 +46,7 @@ def test_psps_model_and_causal_loss():
     assert outputs.shape == (1000, 2)
 
     tf.random.set_seed(10)
-    model = models.build_toy_model(
-        n_states=3, n_features=ks_data.n_features, compile=True
-    )
+    model = models.build_toy_model(n_states=3, n_features=ks_data.n_features, compile=True)
     preds = model.predict(inputs)
     outcome_params_pred, weights, propensity_score = utils.split_y_pred(preds, 2, 1)
 
@@ -65,9 +61,7 @@ def test_end_to_end_dataset_model_fit():
     np.random.seed(13)
     ks_data = datasets.KangSchafer(true_ate=10).sample(n_samples=1000)
     tf.random.set_seed(13)
-    model = models.build_toy_model(
-        n_states=5, n_features=ks_data.features.shape[1], compile=True
-    )
+    model = models.build_toy_model(n_states=5, n_features=ks_data.features.shape[1], compile=True)
     inputs, outputs = ks_data.to_keras_inputs_outputs()
     history = model.fit(
         inputs,
@@ -86,5 +80,4 @@ def test_end_to_end_dataset_model_fit():
     ate = inference.predict_ate(model, inputs[0])
     assert ate > 0
 
-    ute = inference.predict_ute(model, inputs[0])
-    
+    _ = inference.predict_ute(model, inputs[0])

@@ -9,6 +9,7 @@ from typing import Any, Union
 import numpy as np
 import pandas as pd
 import tensorflow as tf
+
 from . import utils
 
 
@@ -57,9 +58,12 @@ def predict_ute(model: tf.keras.Model, features: Any) -> Union[pd.Series, np.nda
     y_pred0 = predict_counterfactual(model, features, np.zeros(shape=features.shape[0]))
     y_pred1 = predict_counterfactual(model, features, np.ones(shape=features.shape[0]))
 
-    n_states = utils.get_n_states(y_pred0, n_outcome_pred_cols=2, n_treatment_pred_cols=1)
-    outcome_params_pred0, weights, _ = utils.split_y_pred(y_pred0, n_outcome_pred_cols=2, n_treatment_pred_cols=1)
-    outcome_params_pred1 = utils.split_y_pred(y_pred1, n_outcome_pred_cols=2, n_treatment_pred_cols=1)[0]
+    outcome_params_pred0, weights, _ = utils.split_y_pred(
+        y_pred0, n_outcome_pred_cols=2, n_treatment_pred_cols=1
+    )
+    outcome_params_pred1 = utils.split_y_pred(
+        y_pred1, n_outcome_pred_cols=2, n_treatment_pred_cols=1
+    )[0]
 
     outcome_mean_pred0 = utils.split_outcome_pred(outcome_params_pred0, n_outcome_pred_cols=2)[0]
     outcome_mean_pred1 = utils.split_outcome_pred(outcome_params_pred1, n_outcome_pred_cols=2)[0]

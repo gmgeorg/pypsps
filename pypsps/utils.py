@@ -1,9 +1,10 @@
 """Module for general utilities."""
 
-from typing import Tuple, Union, List
+from typing import List, Tuple, Union
+
 import numpy as np
-import tensorflow as tf
 import pandas as pd
+import tensorflow as tf
 
 _Y_PRED_DTYPE = Union[np.ndarray, tf.Tensor]
 _DATA_DTYPE = Union[np.ndarray, pd.DataFrame]
@@ -17,16 +18,17 @@ def get_n_cols(y: _Y_PRED_DTYPE) -> int:
         n_cols = y.get_shape().as_list()[1]
     return n_cols
 
-def get_n_states(y_pred: _Y_PRED_DTYPE, 
-                 n_outcome_pred_cols: int,
-                 n_treatment_pred_cols: int) -> int:
+
+def get_n_states(
+    y_pred: _Y_PRED_DTYPE, n_outcome_pred_cols: int, n_treatment_pred_cols: int
+) -> int:
     """Determines number of states based on `y_pred` tensor.
-    
+
     Number of states is equal to (n_outcome_preds * n_states + n_states + n_treatment_pred_cols) = n_cols.
 
     Args:
       y_pred: Tensor with all predictions.
-      treatment_pred_cols: number of prediction cols to represent the treatment. Defaults to 1 for a 
+      treatment_pred_cols: number of prediction cols to represent the treatment. Defaults to 1 for a
         propensity score model (Bernoulli probability).
 
     Returns:
@@ -52,11 +54,13 @@ def split_y_pred(
     outcome_params_pred = y_pred[:, : (n_outcome_pred_cols * n_states)]
     weights = y_pred[:, (n_outcome_pred_cols * n_states) : ((n_outcome_pred_cols + 1) * n_states)]
     treatment_pred = y_pred[:, -n_treatment_pred_cols:]
-  
+
     return outcome_params_pred, weights, treatment_pred
 
 
-def split_outcome_pred(outcome_pred: _Y_PRED_DTYPE, n_outcome_pred_cols: int) -> List[_Y_PRED_DTYPE]:
+def split_outcome_pred(
+    outcome_pred: _Y_PRED_DTYPE, n_outcome_pred_cols: int
+) -> List[_Y_PRED_DTYPE]:
     """Splits the outcome parameter predictions per state into separate params per state tensors."""
     if isinstance(outcome_pred, np.ndarray):
         return np.split(outcome_pred, n_outcome_pred_cols, axis=1)
@@ -71,17 +75,19 @@ def split_y_true(y_true: _Y_PRED_DTYPE, n_outcome_cols: int) -> Tuple[_Y_PRED_DT
     return outcome_true, treatment_true
 
 
-def agg_outcome_pred(y_pred: _Y_PRED_DTYPE, n_outcome_pred_cols: int, n_treatment_pred_cols: int) -> np.ndarray:
+def agg_outcome_pred(
+    y_pred: _Y_PRED_DTYPE, n_outcome_pred_cols: int, n_treatment_pred_cols: int
+) -> np.ndarray:
     """Aggregates state-level outcome predictions to aggregate the outcome prediction.
 
     Does this by a weighted average of outcome predictions per state, where weight
     of outcome prediction in state j equals the state level weight of the causal
     state simplex predictions.
     """
-    outcome_pred, weights, _ = split_y_pred(y_pred, 
-                                                    n_outcome_pred_cols=n_outcome_pred_cols,
-                                                    n_treatment_pred_cols=n_treatment_pred_cols)
-    
+    outcome_pred, weights, _ = split_y_pred(
+        y_pred, n_outcome_pred_cols=n_outcome_pred_cols, n_treatment_pred_cols=n_treatment_pred_cols
+    )
+
     outcome_pred_list = split_outcome_pred(outcome_pred, n_outcome_pred_cols=n_outcome_pred_cols)
 
     is_np = isinstance(outcome_pred, np.ndarray)
