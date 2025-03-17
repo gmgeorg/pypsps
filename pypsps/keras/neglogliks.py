@@ -2,11 +2,15 @@
 
 import math
 
-import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 
+import pypsps.utils
+
 tfd = tfp.distributions
+
+
+_EPS = 1e-6
 
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")
@@ -22,10 +26,7 @@ class NegloglikLoss(tf.keras.losses.Loss):
 
     def call(self, y_true, y_pred):
         """Implements the loss function call."""
-        if isinstance(y_pred, np.ndarray):
-            n_params = y_pred.shape[1]
-        else:
-            n_params = y_pred.get_shape().as_list()[1]
+        n_params = pypsps.utils.get_n_cols(y_pred)
 
         y_pred_cols = [tf.squeeze(c) for c in tf.split(y_pred, n_params, axis=1)]
         distr = self._distribution_constructor(*y_pred_cols)
@@ -43,11 +44,11 @@ class NegloglikLoss(tf.keras.losses.Loss):
         raise NotImplementedError("reduction='%s' is not implemented", self.reduction)
 
 
-def _negloglik_normal(y: tf.Tensor, mu: tf.Tensor, sigma: tf.Tensor) -> tf.Tensor:
+def _negloglik_normal(y: tf.Tensor, loc: tf.Tensor, scale: tf.Tensor) -> tf.Tensor:
     """Computes negative log-likelihood of data y ~ Normal(mu, sigma)."""
-    negloglik_element = tf.math.log(2.0 * math.pi) / 2.0 + tf.math.log(sigma)
-    negloglik_element += 0.5 * tf.square((y - mu) / sigma)
-    return negloglik_element
+    negloglik_element = tf.math.log(2.0 * math.pi) / 2.0 + tf.math.log(scale + _EPS)
+    negloglik_element += 0.5 * tf.square((y - loc) / (scale + _EPS))
+    return tf.squeeze(negloglik_element)
 
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")
@@ -56,17 +57,17 @@ class NegloglikNormal(tf.keras.losses.Loss):
 
     def call(self, y_true, y_pred):
         """Implements the loss function call."""
-        y_pred_mu = y_pred[:, 0]
-        y_pred_scale = y_pred[:, 1]
-
-        losses = _negloglik_normal(y_true, y_pred_mu, y_pred_scale)
+        y_true = tf.squeeze(y_true)
+        loc_pred = y_pred[:, 0]
+        scale_pred = y_pred[:, 1]
+        losses = _negloglik_normal(y_true, loc_pred, scale_pred)
         if self.reduction == tf.keras.losses.Reduction.NONE:
             return losses
         if self.reduction == tf.keras.losses.Reduction.SUM:
-            return tf.reduce_sum(losses)
+            return tf.reduce_sum(losses, axis=-1)
         if self.reduction in (
             tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE,
             tf.keras.losses.Reduction.AUTO,
         ):
-            return tf.reduce_mean(losses)
+            return tf.reduce_mean(losses, axis=-1)
         raise NotImplementedError("reduction='%s' is not implemented", self.reduction)

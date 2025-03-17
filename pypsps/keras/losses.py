@@ -8,6 +8,10 @@ import tensorflow as tf
 from .. import utils
 
 
+def _gen_col_selectors(x: int, n: int, k: int) -> list:
+    return [x + i * n for i in range(k)]
+
+
 @tf.keras.utils.register_keras_serializable(package="pypsps")
 class OutcomeLoss(tf.keras.losses.Loss):
     """Computes outcome loss for a pypsps model with multi-output predictions.
@@ -19,20 +23,26 @@ class OutcomeLoss(tf.keras.losses.Loss):
     def __init__(
         self,
         loss: tf.keras.losses.Loss,
+        n_outcome_true_cols: int,
         n_outcome_pred_cols: int,
-        n_treatment_pred_cols: int = 1,
+        n_treatment_pred_cols: int,
         **kwargs,
     ):
         """Initializes the outcome loss.
 
         Args:
-          outcome_loss: a keras loss function with NONE reduction (ie element-wise).
-            This is a requirement to properly computed the weighted loss across states.
+          loss: a keras loss function with NONE reduction (ie element-wise).  This is a requirement to properly computed the
+            weighted loss across states.
+          n_outcome_true_cols: number of outcome columns in y_true.  Used to split outcome_true and treatment_true.
+          n_outcome_pred_cols: number of outcome columns in y_pred.
+          n_treatment_pred_cols: number of treatment columns in y_pred.
+          **kwargs: additional arguments passed to keras Loss class.
         """
         super().__init__(**kwargs)
         assert isinstance(loss, tf.keras.losses.Loss)
         assert loss.reduction == tf.keras.losses.Reduction.NONE
         self._loss = loss
+        self._n_outcome_true_cols = n_outcome_true_cols
         self._n_outcome_pred_cols = n_outcome_pred_cols
         self._n_treatment_pred_cols = n_treatment_pred_cols
 
@@ -51,37 +61,32 @@ class OutcomeLoss(tf.keras.losses.Loss):
             y_pred, self._n_outcome_pred_cols, self._n_treatment_pred_cols
         )
 
-        outcome_param_preds = utils.split_outcome_pred(
-            outcome_params_pred, n_outcome_pred_cols=self._n_outcome_pred_cols
-        )
-
-        n_cols_true = utils.get_n_cols(y_true)
-        outcome_true = utils.split_y_true(y_true, n_cols_true - 1)[0]
-
+        outcome_true = utils.split_y_true(y_true, self._n_outcome_true_cols)[0]
         weighted_loss = 0.0
         for j in range(n_states):
-            outcome_pred_state_j_list = []
-            for params_pred in outcome_param_preds:
-                outcome_pred_state_j_list.append(params_pred[:, j])
-            outcome_pred_state_j = tf.stack(outcome_pred_state_j_list, axis=1)
-
-            weighted_loss += weights[:, j] * self._loss(
+            cols_to_select = _gen_col_selectors(j, n_states, self._n_outcome_pred_cols)
+            outcome_pred_state_j = tf.gather(outcome_params_pred, cols_to_select, axis=1)
+            loss_state_j = self._loss(
                 y_true=outcome_true,
                 y_pred=outcome_pred_state_j,
             )
+            weighted_loss += weights[:, j] * loss_state_j
 
         if self.reduction == tf.keras.losses.Reduction.NONE:
             return weighted_loss
 
-        weighted_loss = tf.reduce_sum(weighted_loss)
+        weighted_loss_sum = tf.reduce_sum(weighted_loss)
         if self.reduction in (tf.keras.losses.Reduction.SUM,):
-            return weighted_loss
+            return weighted_loss_sum
 
         # Divide by batch sample size; note that sum of all weights = n_samples
         # since weights are softmax per row.
-        if self.reduction in (tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE):
-            weighted_loss /= tf.reduce_sum(weights)
-            return weighted_loss
+        if self.reduction in (
+            tf.keras.losses.Reduction.AUTO,
+            tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE,
+        ):
+            weighted_loss_avg = weighted_loss_sum / tf.reduce_sum(weights)
+            return weighted_loss_avg
 
         raise NotImplementedError("self.reduction='%s' is not implemented", self.reduction)
 
@@ -93,21 +98,37 @@ class TreatmentLoss(tf.keras.losses.Loss):
     def __init__(
         self,
         loss: tf.keras.losses.Loss,
-        n_outcome_pred_cols: int = 2,
-        n_treatment_pred_cols: int = 1,
+        n_outcome_true_cols: int,
+        n_outcome_pred_cols: int,
+        n_treatment_pred_cols: int,
         **kwargs,
     ):
+        """Initializes class.
+
+        Args:
+          loss: a keras loss function with NONE reduction (ie element-wise).
+          n_outcome_true_cols: number of outcome columns in y_true.  Used to split outcome_true and treatment_true.
+          n_outcome_pred_cols: number of outcome columns in y_pred.
+          n_treatment_pred_cols: number of treatment columns in y_pred.
+        """
+
         super().__init__(**kwargs)
         self._loss = loss
+        self._n_outcome_true_cols = n_outcome_true_cols
         self._n_outcome_pred_cols = n_outcome_pred_cols
         self._n_treatment_pred_cols = n_treatment_pred_cols
 
     def call(self, y_true, y_pred):
         """Evaluates loss on treatment label and predicted treatment of y_pred (propensity score)."""
-        return self._loss(
-            y_true[:, 1],
-            utils.split_y_pred(y_pred, self._n_outcome_pred_cols, self._n_treatment_pred_cols)[-1],
+        _, treat_true = utils.split_y_true(y_true, n_outcome_true_cols=self._n_outcome_true_cols)
+        _, _, treat_preds = utils.split_y_pred(
+            y_pred, self._n_outcome_pred_cols, self._n_treatment_pred_cols
         )
+        loss = self._loss(
+            y_true=treat_true,
+            y_pred=treat_preds,
+        )
+        return loss
 
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")
@@ -184,7 +205,7 @@ class CausalLoss(tf.keras.losses.Loss):
         total_loss = self._outcome_loss_weight * loss_outcome + self._alpha * loss_treatment
         if self._predictive_states_regularizer is not None:
             weights = utils.split_y_pred(
-                y_pred,
+                y_pred=y_pred,
                 n_outcome_pred_cols=self._outcome_loss._n_outcome_pred_cols,
                 n_treatment_pred_cols=self._outcome_loss._n_treatment_pred_cols,
             )[1]

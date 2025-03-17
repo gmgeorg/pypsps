@@ -10,6 +10,7 @@ from ..keras import models
 
 
 def test_split_y_does_not_drop_columns():
+    """test split_y"""
     np.random.seed(13)
     ks_data = datasets.KangSchafer(true_ate=10).sample(n_samples=1000)
     tf.random.set_seed(13)
@@ -30,10 +31,11 @@ def test_split_y_does_not_drop_columns():
 
 
 def test_agg_outcome_preds_works():
+    """test aggregating by state works"""
     tf.random.set_seed(0)
     random.seed(0)
     np.random.seed(0)
-    ks_data = datasets.KangSchafer(true_ate=10).sample(n_samples=1000)
+    ks_data = datasets.KangSchafer(true_ate=10, seed=0).sample(n_samples=1000)
     tf.random.set_seed(13)
     n_states = 5
     model = models.build_toy_model(
@@ -66,13 +68,14 @@ def test_agg_outcome_preds_works():
     )
     cor_pred_true = np.corrcoef(avg_outcome_mean, outputs[:, 0])
     print(cor_pred_true)
-    assert cor_pred_true[0, 1] > 0.4
+    assert cor_pred_true[0, 1] > 0.689
 
 
 def test_prepare_keras_inputs_outputs():
+    """test kersa inputs/outputs works"""
     random.seed(0)
     np.random.seed(0)
-    ks_data = datasets.KangSchafer(true_ate=10).sample(n_samples=1000)
+    ks_data = datasets.KangSchafer(true_ate=10, seed=0).sample(n_samples=1000)
 
     res = utils.prepare_keras_inputs_outputs(ks_data.features, ks_data.treatments, ks_data.outcomes)
 

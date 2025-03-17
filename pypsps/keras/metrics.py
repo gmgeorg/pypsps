@@ -37,13 +37,36 @@ class PropensityScoreAUC(tf.keras.metrics.AUC):
 
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")
+class TreatmentMeanSquaredError(tf.keras.metrics.MeanSquaredError):
+    """MSE computed on continuous treatment prediction."""
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        """Updates state"""
+        treat_pred = utils.split_y_pred(y_pred, n_outcome_pred_cols=1, n_treatment_pred_cols=2)[2]
+        treat_true = utils.split_y_true(y_true, n_outcome_true_cols=1)[1]
+        super().update_state(y_true=treat_true, y_pred=treat_pred, sample_weight=sample_weight)
+
+
+# TODO: add unit test for Outcome* metrics
+@tf.keras.utils.register_keras_serializable(package="pypsps")
+class TreatmentMeanAbsoluteError(tf.keras.metrics.MeanAbsoluteError):
+    """MSE computed on the ouptut for weighted average outcome prediction."""
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        """Updates state"""
+        treat_pred = utils.split_y_pred(y_pred, n_outcome_pred_cols=1, n_treatment_pred_cols=2)[2]
+        treat_true = utils.split_y_true(y_true, n_outcome_true_cols=1)[1]
+        super().update_state(y_true=treat_true, y_pred=treat_pred, sample_weight=sample_weight)
+
+
+@tf.keras.utils.register_keras_serializable(package="pypsps")
 class OutcomeMeanSquaredError(tf.keras.metrics.MeanSquaredError):
     """MSE computed on the ouptut for weighted average outcome prediction."""
 
     def update_state(self, y_true, y_pred, sample_weight=None):
         """Updates state"""
         avg_outcome = utils.agg_outcome_pred(y_pred, n_outcome_pred_cols=2, n_treatment_pred_cols=1)
-        outcome_true = utils.split_y_true(y_true, n_outcome_cols=1)[0]
+        outcome_true = utils.split_y_true(y_true, n_outcome_true_cols=1)[0]
         super().update_state(y_true=outcome_true, y_pred=avg_outcome, sample_weight=sample_weight)
 
 
@@ -55,7 +78,7 @@ class OutcomeMeanAbsoluteError(tf.keras.metrics.MeanAbsoluteError):
     def update_state(self, y_true, y_pred, sample_weight=None):
         """Updates state"""
         avg_outcome = utils.agg_outcome_pred(y_pred, n_outcome_pred_cols=2, n_treatment_pred_cols=1)
-        outcome_true = utils.split_y_true(y_true, n_outcome_cols=1)[0]
+        outcome_true = utils.split_y_true(y_true, n_outcome_true_cols=1)[0]
         super().update_state(y_true=outcome_true, y_pred=avg_outcome, sample_weight=sample_weight)
 
 
@@ -74,5 +97,5 @@ def _tr_kernel(weights: tf.Tensor) -> tf.Tensor:
 def predictive_state_df(y_true, y_pred) -> tf.Tensor:
     """Computes degrees of freedom of predictive state weights."""
     del y_true
-    _, weights, _ = utils.split_y_pred(y_pred, n_outcome_pred_cols=1, n_treatment_pred_cols=2)
+    _, weights, _ = utils.split_y_pred(y_pred, n_outcome_pred_cols=1, n_treatment_pred_cols=1)
     return _tr_kernel(weights)

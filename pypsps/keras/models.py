@@ -14,20 +14,22 @@ tfk = tf.keras
 _EPS = 1e-3
 
 
-def _build_binary_continuous_causal_loss(
+def _build_binary_normal_causal_loss(
     n_states: int,
     alpha: float,
     df_penalty_l1: float,
 ) -> losses.CausalLoss:
-    """Builds an example of binary treatment & continuous outcome causal loss."""
+    """Builds an example of binary treatment & Normal outcome causal loss."""
     psps_outcome_loss = losses.OutcomeLoss(
         loss=neglogliks.NegloglikNormal(reduction="none"),
+        n_outcome_true_cols=1,
         n_outcome_pred_cols=2,
         n_treatment_pred_cols=1,
         reduction="sum_over_batch_size",
     )
     psps_treat_loss = losses.TreatmentLoss(
         loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
+        n_outcome_true_cols=1,
         n_outcome_pred_cols=2,
         n_treatment_pred_cols=1,
         reduction="sum_over_batch_size",
@@ -74,18 +76,20 @@ def build_toy_model(
     assert n_states >= 1, f"Got n_states={n_states}"
     assert n_features >= 1, f"Got n_features={n_features}"
 
-    features = tfk.layers.Input(shape=(n_features,))
-    treat = tfk.layers.Input(shape=(1,))
+    features = tfk.layers.Input(shape=(n_features,), name="features")
+    treat = tfk.layers.Input(shape=(1,), name="treatment")
 
-    features_bn = tfk.layers.BatchNormalization()(features)
-    feat_treat = tfk.layers.Concatenate(name="features_and_treatment")([features_bn, treat])
+    features_bn = tfk.layers.BatchNormalization(name="features_bn")(features)
+    feat_treat = tfk.layers.Concatenate(name="features_bn_and_treatment")([features_bn, treat])
 
     ps_hidden = tfk.layers.Dense(10, "relu")(features_bn)
     ps_hidden = tfk.layers.BatchNormalization()(ps_hidden)
     ps_hidden = tfk.layers.Dropout(0.2)(ps_hidden)
     ps_hidden = tfk.layers.Dense(10, "selu")(ps_hidden)
 
-    ps_hidden = tf.keras.layers.Concatenate()([ps_hidden, features_bn])
+    ps_hidden = tf.keras.layers.Concatenate(name="ps_hidden_and_features_bn")(
+        [ps_hidden, features_bn]
+    )
     pss = pypress.keras.layers.PredictiveStateSimplex(n_states=n_states, input_dim=n_features)
     pred_states = pss(ps_hidden)
     # Propensity score for binary treatment (--> "sigmoid" activation).
@@ -97,14 +101,16 @@ def build_toy_model(
     outcome_hidden = tf.keras.layers.Dropout(0.2)(outcome_hidden)
     outcome_hidden = tf.keras.layers.BatchNormalization()(outcome_hidden)
 
-    outcome_hidden = tf.keras.layers.Concatenate()([outcome_hidden, feat_treat])
+    outcome_hidden = tf.keras.layers.Concatenate(name="outcome_hidden_and_ft")(
+        [outcome_hidden, feat_treat]
+    )
 
-    outcome_preds = []
+    loc_preds = []
     scale_preds = []
     # One outcome model per state.
     for state_id in range(n_states):
-        outcome_preds.append(
-            tfk.layers.Dense(1, name="outcome_pred_state_" + str(state_id))(
+        loc_preds.append(
+            tfk.layers.Dense(1, name="loc_pred_state_" + str(state_id))(
                 tfk.layers.Dense(5, "selu", name="feat_eng_state_" + str(state_id))(outcome_hidden)
             )
         )
@@ -117,17 +123,18 @@ def build_toy_model(
             )
         )
 
-    outcome_comb = tfk.layers.Concatenate(name="outcome_pred_combined")(outcome_preds)
+    loc_comb = tfk.layers.Concatenate(name="loc_pred_combined")(loc_preds)
     scale_comb = tfk.layers.Concatenate(name="scale_pred_combined")(scale_preds)
 
+    outcome_pred = tfk.layers.Concatenate(name="loc_scale_pred")([loc_comb, scale_comb])
     outputs_concat = tfk.layers.Concatenate(name="output_tensor")(
-        [outcome_comb, scale_comb, pred_states, prop_score]
+        [outcome_pred, pred_states, prop_score]
     )
 
     model = tfk.models.Model(inputs=[features, treat], outputs=outputs_concat)
 
     if compile:
-        psps_causal_loss = _build_binary_continuous_causal_loss(
+        psps_causal_loss = _build_binary_normal_causal_loss(
             n_states=n_states,
             alpha=alpha,
             df_penalty_l1=df_penalty_l1,
@@ -263,7 +270,7 @@ def build_model_binary_normal(
     model = tfk.models.Model(inputs=[features, treat], outputs=outputs_concat)
 
     if compile:
-        psps_causal_loss = _build_binary_continuous_causal_loss(
+        psps_causal_loss = _build_binary_normal_causal_loss(
             n_states=n_states,
             alpha=alpha,
             df_penalty_l1=df_penalty_l1,

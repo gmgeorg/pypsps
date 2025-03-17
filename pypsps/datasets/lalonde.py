@@ -4,12 +4,12 @@ See also here for details
 https://rugg2.github.io/Lalonde%20dataset%20-%20Causal%20Inference.html
 """
 
-from typing import Dict
 import os
+from typing import Dict
+
 import pandas as pd
 
 from . import base
-
 
 _BASE_URL = "http://www.nber.org/~rdehejia/data"
 
@@ -47,7 +47,7 @@ _OBSERVATIONAL_CONTROL = None
 
 def _read_file(txt_file: str) -> pd.DataFrame:
     print("Reading data from %s" % txt_file)
-    return pd.read_csv(txt_file, delim_whitespace=True, header=None, names=_COLS)
+    return pd.read_csv(txt_file, sep="\s+", header=None, names=_COLS)
 
 
 def _get_all_data() -> Dict[str, pd.DataFrame]:
@@ -82,6 +82,7 @@ class Lalonde(base.CausalDataset):
         self,
         observational_control: bool = False,
         add_is_unemployed_features: bool = False,
+        **kwargs,
     ):
         """Initializes the class.
 
@@ -111,6 +112,7 @@ class Lalonde(base.CausalDataset):
             outcomes=comb_df[_OUTCOME],
             treatments=comb_df[_TREATMENT],
             features=comb_df[all_features],
+            **kwargs,
         )
         self._observational_control = observational_control
         self._add_is_unemployed_features = add_is_unemployed_features
