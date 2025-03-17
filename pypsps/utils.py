@@ -68,10 +68,12 @@ def split_outcome_pred(
         return tf.split(outcome_pred, n_outcome_pred_cols, axis=1)
 
 
-def split_y_true(y_true: _Y_PRED_DTYPE, n_outcome_cols: int) -> Tuple[_Y_PRED_DTYPE, _Y_PRED_DTYPE]:
+def split_y_true(
+    y_true: _Y_PRED_DTYPE, n_outcome_true_cols: int
+) -> Tuple[_Y_PRED_DTYPE, _Y_PRED_DTYPE]:
     """Splits y_true = (outcome, treatment) into separate tensors."""
-    outcome_true = y_true[:, :n_outcome_cols]
-    treatment_true = y_true[:, n_outcome_cols:]
+    outcome_true = y_true[:, :n_outcome_true_cols]
+    treatment_true = y_true[:, n_outcome_true_cols:]
     return outcome_true, treatment_true
 
 

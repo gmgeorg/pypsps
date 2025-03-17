@@ -26,6 +26,7 @@ ruff = "^0.3.7"
 seaborn = "^0.13.2"
 scikit-learn = "^1.6.1"
 optuna = "^4.2.1"
+pydot = "^3.0.4"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
