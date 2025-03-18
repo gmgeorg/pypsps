@@ -2,11 +2,7 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
-# Import the metrics module from your package.
-# Adjust the import path as needed.
 from pypsps.keras import metrics
-
-# --- Dummy utility implementations for testing ---
 
 
 def dummy_split_y_pred(y_pred, n_outcome_pred_cols, n_treatment_pred_cols):
@@ -44,9 +40,9 @@ def dummy_agg_outcome_pred(y_pred, n_outcome_pred_cols, n_treatment_pred_cols):
     return outcome_pred
 
 
-# Monkey-patch the utility functions used by the metrics.
 @pytest.fixture(autouse=True)
 def patch_utils(monkeypatch):
+    """patch utility function"""
     from pypsps import utils as p_utils
 
     monkeypatch.setattr(p_utils, "split_y_pred", dummy_split_y_pred)
@@ -59,6 +55,7 @@ def patch_utils(monkeypatch):
 
 
 def test_propensity_score_binary_crossentropy():
+    """test proepsntiy score xentropy"""
     # Create dummy y_true and y_pred.
     # For this metric, update_state extracts:
     #   treatment_true = y_true[:, 1:]
@@ -127,9 +124,6 @@ def test_treatment_mean_absolute_error():
     np.testing.assert_allclose(mae, 0.0, atol=1e-6)
 
 
-# --- Tests for OutcomeMeanSquaredError ---
-
-
 def test_outcome_mean_squared_error():
     """Tests for MSE"""
     # OutcomeMeanSquaredError uses agg_outcome_pred to compute a prediction
@@ -167,8 +161,8 @@ def test_outcome_mean_absolute_error():
     np.testing.assert_allclose(mae, 0.0, atol=1e-6)
 
 
-# --- Test for predictive_state_df_gen ---
 def test_predictive_state_df_gen():
+    """Test predictive state gen"""
     # For predictive_state_df_gen, the returned function extracts weights from split_y_pred.
     # Our dummy split_y_pred returns:
     #   outcome_pred = y_pred[:, :n_outcome_pred_cols],
