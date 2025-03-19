@@ -1,6 +1,6 @@
 """Module for metrics from pypsps predictions."""
 
-import pypress.utils
+import pypress
 import tensorflow as tf
 
 from .. import utils
@@ -82,20 +82,17 @@ class OutcomeMeanAbsoluteError(tf.keras.metrics.MeanAbsoluteError):
         super().update_state(y_true=outcome_true, y_pred=avg_outcome, sample_weight=sample_weight)
 
 
-# TODO: make public in pypress and move this as a metric to pypress/metrics.py
+def predictive_state_df_gen(n_outcome_pred_cols: int, n_treatment_pred_cols: int):
+    """Metric for degrees of freedom of predictive states."""
 
-
-def _tr_kernel(weights: tf.Tensor) -> tf.Tensor:
-    """Computes trace of kernel matrix implied by PRESS tensor."""
-    return tf.reduce_sum(
-        tf.linalg.diag_part(
-            tf.matmul(tf.transpose(pypress.utils.tf_col_normalize(weights)), weights)
+    def predictive_state_df(y_true, y_pred) -> tf.Tensor:
+        """Computes degrees of freedom of predictive state weights."""
+        del y_true
+        _, weights, _ = utils.split_y_pred(
+            y_pred,
+            n_outcome_pred_cols=n_outcome_pred_cols,
+            n_treatment_pred_cols=n_treatment_pred_cols,
         )
-    )
+        return pypress.utils.tr_kernel(weights)
 
-
-def predictive_state_df(y_true, y_pred) -> tf.Tensor:
-    """Computes degrees of freedom of predictive state weights."""
-    del y_true
-    _, weights, _ = utils.split_y_pred(y_pred, n_outcome_pred_cols=1, n_treatment_pred_cols=1)
-    return _tr_kernel(weights)
+    return predictive_state_df
