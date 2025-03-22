@@ -4,6 +4,7 @@ import pypress
 import tensorflow as tf
 
 from .. import utils
+from . import losses
 
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")
@@ -96,3 +97,53 @@ def predictive_state_df_gen(n_outcome_pred_cols: int, n_treatment_pred_cols: int
         return pypress.utils.tr_kernel(weights)
 
     return predictive_state_df
+
+
+def causal_loss_metric_gen(
+    outcome_loss: losses.OutcomeLoss,
+    treatment_loss: losses.TreatmentLoss,
+    alpha: float = 1.0,
+    outcome_loss_weight: float = 1.0,
+):
+    """
+    Function wrapper that returns a metric function computing the causal loss.
+
+    The returned function takes (y_true, y_pred) as inputs and computes:
+
+        causal_loss = outcome_loss_weight * outcome_loss(y_true, y_pred)
+                      + alpha * treatment_loss(y_true, y_pred)
+
+    This metric function can be passed to model.compile(metrics=[...]).
+
+    Parameters
+    ----------
+    outcome_loss : OutcomeLoss
+        Instance of an outcome loss (e.g. Normal log-likelihood loss).
+    treatment_loss : TreatmentLoss
+        Instance of a treatment loss (e.g. binary cross-entropy for treatment prediction).
+    alpha : float, default=1.0
+        Penalty parameter for treatment loss.
+    outcome_loss_weight : float, default=1.0
+        Weight for the outcome loss.
+
+    Returns
+    -------
+    function
+        A function metric that takes (y_true, y_pred) and returns the causal loss as a float value (can be passed as metric).
+    """
+    # Construct an instance of CausalLoss with the given parameters.
+    causal_loss_obj = losses.CausalLoss(
+        outcome_loss=outcome_loss,
+        treatment_loss=treatment_loss,
+        alpha=alpha,
+        outcome_loss_weight=outcome_loss_weight,
+    )
+
+    def causal_loss_metric(y_true, y_pred) -> tf.Tensor:
+        """Metric function computing the causal loss."""
+        # Call the causal loss object to compute the loss per example.
+        # Here we assume causal_loss_obj returns per-example loss.
+        return causal_loss_obj(y_true, y_pred)
+
+    causal_loss_metric.__name__ = "causal_loss"
+    return causal_loss_metric

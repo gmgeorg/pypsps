@@ -25,15 +25,19 @@ class VerboseNEpochs(tf.keras.callbacks.Callback):
             print(log_str)
 
 
-def recommended_callbacks(monitor="val_loss") -> List[tf.keras.callbacks.Callback]:
+def recommended_callbacks(
+    monitor="val_loss", patience: int = 50, mode="min"
+) -> List[tf.keras.callbacks.Callback]:
     """Return a list of recommended callbacks.
 
     This list is subject to change w/o notice. Do not rely on this in production.
     """
     callbacks = [
-        tf.keras.callbacks.EarlyStopping(monitor=monitor, patience=20, restore_best_weights=True),
-        tf.keras.callbacks.ReduceLROnPlateau(patience=10),
+        tf.keras.callbacks.EarlyStopping(
+            monitor=monitor, patience=patience, restore_best_weights=True, mode=mode
+        ),
+        tf.keras.callbacks.ReduceLROnPlateau(patience=patience // 3),
         tf.keras.callbacks.TerminateOnNaN(),
-        VerboseNEpochs(n=10),
+        VerboseNEpochs(n=20),
     ]
     return callbacks
