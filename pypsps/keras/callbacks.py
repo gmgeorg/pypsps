@@ -17,7 +17,7 @@ class VerboseNEpochs(tf.keras.callbacks.Callback):
     def on_epoch_end(self, epoch, logs=None):
         """call at end of epoch"""
         # logs is a dictionary containing metric names and values.
-        if (epoch + 1) % self.n == 0:
+        if (epoch == 0) or ((epoch + 1) % self.n == 0):
             logs = logs or {}
             log_str = f"Epoch {epoch + 1}: " + ", ".join(
                 f"{key}={value:.4f}" for key, value in logs.items()

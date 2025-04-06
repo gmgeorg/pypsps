@@ -11,10 +11,17 @@ from . import losses
 class PropensityScoreBinaryCrossentropy(tf.keras.metrics.BinaryCrossentropy):
     """Computes cross entropy for the propensity score. Used as a metric in pypsps model."""
 
+    def __init__(self, n_outcome_pred_cols: int, n_treatment_pred_cols: int, **kwargs):
+        super(PropensityScoreBinaryCrossentropy).__init__(**kwargs)
+        self._n_outcome_pred_cols = n_outcome_pred_cols
+        self._n_treatment_pred_cols = n_treatment_pred_cols
+
     def update_state(self, y_true, y_pred, sample_weight=None):
         """Updates state."""
         _, _, propensity_score = utils.split_y_pred(
-            y_pred, n_outcome_pred_cols=2, n_treatment_pred_cols=1
+            y_pred,
+            n_outcome_pred_cols=self._n_outcome_pred_cols,
+            n_treatment_pred_cols=self._n_treatment_pred_cols,
         )
         treatment_true = y_true[:, 1:]
         super().update_state(
@@ -26,10 +33,17 @@ class PropensityScoreBinaryCrossentropy(tf.keras.metrics.BinaryCrossentropy):
 class PropensityScoreAUC(tf.keras.metrics.AUC):
     """AUC computed on the ouptut for propensity part."""
 
+    def __init__(self, n_outcome_pred_cols: int, n_treatment_pred_cols: int, **kwargs):
+        super(PropensityScoreAUC).__init__(**kwargs)
+        self._n_outcome_pred_cols = n_outcome_pred_cols
+        self._n_treatment_pred_cols = n_treatment_pred_cols
+
     def update_state(self, y_true, y_pred, sample_weight=None):
         """Updates state"""
         _, _, propensity_score = utils.split_y_pred(
-            y_pred, n_outcome_pred_cols=2, n_treatment_pred_cols=1
+            y_pred,
+            n_outcome_pred_cols=self._n_outcome_pred_cols,
+            n_treatment_pred_cols=self._n_treatment_pred_cols,
         )
         treatment_true = y_true[:, 1:]
         super().update_state(
