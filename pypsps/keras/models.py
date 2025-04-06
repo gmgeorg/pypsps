@@ -38,9 +38,6 @@ def _build_binary_exponential_causal_loss(
         treatment_loss=psps_treat_loss,
         alpha=alpha,
         outcome_loss_weight=outcome_loss_weight,
-        # predictive_states_regularizer=pypress.keras.regularizers.DegreesOfFreedom(
-        #    l1=df_penalty_l1, df=n_states - 1
-        # ),
         predictive_states_regularizer=pypress.keras.regularizers.Uniform(l1=df_penalty_l1),
         reduction="sum_over_batch_size",
     )
