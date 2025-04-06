@@ -24,6 +24,7 @@ class CausalDataset(object):
         true_ate: Optional[float] = None,
         true_ute: Optional[pd.DataFrame] = None,
         true_propensity_score: Optional[pd.DataFrame] = None,
+        true_outcomes: Optional[pd.DataFrame] = None,
     ):
         """Initializes the class."""
         if isinstance(treatments, pd.Series):
@@ -40,12 +41,18 @@ class CausalDataset(object):
         self.true_ate = true_ate
         self.true_ute = true_ute
         self.true_propensity_score = true_propensity_score
+        self.true_outcomes = true_outcomes
 
     def to_data_frame(self) -> pd.DataFrame:
         """Returns all data as a concatenated DataFrame."""
         list_dfs = [self.outcomes, self.treatments, self.features]
         if self.latent_features is not None:
             list_dfs.append(self.latent_features)
+        if self.true_outcomes is not None:
+            list_dfs.append(self.true_outcomes)
+        if self.true_propensity_score is not None:
+            list_dfs.append(self.true_propensity_score)
+
         return pd.concat(list_dfs, axis=1)
 
     def to_keras_inputs_outputs(

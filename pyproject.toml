@@ -27,6 +27,7 @@ seaborn = "^0.13.2"
 scikit-learn = "^1.6.1"
 optuna = "^4.2.1"
 pydot = "^3.0.4"
+scikit-survival = "^0.24.0"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
