@@ -173,9 +173,15 @@ def build_toy_model(
             loss=psps_causal_loss,
             optimizer=tfk.optimizers.Nadam(learning_rate=learning_rate),
             metrics=[
-                metrics.PropensityScoreBinaryCrossentropy(),
-                metrics.PropensityScoreAUC(curve="PR"),
-                metrics.OutcomeMeanSquaredError(),
+                metrics.PropensityScoreBinaryCrossentropy(
+                    n_outcome_pred_cols=1, n_treatment_pred_cols=1
+                ),
+                metrics.PropensityScoreAUC(
+                    n_outcome_pred_cols=1, n_treatment_pred_cols=1, curve="PR"
+                ),
+                metrics.OutcomeMeanSquaredError(
+                    n_outcome_pred_cols=1, n_treatment_pred_cols=1, n_outcome_true_cols=1
+                ),
             ],
         )
 
@@ -309,9 +315,15 @@ def build_model_binary_normal(
             loss=psps_causal_loss,
             optimizer=tfk.optimizers.Nadam(learning_rate=learning_rate),
             metrics=[
-                metrics.PropensityScoreBinaryCrossentropy(),
-                metrics.PropensityScoreAUC(curve="PR"),
-                metrics.OutcomeMeanSquaredError(),
+                metrics.PropensityScoreBinaryCrossentropy(
+                    n_outcome_pred_cols=1, n_treatment_pred_cols=1
+                ),
+                metrics.PropensityScoreAUC(
+                    n_outcome_pred_cols=1, n_treatment_pred_cols=1, curve="PR"
+                ),
+                metrics.OutcomeMeanSquaredError(
+                    n_outcome_pred_cols=1, n_treatment_pred_cols=1, n_outcome_true_cols=1
+                ),
             ],
         )
 
@@ -423,10 +435,12 @@ def build_model_binary_exponential(
             loss=psps_causal_loss,
             optimizer=tfk.optimizers.Nadam(learning_rate=learning_rate),
             metrics=[
-                # metrics.PropensityScoreBinaryCrossentropy(n_treatment_pred_cols=1,
-                #                                 n_outcome_pred_cols=1),
-                # metrics.PropensityScoreAUC(curve="PR", n_treatment_pred_cols=1,
-                #                                 n_outcome_pred_cols=1),
+                metrics.PropensityScoreBinaryCrossentropy(
+                    n_treatment_pred_cols=1, n_outcome_pred_cols=1
+                ),
+                metrics.PropensityScoreAUC(
+                    curve="PR", n_treatment_pred_cols=1, n_outcome_pred_cols=1
+                ),
                 metrics.predictive_state_df_gen(n_treatment_pred_cols=1, n_outcome_pred_cols=1),
                 metrics.causal_loss_metric_gen(
                     outcome_loss=psps_causal_loss._outcome_loss,
