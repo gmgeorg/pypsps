@@ -8,7 +8,7 @@ readme = "README.md"
 homepage = "https://github.com/gmgeorg/pypsps.git"
 
 [tool.poetry.dependencies]
-python = "^3.12"
+python = ">=3.12,<4.0.0"
 
 numpy = ">=1.11.0"
 pandas = ">=1.0.0"
@@ -16,7 +16,7 @@ tensorflow = ">=2.11.0"
 tensorflow_probability = ">=0.18.0"
 tf-keras = ">=2.14.1"
 tqdm = ">=4.62"
-pypress = { git = "https://github.com/gmgeorg/pypress.git", rev = "v0.0.4" }
+pypress = { git = "https://github.com/gmgeorg/pypress.git", rev = "v0.0.5" }
 
 [tool.poetry.group.dev.dependencies]
 flake8 = "^7.0.0"

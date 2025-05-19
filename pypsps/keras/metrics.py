@@ -229,5 +229,5 @@ def causal_loss_metric_gen(
         # Here we assume causal_loss_obj returns per-example loss.
         return causal_loss_obj(y_true, y_pred)
 
-    causal_loss_metric.__name__ = "causal_loss"
+    causal_loss_metric.__name__ = "causal_loss_metric"
     return causal_loss_metric
