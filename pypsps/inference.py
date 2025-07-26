@@ -1,7 +1,13 @@
 """Module for computing causal estimates (UTE & ATE) based on model predictions.
 
-Inference for now only supports binary treatment (i.e., switch between 0 / 1 to obtain
-counterfactual predictions).
+Inference supports
+
+* binary treatment (i.e., switch between 0 / 1)
+* continuous treatment along a grid (compared to baseline treatment)
+
+to obtain counterfactual predictions).
+
+For uncertainty estimates see the bootstrap.py module.
 """
 
 from typing import Any, List, Optional, Union
@@ -144,7 +150,7 @@ def predict_ate_continuous(
     treatment_grid: List[float],
     baseline_treatment: Optional[float] = None,
 ) -> Union[pd.Series, np.ndarray]:
-    """Computes the average treatment effect (ATE) for continous treatment.
+    """Computes the average treatment effect (ATE) for continuous treatment.
 
     Args:
       model: a trained pypsps model.
@@ -160,4 +166,7 @@ def predict_ate_continuous(
       A pd.Series (if features is a DataFrame) or a np.ndarray of same number of
       rows as the number of values in treatment grid.
     """
-    return predict_ute_continuous(model, features, treatment_grid, baseline_treatment).mean(axis=0)
+    ute_cont = predict_ute_continuous(model, features, treatment_grid, baseline_treatment)
+    ate_cont = ute_cont.mean(axis=0)
+    ate_cont.name = "ate"
+    return ate_cont
