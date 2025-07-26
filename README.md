@@ -14,7 +14,7 @@ model = models.build_toy_model(n_states=4, n_features=6)
 import tensorflow as tf
 tf.keras.utils.plot_model(model)
 ```
-![PSPS architecture](imgs/psps_architecture.png)
+![PSPS architecture](imgs/psps_architecture_v2.png)
 
 *Predictive State Propensity Subclassification* (**PSPS**) is a causal deep
 learning algorithm for observational (non-randomized) data proposed by [Kelly,
@@ -34,15 +34,15 @@ for building comprehensive causal learning graphs suitable for any kind of causa
 data / inference problem.
 
 
-## General causal framework, not only binary treatment & continous outcome
+## General causal framework, not only binary treatment & continuous outcome
 
 PSPS is a general framework for causal learning for any treatment type (binary,
-continous, multi-class, ...) and any outcome type (univariate, multivariate;
+continuous, multi-class, ...) and any outcome type (univariate, multivariate;
 binary, continuous, multi-class, ...).
 
 The `pypsps.keras.models` module contains `build_toy_model()` as a template of how
 to build a causal PSPS model architecture for the common case of binary
-treatment (T), numeric features (X) a univariate, continous outcome (Y), with a
+treatment (T), numeric features (X) a univariate, continuous outcome (Y), with a
 specific hidden layer structure.  The toy model architecture can be used as a
 template for constructing specific PSPS model structure for the causal dataset
 at hand.
@@ -95,8 +95,8 @@ pd.DataFrame(history.history)[["loss", "val_loss"]].plot(logy=True); plt.grid()
 
 ```shell
 ATE
-	 true: 20.0 
-	naive: -1.3 
+	 true: 20.0
+	naive: -1.3
 	 PSPS: 17.3
 ```
 
@@ -121,7 +121,7 @@ the `KangSchafer().sample()` example above.
 [Kelly, Kong, and Goerg (2022)](https://proceedings.mlr.press/v177/kelly22a.html),
  **Predictive State Propensity Subclassification (PSPS): A causal inference
  algorithm for data-driven propensity score stratification**, Proceedings of MLR
- for the *Causal Learning and Reasoning (CLEAR) 2022*. 
+ for the *Causal Learning and Reasoning (CLEAR) 2022*.
 
 
 ## License

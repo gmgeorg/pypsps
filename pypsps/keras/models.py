@@ -70,7 +70,7 @@ def _build_binary_normal_causal_loss(
         alpha=alpha,
         outcome_loss_weight=1.0,
         predictive_states_regularizer=pypress.keras.regularizers.DegreesOfFreedom(
-            l1=df_penalty_l1, df=n_states - 1
+            l1=df_penalty_l1, target=n_states - 1
         ),
         reduction="sum_over_batch_size",
     )
@@ -85,7 +85,7 @@ def build_toy_model(
     df_penalty_l1: float = 1.0,
     learning_rate: float = 0.01,
 ) -> tf.keras.Model:
-    """Builds a pypsps toy model for binary treatment & continous outcome.
+    """Builds a pypsps toy model for binary treatment & continuous outcome.
 
     All pypsps keras layers can be used to build more complex causal model architectures
     within a TensorFlow graph.  The specific model structure here is only used
@@ -110,7 +110,7 @@ def build_toy_model(
     treat = tfk.layers.Input(shape=(1,), name="treatment")
 
     features_bn = tfk.layers.BatchNormalization(name="features_bn")(features)
-    feat_treat = tfk.layers.Concatenate(name="features_bn_and_treatment")([features_bn, treat])
+    feat_treat_bn = tfk.layers.Concatenate(name="features_bn_and_treatment")([features_bn, treat])
 
     ps_hidden = tfk.layers.Dense(10, "relu")(features_bn)
     ps_hidden = tfk.layers.BatchNormalization()(ps_hidden)
@@ -127,12 +127,12 @@ def build_toy_model(
         units=1, activation="sigmoid", name="propensity_score"
     )(pred_states)
 
-    outcome_hidden = tf.keras.layers.Dense(10, "tanh")(feat_treat)
+    outcome_hidden = tf.keras.layers.Dense(10, "tanh", name="inputs_processing")(feat_treat_bn)
     outcome_hidden = tf.keras.layers.Dropout(0.2)(outcome_hidden)
     outcome_hidden = tf.keras.layers.BatchNormalization()(outcome_hidden)
 
     outcome_hidden = tf.keras.layers.Concatenate(name="outcome_hidden_and_ft")(
-        [outcome_hidden, feat_treat]
+        [outcome_hidden, feat_treat_bn]
     )
 
     loc_preds = []
@@ -149,14 +149,14 @@ def build_toy_model(
         # change this to a scale parameter that changes as a function of inputs / hidden layers.
         scale_preds.append(
             tf.keras.activations.softplus(
-                layers.BiasOnly(name="scale_logit_" + str(state_id))(feat_treat)
+                layers.BiasOnly(name="scale_logit_" + str(state_id))(feat_treat_bn)
             )
         )
 
-    loc_comb = tfk.layers.Concatenate(name="loc_pred_combined")(loc_preds)
-    scale_comb = tfk.layers.Concatenate(name="scale_pred_combined")(scale_preds)
+    loc_comb = tfk.layers.Concatenate(name="loc_all_states")(loc_preds)
+    scale_comb = tfk.layers.Concatenate(name="scale_all_states")(scale_preds)
 
-    outcome_pred = tfk.layers.Concatenate(name="loc_scale_pred")([loc_comb, scale_comb])
+    outcome_pred = tfk.layers.Concatenate(name="loc_scale_all_states")([loc_comb, scale_comb])
     outputs_concat = tfk.layers.Concatenate(name="output_tensor")(
         [outcome_pred, pred_states, prop_score]
     )
@@ -201,7 +201,7 @@ def build_model_binary_normal(
     learning_rate: float = 0.01,
     dropout_rate: float = 0.2,
 ) -> tf.keras.Model:
-    """Builds a pypsps toy model for binary treatment & continous outcome.
+    """Builds a pypsps toy model for binary treatment & continuous outcome.
 
     All pypsps keras layers can be used to build more complex causal model architectures
     within a TensorFlow graph.  The specific model structure here is only used
@@ -226,10 +226,12 @@ def build_model_binary_normal(
     treat = tfk.layers.Input(shape=(1,))
 
     features_bn = tfk.layers.BatchNormalization()(features)
-    feat_treat = tfk.layers.Concatenate(name="features_and_treatment")([features_bn, treat])
+    feat_treat_bn = tfk.layers.Concatenate(name="features_and_treatment")([features_bn, treat])
 
     ps_hidden = tf.keras.layers.Dense(
-        predictive_state_hidden_layers[0][0], predictive_state_hidden_layers[0][1]
+        predictive_state_hidden_layers[0][0],
+        predictive_state_hidden_layers[0][1],
+        name="features_processing_for_propensity_score",
     )(features_bn)
     ps_hidden = tf.keras.layers.Dropout(dropout_rate)(ps_hidden)
     ps_hidden = tf.keras.layers.BatchNormalization()(ps_hidden)
@@ -249,8 +251,8 @@ def build_model_binary_normal(
     )(pred_states)
 
     outcome_hidden = tf.keras.layers.Dense(
-        outcome_hidden_layers[0][0], outcome_hidden_layers[0][1]
-    )(feat_treat)
+        outcome_hidden_layers[0][0], outcome_hidden_layers[0][1], name="inputs_processing"
+    )(feat_treat_bn)
     outcome_hidden = tf.keras.layers.Dropout(dropout_rate)(outcome_hidden)
     outcome_hidden = tf.keras.layers.BatchNormalization()(outcome_hidden)
 
@@ -259,7 +261,9 @@ def build_model_binary_normal(
         outcome_hidden = tf.keras.layers.Dropout(dropout_rate)(outcome_hidden)
         outcome_hidden = tf.keras.layers.BatchNormalization()(outcome_hidden)
 
-    outcome_hidden = tf.keras.layers.Concatenate()([outcome_hidden, feat_treat])
+    outcome_hidden = tf.keras.layers.Concatenate(name="outcome_hidden_and_ft")(
+        [outcome_hidden, feat_treat_bn]
+    )
 
     loc_preds = []
     scale_preds = []
@@ -280,7 +284,7 @@ def build_model_binary_normal(
             # change this to a scale parameter that changes as a function of inputs / hidden layers.
             scale_preds.append(
                 tf.keras.activations.softplus(
-                    layers.BiasOnly(name="scale_logit_" + str(state_id))(feat_treat)
+                    layers.BiasOnly(name="scale_logit_" + str(state_id))(feat_treat_bn)
                 )
             )
         else:
@@ -296,8 +300,8 @@ def build_model_binary_normal(
                 )
             )
 
-    loc_comb = tfk.layers.Concatenate(name="loc_pred_combined")(loc_preds)
-    scale_comb = tfk.layers.Concatenate(name="scale_pred_combined")(scale_preds)
+    loc_comb = tfk.layers.Concatenate(name="loc_all_states")(loc_preds)
+    scale_comb = tfk.layers.Concatenate(name="scale_all_states")(scale_preds)
 
     outputs_concat = tfk.layers.Concatenate(name="output_tensor")(
         [loc_comb, scale_comb, pred_states, prop_score]
@@ -343,7 +347,7 @@ def build_model_binary_exponential(
     learning_rate: float = 0.01,
     dropout_rate: float = 0.2,
 ) -> tf.keras.Model:
-    """Builds a pypsps toy model for binary treatment & continous outcome.
+    """Builds a pypsps toy model for binary treatment & continuous outcome.
 
     All pypsps keras layers can be used to build more complex causal model architectures
     within a TensorFlow graph.  The specific model structure here is only used
@@ -368,7 +372,7 @@ def build_model_binary_exponential(
     treat = tfk.layers.Input(shape=(1,), name="treatment")
 
     features_bn = tfk.layers.BatchNormalization(name="features_bn")(features)
-    feat_treat = tfk.layers.Concatenate(name="features_and_treatment")([features_bn, treat])
+    feat_treat_bn = tfk.layers.Concatenate(name="features_and_treatment")([features_bn, treat])
 
     ps_hidden = tf.keras.layers.Dense(
         predictive_state_hidden_layers[0][0], predictive_state_hidden_layers[0][1]
@@ -381,7 +385,9 @@ def build_model_binary_exponential(
         ps_hidden = tf.keras.layers.Dropout(dropout_rate)(ps_hidden)
         ps_hidden = tf.keras.layers.BatchNormalization()(ps_hidden)
 
-    ps_hidden = tf.keras.layers.Concatenate()([ps_hidden, features_bn])
+    ps_hidden = tf.keras.layers.Concatenate(name="concat_skip_connection_treatment")(
+        [ps_hidden, features_bn]
+    )
     pss = pypress.keras.layers.PredictiveStateSimplex(n_states=n_states, input_dim=n_features)
     pred_states = pss(ps_hidden)
 
@@ -391,8 +397,8 @@ def build_model_binary_exponential(
     )(pred_states)
 
     outcome_hidden = tf.keras.layers.Dense(
-        outcome_hidden_layers[0][0], outcome_hidden_layers[0][1]
-    )(feat_treat)
+        outcome_hidden_layers[0][0], outcome_hidden_layers[0][1], name="inputs_processing"
+    )(feat_treat_bn)
     outcome_hidden = tf.keras.layers.Dropout(dropout_rate)(outcome_hidden)
     outcome_hidden = tf.keras.layers.BatchNormalization()(outcome_hidden)
 
@@ -401,7 +407,9 @@ def build_model_binary_exponential(
         outcome_hidden = tf.keras.layers.Dropout(dropout_rate)(outcome_hidden)
         outcome_hidden = tf.keras.layers.BatchNormalization()(outcome_hidden)
 
-    outcome_hidden = tf.keras.layers.Concatenate()([outcome_hidden, feat_treat])
+    outcome_hidden = tf.keras.layers.Concatenate(name="concat_skip_connection_outcome")(
+        [outcome_hidden, feat_treat_bn]
+    )
 
     log_rate_preds = []
     # One outcome model per state.
@@ -416,7 +424,7 @@ def build_model_binary_exponential(
             )
         )
 
-    log_rate_comb = tfk.layers.Concatenate(name="log_rate_pred_combined")(log_rate_preds)
+    log_rate_comb = tfk.layers.Concatenate(name="log_rate_all_states")(log_rate_preds)
 
     outputs_concat = tfk.layers.Concatenate(name="output_tensor")(
         [log_rate_comb, pred_states, prop_score]
