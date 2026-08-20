@@ -15,9 +15,14 @@ _EPS = 1e-3
 
 
 def _build_binary_exponential_causal_loss(
-    n_states: int, alpha: float, df_penalty_l1: float, outcome_loss_weight: float
+    n_states: int,
+    alpha: float,
+    df_penalty_l1: float,
+    outcome_loss_weight: float,
 ) -> losses.CausalLoss:
     """Builds an example of binary treatment & continuous outcome causal loss."""
+
+    del n_states  # not used in this function, but kept for consistency with other loss builders
 
     psps_outcome_loss = losses.OutcomeLoss(
         loss=neglogliks.NegloglikExponential(reduction="none", log_rate=True),
@@ -432,6 +437,11 @@ def build_model_binary_exponential(
 
     model = tfk.models.Model(inputs=[features, treat], outputs=outputs_concat)
 
+    # Binary treatment & continuous exponential survival model architecture.
+    _n_outcome_true_cols = 2  # (outcome, event indicator)
+    _n_outcome_pred_cols = 1  # (log_rate)
+    _n_treatment_pred_cols = 1  # (propensity score)
+
     if compile:
         psps_causal_loss = _build_binary_exponential_causal_loss(
             n_states=n_states,
@@ -444,12 +454,18 @@ def build_model_binary_exponential(
             optimizer=tfk.optimizers.Nadam(learning_rate=learning_rate),
             metrics=[
                 metrics.PropensityScoreBinaryCrossentropy(
-                    n_treatment_pred_cols=1, n_outcome_pred_cols=1
+                    n_treatment_pred_cols=_n_treatment_pred_cols,
+                    n_outcome_pred_cols=_n_outcome_pred_cols,
                 ),
                 metrics.PropensityScoreAUC(
-                    curve="PR", n_treatment_pred_cols=1, n_outcome_pred_cols=1
+                    curve="PR",
+                    n_treatment_pred_cols=_n_treatment_pred_cols,
+                    n_outcome_pred_cols=_n_outcome_pred_cols,
                 ),
-                metrics.predictive_state_df_gen(n_treatment_pred_cols=1, n_outcome_pred_cols=1),
+                metrics.predictive_state_df_gen(
+                    n_treatment_pred_cols=_n_treatment_pred_cols,
+                    n_outcome_pred_cols=_n_outcome_pred_cols,
+                ),
                 metrics.causal_loss_metric_gen(
                     outcome_loss=psps_causal_loss._outcome_loss,
                     treatment_loss=psps_causal_loss._treatment_loss,

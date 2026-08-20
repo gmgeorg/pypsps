@@ -4,7 +4,7 @@ import numpy as np
 import tensorflow as tf
 
 from .. import datasets
-from ..keras import models
+from ..keras import callbacks, models
 
 tfk = tf.keras
 
@@ -46,18 +46,31 @@ def test_build_model_binary_normal():
 def test_build_model_binary_exponential():
     """test build models"""
     np.random.seed(10)
-    ks_data = datasets.KangSchafer(true_ate=10).sample(n_samples=1000)
 
-    inputs, _ = ks_data.to_keras_inputs_outputs()
+    simulator = datasets.CancerSurvivalSimulator(seed=42)
+    surv_data = simulator.sample(n_samples=1000)
+    inputs, outputs = surv_data.to_keras_inputs_outputs()
+
     tf.random.set_seed(10)
     model = models.build_model_binary_exponential(
         n_states=3,
-        n_features=ks_data.n_features,
+        n_features=surv_data.n_features,
         compile=True,
         predictive_state_hidden_layers=[(10, "selu"), (20, "relu")],
         outcome_hidden_layers=[(30, "tanh"), (20, "selu")],
         log_rate_layer=(20, "selu"),
     )
+
     preds = model.predict(inputs)
-    assert preds.shape[0] == ks_data.n_samples
+    assert preds.shape[0] == surv_data.n_samples
     assert not np.isnan(preds.sum().sum())
+    history = model.fit(
+        inputs,
+        outputs,
+        validation_split=0.2,
+        verbose=1,
+        epochs=1,
+        batch_size=32,
+        callbacks=callbacks.recommended_callbacks("val_causal_loss"),
+    )
+    assert not np.isnan(history.history["loss"][-1])

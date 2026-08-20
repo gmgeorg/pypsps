@@ -29,7 +29,8 @@ class PropensityScoreBinaryCrossentropy(tf.keras.metrics.BinaryCrossentropy):
             n_outcome_pred_cols=self._n_outcome_pred_cols,
             n_treatment_pred_cols=self._n_treatment_pred_cols,
         )
-        treatment_true = y_true[:, 1:]
+        # TODO: make it robust with utils.split_y_true() to handle multi-output y_true
+        treatment_true = y_true[:, -1:]
         super().update_state(
             y_true=treatment_true, y_pred=propensity_score, sample_weight=sample_weight
         )
@@ -37,7 +38,7 @@ class PropensityScoreBinaryCrossentropy(tf.keras.metrics.BinaryCrossentropy):
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")
 class PropensityScoreAUC(tf.keras.metrics.AUC):
-    """AUC computed on the ouptut for propensity part."""
+    """AUC computed on the output for propensity part."""
 
     def __init__(self, n_outcome_pred_cols: int, n_treatment_pred_cols: int, **kwargs):
         super().__init__()
@@ -51,7 +52,9 @@ class PropensityScoreAUC(tf.keras.metrics.AUC):
             n_outcome_pred_cols=self._n_outcome_pred_cols,
             n_treatment_pred_cols=self._n_treatment_pred_cols,
         )
-        treatment_true = y_true[:, 1:]
+        # Pick the last column of y_true as the treatment label (binary).
+        # TODO: make it robust with utils.split_y_true() to handle multi-output y_true
+        treatment_true = y_true[:, -1:]
         super().update_state(
             y_true=treatment_true, y_pred=propensity_score, sample_weight=sample_weight
         )
@@ -87,7 +90,7 @@ class TreatmentMeanSquaredError(tf.keras.metrics.MeanSquaredError):
 # TODO: add unit test for Outcome* metrics
 @tf.keras.utils.register_keras_serializable(package="pypsps")
 class TreatmentMeanAbsoluteError(tf.keras.metrics.MeanAbsoluteError):
-    """MSE computed on the ouptut for weighted average outcome prediction."""
+    """MSE computed on the output for weighted average outcome prediction."""
 
     def __init__(
         self,
@@ -108,13 +111,13 @@ class TreatmentMeanAbsoluteError(tf.keras.metrics.MeanAbsoluteError):
             n_outcome_pred_cols=self._n_outcome_pred_cols,
             n_treatment_pred_cols=self._n_treatment_pred_cols,
         )[2]
-        treat_true = utils.split_y_true(y_true, n_outcome_true_cols=self._n_treatment_pred_cols)[1]
+        treat_true = utils.split_y_true(y_true, n_outcome_true_cols=self._n_outcome_true_cols)[1]
         super().update_state(y_true=treat_true, y_pred=treat_pred, sample_weight=sample_weight)
 
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")
 class OutcomeMeanSquaredError(tf.keras.metrics.MeanSquaredError):
-    """MSE computed on the ouptut for weighted average outcome prediction."""
+    """MSE computed on the output for weighted average outcome prediction."""
 
     def __init__(
         self,
@@ -142,7 +145,7 @@ class OutcomeMeanSquaredError(tf.keras.metrics.MeanSquaredError):
 # TODO: add unit test for Outcome* metrics
 @tf.keras.utils.register_keras_serializable(package="pypsps")
 class OutcomeMeanAbsoluteError(tf.keras.metrics.MeanAbsoluteError):
-    """MSE computed on the ouptut for weighted average outcome prediction."""
+    """MSE computed on the output for weighted average outcome prediction."""
 
     def __init__(
         self,

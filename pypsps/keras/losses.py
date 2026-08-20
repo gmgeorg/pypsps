@@ -16,8 +16,9 @@ def _gen_col_selectors(x: int, n: int, k: int) -> list:
 class OutcomeLoss(tf.keras.losses.Loss):
     """Computes outcome loss for a pypsps model with multi-output predictions.
 
-    The outcome loss for pypsps model is a weighted sum of state-level outcome losses,
-    where weights are the predictive states embeddings from the propensity model.
+    The outcome loss for pypsps model is evaluated as the negative marginal log-likelihood
+    of a mixture of experts over states, where weights are the predictive states
+    embeddings from the propensity model.
     """
 
     def __init__(
@@ -31,9 +32,9 @@ class OutcomeLoss(tf.keras.losses.Loss):
         """Initializes the outcome loss.
 
         Args:
-          loss: a keras loss function with NONE reduction (ie element-wise).  This is a requirement to properly computed the
-            weighted loss across states.
-          n_outcome_true_cols: number of outcome columns in y_true.  Used to split outcome_true and treatment_true.
+          loss: a keras loss function with NONE reduction (ie element-wise). This is a requirement to properly computed the
+            mixture loss across states.
+          n_outcome_true_cols: number of outcome columns in y_true. Used to split outcome_true and treatment_true.
           n_outcome_pred_cols: number of outcome columns in y_pred.
           n_treatment_pred_cols: number of treatment columns in y_pred.
           **kwargs: additional arguments passed to keras Loss class.
@@ -51,7 +52,7 @@ class OutcomeLoss(tf.keras.losses.Loss):
 
         y_pred is a combination of
           * outcome parameter predictions per state (params_j | X, T) [ N x J ]
-          * predictive state weights (P(state j | X)  [ N x J ]
+          * predictive state weights (P(state j | X) [ N x J ]
           * propensity score (P(treatment | X) [ N x 1 ]
         """
         n_states = utils.get_n_states(
@@ -62,20 +63,35 @@ class OutcomeLoss(tf.keras.losses.Loss):
         )
 
         outcome_true = utils.split_y_true(y_true, self._n_outcome_true_cols)[0]
-        weighted_loss = 0.0
+
+        log_weights = tf.math.log(weights + 1e-8)
+        log_components = []
+
         for j in range(n_states):
             cols_to_select = _gen_col_selectors(j, n_states, self._n_outcome_pred_cols)
             outcome_pred_state_j = tf.gather(outcome_params_pred, cols_to_select, axis=1)
-            loss_state_j = self._loss(
+
+            # self._loss returns state-specific NLL: -log p(Y | A, X, s_j)
+            nll_state_j = self._loss(
                 y_true=outcome_true,
                 y_pred=outcome_pred_state_j,
             )
-            weighted_loss += weights[:, j] * loss_state_j
+
+            # Convert NLL to log probability and add log weight
+            log_p_j = -nll_state_j
+            log_joint_j = log_weights[:, j] + log_p_j
+            log_components.append(tf.expand_dims(log_joint_j, axis=1))
+
+        # Stack log components -> shape: (batch_size, n_states)
+        stacked_log_mix = tf.concat(log_components, axis=1)
+
+        # Compute exact negative marginal log-likelihood per sample
+        marginal_nll = -tf.math.reduce_logsumexp(stacked_log_mix, axis=1)
 
         if self.reduction == tf.keras.losses.Reduction.NONE:
-            return weighted_loss
+            return marginal_nll
 
-        weighted_loss_sum = tf.reduce_sum(weighted_loss)
+        weighted_loss_sum = tf.reduce_sum(marginal_nll)
         if self.reduction in (tf.keras.losses.Reduction.SUM,):
             return weighted_loss_sum
 
@@ -85,7 +101,7 @@ class OutcomeLoss(tf.keras.losses.Loss):
             tf.keras.losses.Reduction.AUTO,
             tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE,
         ):
-            weighted_loss_avg = weighted_loss_sum / tf.reduce_sum(weights)
+            weighted_loss_avg = weighted_loss_sum / tf.cast(tf.shape(y_true)[0], y_true.dtype)
             return weighted_loss_avg
 
         raise NotImplementedError("self.reduction='%s' is not implemented", self.reduction)
@@ -122,7 +138,9 @@ class TreatmentLoss(tf.keras.losses.Loss):
         """Evaluates loss on treatment label and predicted treatment of y_pred (propensity score)."""
         _, treat_true = utils.split_y_true(y_true, n_outcome_true_cols=self._n_outcome_true_cols)
         _, _, treat_preds = utils.split_y_pred(
-            y_pred, self._n_outcome_pred_cols, self._n_treatment_pred_cols
+            y_pred=y_pred,
+            n_outcome_pred_cols=self._n_outcome_pred_cols,
+            n_treatment_pred_cols=self._n_treatment_pred_cols,
         )
         loss = self._loss(
             y_true=treat_true,

@@ -96,6 +96,47 @@ def test_propensity_score_auc():
     assert 0.0 <= auc <= 1.0
 
 
+def test_propensity_score_binary_crossentropy_treatment_is_last_column():
+    """Regression test: propensity metrics must read treatment from the LAST column of
+    y_true, not from y_true[:, 1:]. Outcome data can have more than one column (e.g. a
+    survival outcome of [event_time, event_indicator]), in which case y_true[:, 1:]
+    would silently leak non-treatment columns into the propensity metric. Treatment is
+    always appended as the final column by utils.prepare_keras_inputs_outputs, so
+    y_true[:, -1:] must be used regardless of how many outcome columns precede it.
+    """
+    # 2 outcome-like columns followed by the treatment column (last).
+    y_true = tf.constant([[5.0, 0.0, 1.0], [3.0, 1.0, 0.0], [8.0, 1.0, 1.0]], dtype=tf.float32)
+    y_pred = tf.constant(
+        [[0.1, 0.2, 0.3, 0.9], [0.5, 0.6, 0.7, 0.1], [0.9, 1.0, 1.1, 0.8]], dtype=tf.float32
+    )
+
+    metric = metrics.PropensityScoreBinaryCrossentropy(
+        n_outcome_pred_cols=2, n_treatment_pred_cols=1
+    )
+    metric.update_state(y_true, y_pred)
+
+    expected = tf.keras.metrics.BinaryCrossentropy()
+    expected.update_state(y_true=y_true[:, -1:], y_pred=y_pred[:, -1:])
+
+    np.testing.assert_allclose(metric.result().numpy(), expected.result().numpy())
+
+
+def test_propensity_score_auc_treatment_is_last_column():
+    """Regression test: see test_propensity_score_binary_crossentropy_treatment_is_last_column."""
+    y_true = tf.constant([[5.0, 0.0, 1.0], [3.0, 1.0, 0.0], [8.0, 1.0, 1.0]], dtype=tf.float32)
+    y_pred = tf.constant(
+        [[0.1, 0.2, 0.3, 0.9], [0.5, 0.6, 0.7, 0.1], [0.9, 1.0, 1.1, 0.8]], dtype=tf.float32
+    )
+
+    metric = metrics.PropensityScoreAUC(n_outcome_pred_cols=2, n_treatment_pred_cols=1)
+    metric.update_state(y_true, y_pred)
+
+    expected = tf.keras.metrics.AUC()
+    expected.update_state(y_true=y_true[:, -1:], y_pred=y_pred[:, -1:])
+
+    np.testing.assert_allclose(metric.result().numpy(), expected.result().numpy())
+
+
 def test_treatment_mean_squared_error():
     """test for treatment MSE"""
     # For TreatmentMeanSquaredError:
@@ -117,17 +158,17 @@ def test_treatment_mean_squared_error():
     assert mse < 1.0
 
 
-# def test_treatment_mean_absolute_error():
-#     """ttest for MAE treatment"""
-#     y_true = tf.constant([[10, 2], [20, 4], [30, 6]], dtype=tf.float32)
-#     y_pred = tf.constant([[9, 0, 0, 2.0], [20, 0, 0, 4.0], [30, 0, 0, 6.0]], dtype=tf.float32)
-#     metric = metrics.TreatmentMeanAbsoluteError(n_outcome_pred_cols=1,
-#                                                n_treatment_pred_cols=2,
-#                                                n_outcome_true_cols=1)
-#     metric.update_state(y_true, y_pred)
-#     mae = metric.result().numpy()
-#     # Expect near zero error
-#     np.testing.assert_allclose(mae, 0.0, atol=1e-6)
+def test_treatment_mean_absolute_error():
+    """test for MAE treatment"""
+    y_true = tf.constant([[10, 2], [20, 4], [30, 6]], dtype=tf.float32)
+    y_pred = tf.constant([[9, 0, 0, 2.0], [20, 0, 0, 4.0], [30, 0, 0, 6.0]], dtype=tf.float32)
+    metric = metrics.TreatmentMeanAbsoluteError(
+        n_outcome_pred_cols=1, n_treatment_pred_cols=2, n_outcome_true_cols=1
+    )
+    metric.update_state(y_true, y_pred)
+    mae = metric.result().numpy()
+    # Expect near zero error
+    np.testing.assert_allclose(mae, 0.0, atol=1e-6)
 
 
 def test_outcome_mean_squared_error():
