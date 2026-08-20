@@ -8,6 +8,13 @@ repos:
       - id: check-merge-conflict
       # - id: name-tests-test
 
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.17.2
+    hooks:
+      - id: markdownlint-cli2
+        # Optional: automatically fix basic formatting issues (like line endings and spacing)
+        args: ["--fix"]
+
   - repo: https://github.com/codespell-project/codespell
     rev: v2.4.1
     hooks:
