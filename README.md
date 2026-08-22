@@ -71,8 +71,7 @@ adapted to your specific observational dataset.
 Install directly from GitHub:
 
 ```bash
-pip install git+[https://github.com/gmgeorg/pypsps.git](https://github.com/gmgeorg/pypsps.git)
-
+pip install git+https://github.com/gmgeorg/pypsps.git
 ```
 
 For development setup and requirements, see
@@ -85,7 +84,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from pypsps.keras import models
+from pypsps.keras import callbacks, models
 from pypsps import datasets, inference, utils
 
 np.random.seed(10)
@@ -101,12 +100,18 @@ history = model.fit(inputs,
                     batch_size=64,
                     verbose=2,
                     validation_split=0.2,
-                    callbacks=models.recommended_callbacks(),
+                    callbacks=callbacks.get_default_callbacks(
+                        monitor="val_causal_loss_metric", patience=25
+                    ),
                     )
 preds = model.predict(inputs)
-outcome_pred, scale, weights, propensity_score = utils.split_y_pred(preds)
+# treatment_pred is state-conditional (one column per state), not a single marginal
+# propensity score; use utils.agg_treatment_pred(preds, ...) for the marginal P(A | X).
+outcome_pred, weights, treatment_pred = utils.split_y_pred(
+    preds, n_outcome_pred_cols=2, n_treatment_pred_cols=1
+)
 
-pred_ate = inference.predict_ate(model, ks_data.features)
+pred_ate = inference.predict_ate_binary(model, ks_data.features)
 print("ATE\n\t true: %.1f \n\tnaive: %.1f \n\t PSPS: %.1f" % (
     ks_data.true_ate, ks_data.naive_ate(), pred_ate)
     )

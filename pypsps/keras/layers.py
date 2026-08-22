@@ -1,6 +1,7 @@
 """Module for models & layers for pypsps."""
 
 from typing import Optional
+
 import tensorflow as tf
 
 
@@ -39,10 +40,22 @@ class BiasOnly(tf.keras.layers.Layer):
         return tf.expand_dims(tf.ones_like(x[:, 0]), 1) * self._constant
 
     def get_config(self):
+        """Returns the layer config, including `units` (dropped before, silently reverting to 1
+        on `from_config`) and a properly serialized `bias_regularizer`."""
         config = super().get_config().copy()
         config.update(
             {
-                "bias_regularizer": self._bias_regularizer,
+                "units": self._units,
+                "bias_regularizer": tf.keras.regularizers.serialize(self._bias_regularizer)
+                if self._bias_regularizer is not None
+                else None,
             }
         )
         return config
+
+    @classmethod
+    def from_config(cls, config):
+        """Deserializes `bias_regularizer` back into a Regularizer instance."""
+        config = config.copy()
+        config["bias_regularizer"] = tf.keras.regularizers.deserialize(config["bias_regularizer"])
+        return cls(**config)

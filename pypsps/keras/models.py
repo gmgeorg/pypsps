@@ -2,6 +2,7 @@
 
 from typing import List, Tuple
 
+import numpy as np
 import pypress
 import pypress.keras.layers
 import pypress.keras.regularizers
@@ -24,15 +25,17 @@ def _build_binary_exponential_causal_loss(
 
     del n_states  # not used in this function, but kept for consistency with other loss builders
 
+    treatment_nll = tf.keras.losses.BinaryCrossentropy(reduction="none")
     psps_outcome_loss = losses.OutcomeLoss(
         loss=neglogliks.NegloglikExponential(reduction="none", log_rate=True),
+        treatment_loss=treatment_nll,
         n_outcome_true_cols=2,
         n_outcome_pred_cols=1,
         n_treatment_pred_cols=1,
         reduction="sum_over_batch_size",
     )
     psps_treat_loss = losses.TreatmentLoss(
-        loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
+        loss=treatment_nll,
         n_outcome_true_cols=2,
         n_outcome_pred_cols=1,
         n_treatment_pred_cols=1,
@@ -43,7 +46,7 @@ def _build_binary_exponential_causal_loss(
         treatment_loss=psps_treat_loss,
         alpha=alpha,
         outcome_loss_weight=outcome_loss_weight,
-        predictive_states_regularizer=pypress.keras.regularizers.Uniform(l1=df_penalty_l1),
+        predictive_states_regularizer=pypress.keras.regularizers.Uniform(l2=df_penalty_l1),
         reduction="sum_over_batch_size",
     )
     return psps_causal_loss
@@ -55,15 +58,17 @@ def _build_binary_normal_causal_loss(
     df_penalty_l1: float,
 ) -> losses.CausalLoss:
     """Builds an example of binary treatment & Normal outcome causal loss."""
+    treatment_nll = tf.keras.losses.BinaryCrossentropy(reduction="none")
     psps_outcome_loss = losses.OutcomeLoss(
         loss=neglogliks.NegloglikNormal(reduction="none"),
+        treatment_loss=treatment_nll,
         n_outcome_true_cols=1,
         n_outcome_pred_cols=2,
         n_treatment_pred_cols=1,
         reduction="sum_over_batch_size",
     )
     psps_treat_loss = losses.TreatmentLoss(
-        loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
+        loss=treatment_nll,
         n_outcome_true_cols=1,
         n_outcome_pred_cols=2,
         n_treatment_pred_cols=1,
@@ -75,7 +80,8 @@ def _build_binary_normal_causal_loss(
         alpha=alpha,
         outcome_loss_weight=1.0,
         predictive_states_regularizer=pypress.keras.regularizers.DegreesOfFreedom(
-            l1=df_penalty_l1, target=n_states - 1
+            l1=df_penalty_l1,
+            target=max(1, np.log(0.5 * n_states)),
         ),
         reduction="sum_over_batch_size",
     )
@@ -127,10 +133,18 @@ def build_toy_model(
     )
     pss = pypress.keras.layers.PredictiveStateSimplex(n_states=n_states, input_dim=n_features)
     pred_states = pss(ps_hidden)
-    # Propensity score for binary treatment (--> "sigmoid" activation).
-    prop_score = pypress.keras.layers.PredictiveStateMeans(
-        units=1, activation="sigmoid", name="propensity_score"
-    )(pred_states)
+    # State-conditional propensity for binary treatment (--> "sigmoid" activation), one constant
+    # per state (the "balancedness" assumption: treatment probability is homogeneous within a
+    # predictive state). Kept state-conditional (not pre-mixed) so the causal loss can compute
+    # the exact posterior P(state | X, treatment) via Bayes' rule.
+    prop_score_preds = []
+    for state_id in range(n_states):
+        prop_score_preds.append(
+            tf.keras.activations.sigmoid(
+                layers.BiasOnly(name="propensity_logit_state_" + str(state_id))(features_bn)
+            )
+        )
+    prop_score = tfk.layers.Concatenate(name="propensity_score")(prop_score_preds)
 
     outcome_hidden = tf.keras.layers.Dense(10, "tanh", name="inputs_processing")(feat_treat_bn)
     outcome_hidden = tf.keras.layers.Dropout(0.2)(outcome_hidden)
@@ -179,13 +193,17 @@ def build_toy_model(
             optimizer=tfk.optimizers.Nadam(learning_rate=learning_rate),
             metrics=[
                 metrics.PropensityScoreBinaryCrossentropy(
-                    n_outcome_pred_cols=1, n_treatment_pred_cols=1
+                    n_outcome_pred_cols=2, n_treatment_pred_cols=1
                 ),
                 metrics.PropensityScoreAUC(
-                    n_outcome_pred_cols=1, n_treatment_pred_cols=1, curve="PR"
+                    n_outcome_pred_cols=2, n_treatment_pred_cols=1, curve="PR"
                 ),
                 metrics.OutcomeMeanSquaredError(
-                    n_outcome_pred_cols=1, n_treatment_pred_cols=1, n_outcome_true_cols=1
+                    n_outcome_pred_cols=2, n_treatment_pred_cols=1, n_outcome_true_cols=1
+                ),
+                metrics.causal_loss_metric_gen(
+                    outcome_loss=psps_causal_loss._outcome_loss,
+                    treatment_loss=psps_causal_loss._treatment_loss,
                 ),
             ],
         )
@@ -250,10 +268,17 @@ def build_model_binary_normal(
     pss = pypress.keras.layers.PredictiveStateSimplex(n_states=n_states, input_dim=n_features)
     pred_states = pss(ps_hidden)
 
-    # Propensity score for binary treatment (--> "sigmoid" activation).
-    prop_score = pypress.keras.layers.PredictiveStateMeans(
-        units=1, activation="sigmoid", name="propensity_score"
-    )(pred_states)
+    # State-conditional propensity for binary treatment (--> "sigmoid" activation), one constant
+    # per state; kept state-conditional (not pre-mixed) so the causal loss can compute the exact
+    # posterior P(state | X, treatment) via Bayes' rule.
+    prop_score_preds = []
+    for state_id in range(n_states):
+        prop_score_preds.append(
+            tf.keras.activations.sigmoid(
+                layers.BiasOnly(name="propensity_logit_state_" + str(state_id))(features_bn)
+            )
+        )
+    prop_score = tfk.layers.Concatenate(name="propensity_score")(prop_score_preds)
 
     outcome_hidden = tf.keras.layers.Dense(
         outcome_hidden_layers[0][0], outcome_hidden_layers[0][1], name="inputs_processing"
@@ -325,13 +350,17 @@ def build_model_binary_normal(
             optimizer=tfk.optimizers.Nadam(learning_rate=learning_rate),
             metrics=[
                 metrics.PropensityScoreBinaryCrossentropy(
-                    n_outcome_pred_cols=1, n_treatment_pred_cols=1
+                    n_outcome_pred_cols=2, n_treatment_pred_cols=1
                 ),
                 metrics.PropensityScoreAUC(
-                    n_outcome_pred_cols=1, n_treatment_pred_cols=1, curve="PR"
+                    n_outcome_pred_cols=2, n_treatment_pred_cols=1, curve="PR"
                 ),
                 metrics.OutcomeMeanSquaredError(
-                    n_outcome_pred_cols=1, n_treatment_pred_cols=1, n_outcome_true_cols=1
+                    n_outcome_pred_cols=2, n_treatment_pred_cols=1, n_outcome_true_cols=1
+                ),
+                metrics.causal_loss_metric_gen(
+                    outcome_loss=psps_causal_loss._outcome_loss,
+                    treatment_loss=psps_causal_loss._treatment_loss,
                 ),
             ],
         )
@@ -396,10 +425,17 @@ def build_model_binary_exponential(
     pss = pypress.keras.layers.PredictiveStateSimplex(n_states=n_states, input_dim=n_features)
     pred_states = pss(ps_hidden)
 
-    # Propensity score for binary treatment (--> "sigmoid" activation).
-    prop_score = pypress.keras.layers.PredictiveStateMeans(
-        units=1, activation="sigmoid", name="propensity_score"
-    )(pred_states)
+    # State-conditional propensity for binary treatment (--> "sigmoid" activation), one constant
+    # per state; kept state-conditional (not pre-mixed) so the causal loss can compute the exact
+    # posterior P(state | X, treatment) via Bayes' rule.
+    prop_score_preds = []
+    for state_id in range(n_states):
+        prop_score_preds.append(
+            tf.keras.activations.sigmoid(
+                layers.BiasOnly(name="propensity_logit_state_" + str(state_id))(features_bn)
+            )
+        )
+    prop_score = tfk.layers.Concatenate(name="propensity_score")(prop_score_preds)
 
     outcome_hidden = tf.keras.layers.Dense(
         outcome_hidden_layers[0][0], outcome_hidden_layers[0][1], name="inputs_processing"
@@ -474,3 +510,25 @@ def build_model_binary_exponential(
         )
 
     return model
+
+
+def get_propensity_state_conditional_means(model: tf.keras.Model) -> tf.Tensor:
+    """Returns each state's propensity constant (post-sigmoid), for models built by the
+    `build_*` functions in this module.
+
+    The propensity head is one `BiasOnly` logit per state (layers named
+    "propensity_logit_state_<k>"), not a single mixed `pypress.keras.layers.PredictiveStateMeans`
+    layer, so there's no single layer exposing a `.state_conditional_means` property anymore.
+    This reconstructs the analogous `(n_states, 1)` tensor from each state's bias weight
+    directly. Works both before and after training -- a useful sanity check that per-state
+    propensity estimates are reasonable (e.g., not degenerate) at initialization and after
+    fitting.
+    """
+    n_states = model.get_layer("propensity_score").output.shape[-1]
+    logits = tf.stack(
+        [
+            tf.convert_to_tensor(model.get_layer(f"propensity_logit_state_{k}").weights[0])
+            for k in range(n_states)
+        ]
+    )
+    return tf.sigmoid(logits)
