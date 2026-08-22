@@ -13,6 +13,7 @@ def bootstrap_ute_binary(
     model: tf.keras.Model,
     features: pd.DataFrame,
     n_bootstraps: int = 100,
+    random_state: int = 0,
 ) -> pd.DataFrame:
     """
     Generate bootstrap samples of unit-level treatment effects for binary treatment.
@@ -21,12 +22,13 @@ def bootstrap_ute_binary(
       model: Trained pypsps model supporting binary treatment.
       features: Feature matrix (DataFrame). Typically inputs[0].
       n_bootstraps: Number of bootstrap replicates.
+      random_state: seed for the resampling RNG.
 
     Returns:
       DataFrame of shape (n_bootstraps, n_units) with each row a bootstrap replicate of UTEs.
     """
     n_samples = features.shape[0]
-    rng = np.random.RandomState(0)
+    rng = np.random.RandomState(random_state)
     ute_samples = []
 
     for i in range(n_bootstraps):
@@ -47,6 +49,7 @@ def bootstrap_ate_binary(
     model: tf.keras.Model,
     features: Union[pd.DataFrame, np.ndarray],
     n_bootstraps: int = 100,
+    random_state: int = 0,
 ) -> pd.Series:
     """
     Estimate confidence intervals for the ATE of a binary treatment via bootstrapping.
@@ -55,6 +58,7 @@ def bootstrap_ate_binary(
       model: Trained pypsps model supporting binary treatment.
       features: Feature matrix (DataFrame or ndarray).  Usually inputs[0].
       n_bootstraps: Number of bootstrap samples.
+      random_state: seed for the resampling RNG.
 
     Returns:
        pd.Series: the bootstrap estimates of the ATE. Number of rows = n_bootstraps.
@@ -62,7 +66,7 @@ def bootstrap_ate_binary(
     n_samples = features.shape[0]
     ate_samples = []
 
-    rng = np.random.RandomState(n_samples)
+    rng = np.random.RandomState(random_state)
     for _ in range(n_bootstraps):
         idx = rng.choice(n_samples, size=n_samples, replace=True)
         if isinstance(features, pd.DataFrame):
@@ -83,6 +87,7 @@ def bootstrap_ate_continuous(
     treatment_grid: List[float],
     baseline_treatment: Optional[float] = None,
     n_bootstraps: int = 100,
+    random_state: int = 0,
 ) -> pd.DataFrame:
     """
     Estimate confidence intervals for ATE over a treatment grid via bootstrapping.
@@ -94,12 +99,13 @@ def bootstrap_ate_continuous(
       n_bootstrap: Number of bootstrap samples.
       alpha: Significance level for two-sided intervals.
       baseline_treatment: Baseline value for comparison (defaults to grid mean).
+      random_state: seed for the resampling RNG.
 
     Returns:
       ci_df: DataFrame with index=treatment_grid and columns ["lower", "upper"].
     """
     n_samples = features.shape[0]
-    rng = np.random.RandomState(n_samples)
+    rng = np.random.RandomState(random_state)
 
     ate_samples = []
     for _ in range(n_bootstraps):

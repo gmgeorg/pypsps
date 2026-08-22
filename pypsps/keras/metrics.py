@@ -24,7 +24,7 @@ class PropensityScoreBinaryCrossentropy(tf.keras.metrics.BinaryCrossentropy):
 
     def update_state(self, y_true, y_pred, sample_weight=None):
         """Updates state."""
-        _, _, propensity_score = utils.split_y_pred(
+        propensity_score = utils.agg_treatment_pred(
             y_pred,
             n_outcome_pred_cols=self._n_outcome_pred_cols,
             n_treatment_pred_cols=self._n_treatment_pred_cols,
@@ -47,7 +47,7 @@ class PropensityScoreAUC(tf.keras.metrics.AUC):
 
     def update_state(self, y_true, y_pred, sample_weight=None):
         """Updates state"""
-        _, _, propensity_score = utils.split_y_pred(
+        propensity_score = utils.agg_treatment_pred(
             y_pred,
             n_outcome_pred_cols=self._n_outcome_pred_cols,
             n_treatment_pred_cols=self._n_treatment_pred_cols,
@@ -78,11 +78,11 @@ class TreatmentMeanSquaredError(tf.keras.metrics.MeanSquaredError):
 
     def update_state(self, y_true, y_pred, sample_weight=None):
         """Updates state"""
-        treat_pred = utils.split_y_pred(
+        treat_pred = utils.agg_treatment_pred(
             y_pred,
             n_outcome_pred_cols=self._n_outcome_pred_cols,
             n_treatment_pred_cols=self._n_treatment_pred_cols,
-        )[2]
+        )
         treat_true = utils.split_y_true(y_true, n_outcome_true_cols=self._n_outcome_true_cols)[1]
         super().update_state(y_true=treat_true, y_pred=treat_pred, sample_weight=sample_weight)
 
@@ -106,11 +106,11 @@ class TreatmentMeanAbsoluteError(tf.keras.metrics.MeanAbsoluteError):
 
     def update_state(self, y_true, y_pred, sample_weight=None):
         """Updates state"""
-        treat_pred = utils.split_y_pred(
+        treat_pred = utils.agg_treatment_pred(
             y_pred,
             n_outcome_pred_cols=self._n_outcome_pred_cols,
             n_treatment_pred_cols=self._n_treatment_pred_cols,
-        )[2]
+        )
         treat_true = utils.split_y_true(y_true, n_outcome_true_cols=self._n_outcome_true_cols)[1]
         super().update_state(y_true=treat_true, y_pred=treat_pred, sample_weight=sample_weight)
 
@@ -234,3 +234,50 @@ def causal_loss_metric_gen(
 
     causal_loss_metric.__name__ = "causal_loss_metric"
     return causal_loss_metric
+
+
+def uniform_entropy_gen(n_outcome_pred_cols: int, n_treatment_pred_cols: int):
+    """
+    Function wrapper that returns a metric function computing the Shannon entropy.
+
+    The returned function computes the average Shannon entropy of predictive state distributions
+    across all samples. Higher entropy indicates more uniform state distributions.
+
+    The entropy is computed as:
+        mean_entropy = mean(-sum(p_i * log(p_i)))
+
+    where p_i are the predictive state weights for each state.
+
+    This metric function can be passed to model.compile(metrics=[...]).
+
+    Parameters
+    ----------
+    n_outcome_pred_cols : int
+        Number of outcome prediction columns in y_pred.
+    n_treatment_pred_cols : int
+        Number of treatment prediction columns in y_pred.
+
+    Returns
+    -------
+    function
+        A function metric that takes (y_true, y_pred) and returns the mean entropy as a float value.
+    """
+
+    def uniform_entropy(y_true, y_pred) -> tf.Tensor:
+        """Computes Shannon entropy of predictive state weights."""
+        del y_true
+        _, weights, _ = utils.split_y_pred(
+            y_pred,
+            n_outcome_pred_cols=n_outcome_pred_cols,
+            n_treatment_pred_cols=n_treatment_pred_cols,
+        )
+        # Shannon entropy per row: -sum(p_i * log(p_i)). Uses safe_xlogx instead of an
+        # epsilon floor (log(p_i + eps)) so sharp/near-degenerate state weights aren't
+        # distorted -- see dev-docs item 2 for why the floor is the wrong fix here.
+        entropy_per_row = -1 * tf.math.reduce_sum(pypress.utils.safe_xlogx(weights), axis=1)
+        # Return mean entropy across all samples
+        # Higher values indicate more uniform distributions
+        return tf.math.reduce_mean(entropy_per_row)
+
+    uniform_entropy.__name__ = "uniform_entropy"
+    return uniform_entropy

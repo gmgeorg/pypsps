@@ -1,6 +1,7 @@
 """Module to implement distributions and log-likelihood loss fcts."""
 
 import math
+from typing import Callable, Union
 
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -11,6 +12,8 @@ tfd = tfp.distributions
 
 
 _EPS = 1e-6
+
+LossLike = Union[tf.keras.losses.Loss, Callable[[tf.Tensor, tf.Tensor], tf.Tensor]]
 
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")
@@ -148,3 +151,88 @@ class NegloglikExponential(tf.keras.losses.Loss):
         ):
             return tf.reduce_mean(losses, axis=-1)
         raise NotImplementedError(f"reduction='{self.reduction}' is not implemented")
+
+
+def negloglik_per_state(
+    negloglik: LossLike,
+    y_true: tf.Tensor,  # [N, C]
+    y_pred: tf.Tensor,  # [N, K * P] (Interleaved parameters)
+    n_states: int,  # Pass as Python int to ensure loop unrolling
+) -> tf.Tensor:
+    """
+    Returns -log p(y | state) as [N, K] using an elementwise NLL,
+    avoiding tf.reshape to prevent Rank/Shape inference errors.
+
+    Args:
+        negloglik: Loss function with reduction=NONE
+        y_true: True labels [N, C]
+        y_pred: Predicted parameters [N, K * P] in interleaved format
+        n_states: Number of states (K)
+
+    Returns:
+        negative loglikelihood per row per state [N, K]
+    """
+    y_true = tf.cast(tf.convert_to_tensor(y_true), tf.float32)
+    if y_true.shape.rank == 1:
+        y_true = y_true[:, None]
+
+    # Check NLL reduction if it's a Keras Loss
+    if hasattr(negloglik, "reduction") and negloglik.reduction != tf.keras.losses.Reduction.NONE:
+        raise ValueError("negloglik Loss must have reduction=NONE.")
+
+    n_cols = pypsps.utils.get_n_cols(y_pred)
+    n_params_per_state = int(n_cols / n_states)
+
+    nll_list = []
+
+    # Loop over states: Each iteration creates a concrete slice of the graph
+    for j in range(n_states):
+        # 1. Identify which columns belong to state j
+        # Assuming: [state0_p0, state1_p0, ..., stateK_p0, state0_p1, ...]
+        indices = pypsps.utils.get_state_column_indices(j, n_states, n_params_per_state)
+        # 2. Extract parameters for state j: [N, P]
+        params_state_j = tf.gather(y_pred, indices, axis=1)
+        # 3. Compute NLL for this state: [N]
+        if isinstance(negloglik, tf.keras.losses.Loss):
+            nll_j = negloglik(y_true=y_true, y_pred=params_state_j)
+        else:
+            nll_j = negloglik(y_true, params_state_j)
+
+        nll_list.append(nll_j)
+
+    # Stack results back into [N, K]
+    nll_per_state = tf.stack(nll_list, axis=1, name="negloglik_per_state")
+
+    return nll_per_state
+
+
+def posterior_from_negloglik_per_state(
+    weights: tf.Tensor,  # [N,K] = P(S | X)
+    nll: tf.Tensor,  # [N,K] = negative log-likelihood of A given S_k
+) -> tf.Tensor:
+    """Compute posterior gamma = P(S | X, T) = softmax(log P(S|X) + log p(T|S,·)).
+
+    Computes posterior responsibilities:
+        gamma = P(S | X, A)
+
+    using Bayes' rule in log-space:
+        gamma_k ∝ P(S_k | X) * exp(-nll_k)
+
+    Second equality follows because T is independent of X given S.
+
+    Args:
+        weights:
+            Prior state probabilities P(S | X), shape [N,K].
+        nll:
+            Per-state negative log-likelihoods, shape [N,K].
+
+    Returns:
+        gamma:
+            Posterior state probabilities P(S | X, A), shape [N,K].
+    """
+    weights = tf.convert_to_tensor(weights)
+    nll = tf.convert_to_tensor(nll)
+
+    log_w = pypsps.utils.safe_log(weights, name="log_weights")  # [N,K]
+    gamma = tf.nn.softmax(log_w - nll, axis=1)  # posterior weights
+    return gamma
