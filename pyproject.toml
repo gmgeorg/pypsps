@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pypsps"
-version = "0.1.3"
+version = "0.1.4"
 description = "Predictive State Propensity Subclassification (PSPS) in Python (keras)"
 authors = ["Georg M. Goerg <im@gmge.org>"]
 license = "MIT"
