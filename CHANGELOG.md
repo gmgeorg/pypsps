@@ -16,15 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   likelihood" into "likelihood plus whatever penalty this candidate happened to draw",
   systematically rewarding weaker penalties regardless of fit quality. No such penalty is
   wired into committed `OutcomeLoss`/`TreatmentLoss` yet, so this was a structural gap rather
-  than an active bug, flagged as a pending follow-up in
-  [dev-docs/20260820-bugfixes-v1.md item 5](dev-docs/20260820-bugfixes-v1.md). Fixed by adding
-  an explicit `penalty_free()` method to `OutcomeLoss`/`TreatmentLoss` that reconstructs the
-  loss from a hand-written list of its own non-penalty constructor arguments (not by scanning
-  attribute names for a naming convention); `causal_loss_metric_gen` now always calls it before
-  wrapping the losses in its internal `CausalLoss`. A future subclass that adds a penalty either
-  gets it correctly zeroed automatically (if it defaults to "off") or `penalty_free()` raises
-  until that subclass explicitly overrides it -- it can never leak through unnoticed. See
-  [dev-docs/20260822-bugfixes-v3.md](dev-docs/20260822-bugfixes-v3.md) for the full writeup.
+  than an active bug. Fixed by adding an explicit `penalty_free()` method to
+  `OutcomeLoss`/`TreatmentLoss` that reconstructs the loss from a hand-written list of its own
+  non-penalty constructor arguments (not by scanning attribute names for a naming convention);
+  `causal_loss_metric_gen` now always calls it before wrapping the losses in its internal
+  `CausalLoss`. A future subclass that adds a penalty either gets it correctly zeroed
+  automatically (if it defaults to "off") or `penalty_free()` raises until that subclass
+  explicitly overrides it -- it can never leak through unnoticed.
 
 ## pypsps v0.1.0 - Aug 21, 2026
 
