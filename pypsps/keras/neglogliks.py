@@ -32,7 +32,7 @@ class NegloglikLoss(tf.keras.losses.Loss):
         """Implements the loss function call."""
         n_params = pypsps.utils.get_n_cols(y_pred)
 
-        y_pred_cols = [tf.squeeze(c) for c in tf.split(y_pred, n_params, axis=1)]
+        y_pred_cols = [tf.squeeze(c, axis=-1) for c in tf.split(y_pred, n_params, axis=1)]
         distr = self._distribution_constructor(*y_pred_cols)
         losses = -distr.log_prob(y_true)
 
@@ -52,7 +52,7 @@ def _negloglik_normal(y: tf.Tensor, loc: tf.Tensor, scale: tf.Tensor) -> tf.Tens
     """Computes negative log-likelihood of data y ~ Normal(mu, sigma)."""
     negloglik_element = tf.math.log(2.0 * math.pi) / 2.0 + tf.math.log(scale + _EPS)
     negloglik_element += 0.5 * tf.square((y - loc) / (scale + _EPS))
-    return tf.squeeze(negloglik_element)
+    return negloglik_element
 
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")
@@ -61,10 +61,12 @@ class NegloglikNormal(tf.keras.losses.Loss):
 
     def call(self, y_true, y_pred):
         """Implements the loss function call."""
-        y_true = tf.squeeze(y_true)
+        if y_true.shape.rank == 2 and y_true.shape[-1] == 1:
+            y_true = tf.squeeze(y_true, axis=-1)
         loc_pred = y_pred[:, 0]
         scale_pred = y_pred[:, 1]
-        losses = _negloglik_normal(y_true, loc_pred, scale_pred)
+        losses = _negloglik_normal(y=y_true, loc=loc_pred, scale=scale_pred)
+        losses = tf.ensure_shape(losses, [None])
         if self.reduction == tf.keras.losses.Reduction.NONE:
             return losses
         if self.reduction == tf.keras.losses.Reduction.SUM:
@@ -145,10 +147,13 @@ class NegloglikExponential(tf.keras.losses.Loss):
         if self._log_rate:
             y_pred = tf.exp(y_pred)
 
-        # y_pred is the rate
+        # y_pred is the rate; may be [N] or [N, 1] depending on caller
+        rate = y_pred[:, 0] if y_pred.shape.rank == 2 else y_pred
+
         losses = _negloglik_exponential(
-            tf.squeeze(event_time), tf.squeeze(event_indicator), rate=tf.squeeze(y_pred)
+            event_time=event_time, event_indicator=event_indicator, rate=rate
         )
+        losses = tf.ensure_shape(losses, [None])
 
         if self.reduction == tf.keras.losses.Reduction.NONE:
             return losses
@@ -247,10 +252,13 @@ class NegloglikExponentialScale(tf.keras.losses.Loss):
         event_time = y_true[:, 0]
         event_indicator = y_true[:, 1]
 
-        # y_pred is log_scale (log of mean survival time)
+        # y_pred is log_scale (log of mean survival time); may be [N] or [N, 1]
+        log_scale = y_pred[:, 0] if y_pred.shape.rank == 2 else y_pred
+
         losses = _negloglik_exponential_scale(
-            tf.squeeze(event_time), tf.squeeze(event_indicator), log_scale=tf.squeeze(y_pred)
+            event_time=event_time, event_indicator=event_indicator, log_scale=log_scale
         )
+        losses = tf.ensure_shape(losses, [None])
 
         if self.reduction == tf.keras.losses.Reduction.NONE:
             return losses
@@ -372,11 +380,12 @@ class NegloglikWeibull(tf.keras.losses.Loss):
         log_shape = y_pred[:, 1]
 
         losses = _negloglik_weibull(
-            tf.squeeze(event_time),
-            tf.squeeze(event_indicator),
-            log_scale=tf.squeeze(log_scale),
-            log_shape=tf.squeeze(log_shape),
+            event_time=event_time,
+            event_indicator=event_indicator,
+            log_scale=log_scale,
+            log_shape=log_shape,
         )
+        losses = tf.ensure_shape(losses, [None])
 
         if self.reduction == tf.keras.losses.Reduction.NONE:
             return losses

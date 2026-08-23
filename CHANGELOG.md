@@ -5,6 +5,25 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.1.5 - Aug 23, 2026
+
+### Fixed
+
+* `pypsps/keras/neglogliks.py`: bare, no-`axis` `tf.squeeze()` calls in
+  `NegloglikLoss.call`, `NegloglikExponential.call`, `NegloglikExponentialScale.call`, and
+  `NegloglikWeibull.call` decided at trace time which size-1 dimensions to drop; when a
+  tensor's static shape had an unknown (`None`) dimension -- which happens whenever
+  `train_step` is retraced for a batch shaped differently from the one used to first trace
+  the graph (e.g. a partial/remainder final batch, or a batch size larger than a
+  cross-validation fold) -- `tf.squeeze()` couldn't statically prove that dimension wasn't 1,
+  degrading the entire output shape to unknown rank. That unknown-rank tensor then broke
+  shape inference inside `posterior_from_negloglik_per_state`, raising `TypeError:
+  unsupported operand type(s) for -: 'NoneType' and 'int'` during `model.fit()` in graph
+  mode. Fixed by deleting the now-redundant squeezes (the squeezed values are already
+  rank-1 from column slicing) and pinning the loss tensor's static shape explicitly via
+  `tf.ensure_shape(losses, [None])`. `NegloglikNormal.call` had the same pattern and is now
+  fixed for real upstream (a prior fix only ever landed in a downstream fork).
+
 ## pypsps v0.1.4 - Aug 23, 2026
 
 ### Fixed
