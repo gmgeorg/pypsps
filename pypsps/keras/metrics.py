@@ -186,6 +186,20 @@ def predictive_state_df_gen(n_outcome_pred_cols: int, n_treatment_pred_cols: int
     return predictive_state_df
 
 
+def _penalty_free_copy(loss_obj):
+    """Returns a penalty-free instance of `loss_obj`, without mutating `loss_obj` itself
+    (which may still be the live training-time loss).
+
+    Delegates to `loss_obj.penalty_free()` (see `losses.OutcomeLoss.penalty_free` /
+    `losses.TreatmentLoss.penalty_free`), which rebuilds the object from an explicit,
+    class-declared list of constructor arguments -- never by scanning attribute names for a
+    naming convention like `_lambda_*`. That keeps this correct even for a penalty that isn't
+    named with a `lambda`-style prefix: the loss class itself, not this function, decides
+    what counts as a penalty.
+    """
+    return loss_obj.penalty_free()
+
+
 def causal_loss_metric_gen(
     outcome_loss: losses.OutcomeLoss,
     treatment_loss: losses.TreatmentLoss,
@@ -199,6 +213,12 @@ def causal_loss_metric_gen(
 
         causal_loss = outcome_loss_weight * outcome_loss(y_true, y_pred)
                       + alpha * treatment_loss(y_true, y_pred)
+
+    with `outcome_loss` and `treatment_loss` stripped of any embedded penalty terms (see
+    `_penalty_free_copy`) and wrapped in a `CausalLoss` with `predictive_states_regularizer=
+    None`, so this metric always reports the exact joint likelihood, never a penalized/
+    regularized proxy for it -- regardless of what alpha, outcome_loss_weight, or predictive
+    state / balance penalties the model was actually trained with.
 
     This metric function can be passed to model.compile(metrics=[...]).
 
@@ -218,10 +238,12 @@ def causal_loss_metric_gen(
     function
         A function metric that takes (y_true, y_pred) and returns the causal loss as a float value (can be passed as metric).
     """
-    # Construct an instance of CausalLoss with the given parameters.
+    # Construct an instance of CausalLoss with the given parameters, using penalty-free
+    # copies of outcome_loss/treatment_loss so this metric can never inherit a penalty term
+    # baked into either of them.
     causal_loss_obj = losses.CausalLoss(
-        outcome_loss=outcome_loss,
-        treatment_loss=treatment_loss,
+        outcome_loss=_penalty_free_copy(outcome_loss),
+        treatment_loss=_penalty_free_copy(treatment_loss),
         alpha=alpha,
         outcome_loss_weight=outcome_loss_weight,
     )
