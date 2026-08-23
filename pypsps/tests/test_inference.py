@@ -43,6 +43,35 @@ def test_state_conditional_outcome_mean_exponential_log_rate():
     np.testing.assert_allclose(mean, [[1.0, 0.5]], rtol=1e-5)
 
 
+def test_state_conditional_outcome_mean_exponential_scale():
+    """Exponential-scale outcome: mean is exp(log_scale)."""
+    model = _make_stub_model(neglogliks.NegloglikExponentialScale(reduction="none"))
+    layout = utils.ColumnLayout(
+        n_outcome_pred_cols=1, n_treatment_pred_cols=1, n_outcome_true_cols=2
+    )
+    log_scale = np.array([[0.0, np.log(2.0)]], dtype="float32")  # scales 1, 2
+    mean = inference._state_conditional_outcome_mean(model, log_scale, layout)
+    np.testing.assert_allclose(mean, [[1.0, 2.0]], rtol=1e-5)
+
+
+def test_state_conditional_outcome_mean_weibull():
+    """Weibull outcome: mean is scale * Gamma(1 + 1/shape), computed for 2 states."""
+    model = _make_stub_model(neglogliks.NegloglikWeibull(reduction="none"))
+    layout = utils.ColumnLayout(
+        n_outcome_pred_cols=2, n_treatment_pred_cols=1, n_outcome_true_cols=2
+    )
+    # 2 states, params interleaved as [log_scale_s0, log_scale_s1, log_shape_s0, log_shape_s1].
+    log_scale = np.array([0.3, -0.2], dtype="float32")
+    log_shape = np.array([0.5, -0.3], dtype="float32")
+    outcome_params = np.concatenate([log_scale, log_shape])[np.newaxis, :]
+
+    mean = inference._state_conditional_outcome_mean(model, outcome_params, layout)
+
+    k = np.exp(log_shape)
+    expected = np.exp(log_scale) * np.exp(tf.math.lgamma(1.0 + 1.0 / k).numpy())
+    np.testing.assert_allclose(mean, expected[np.newaxis, :], rtol=1e-5)
+
+
 def test_state_conditional_outcome_mean_unsupported_loss_raises():
     """An outcome loss this helper has no case for raises, instead of a silently wrong number."""
     model = _make_stub_model(tf.keras.losses.MeanSquaredError(reduction="none"))
