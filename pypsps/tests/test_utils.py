@@ -9,6 +9,56 @@ from .. import datasets, utils
 from ..keras import models
 
 
+def test_get_n_cols_np_array():
+    """get_n_cols works on a plain numpy array"""
+    y = np.zeros((4, 3))
+    assert utils.get_n_cols(y) == 3
+
+
+def test_get_n_cols_eager_tensor():
+    """get_n_cols works on an eager tf.Tensor"""
+    y = tf.zeros((4, 3))
+    assert utils.get_n_cols(y) == 3
+
+
+def test_get_n_cols_graph_mode_tensor():
+    """get_n_cols works on a tensor traced inside a tf.function (graph mode)"""
+
+    @tf.function
+    def _call(y):
+        return utils.get_n_cols(y)
+
+    n_cols = _call(tf.zeros((4, 3)))
+    assert int(n_cols) == 3
+
+
+def test_get_n_cols_keras_symbolic_tensor():
+    """get_n_cols works on a symbolic KerasTensor (e.g. from a functional-API Input)"""
+    y = tf.keras.layers.Input(shape=(3,))
+    assert utils.get_n_cols(y) == 3
+
+
+def test_toy_model_fits_in_eager_and_graph_mode():
+    """The default posterior-weighted causal loss traces get_n_cols through nested
+    CausalLoss -> OutcomeLoss calls; this must work both eagerly and in graph mode
+    (Keras 3's default compile_loss tracing), which is what originally broke with
+    tf.Tensor.get_shape().as_list().
+    """
+    np.random.seed(13)
+    ks_data = datasets.KangSchafer(true_ate=10).sample(n_samples=200)
+    inputs, outputs = ks_data.to_keras_inputs_outputs()
+
+    for run_eagerly in (True, False):
+        tf.random.set_seed(13)
+        model = models.build_toy_model(
+            n_states=3, n_features=ks_data.features.shape[1], compile=True
+        )
+        model.run_eagerly = run_eagerly
+        history = model.fit(inputs, outputs, epochs=1, batch_size=64, verbose=0)
+        loss = history.history["loss"][0]
+        assert np.isfinite(loss), f"non-finite loss with run_eagerly={run_eagerly}"
+
+
 def test_split_y_does_not_drop_columns():
     """test split_y"""
     np.random.seed(13)

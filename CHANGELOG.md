@@ -5,6 +5,18 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.1.4 - Aug 23, 2026
+
+### Fixed
+
+* `get_n_cols` (`pypsps/utils.py`) used the old TF1-era `y.get_shape().as_list()[1]` for
+  non-`np.ndarray` inputs. Under Keras 3, the tensor flowing through the nested
+  `CausalLoss` -> `OutcomeLoss` call chain during graph-mode loss tracing is a `KerasTensor`,
+  which has no `get_shape()` method at all, raising `AttributeError` and crashing training
+  with the default (posterior-weighted) loss. Fixed by using `y.shape[1]` unconditionally,
+  which works for `np.ndarray`, eager `tf.Tensor`, graph-traced tensors, and `KerasTensor`
+  alike.
+
 ## pypsps v0.1.3 - Aug 22, 2026
 
 ### Fixed

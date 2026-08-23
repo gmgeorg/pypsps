@@ -13,10 +13,7 @@ _DATA_DTYPE = Union[np.ndarray, pd.DataFrame]
 
 def get_n_cols(y: _Y_PRED_DTYPE) -> int:
     """Gets the number of columns of a np array or TF tensor."""
-    if isinstance(y, np.ndarray):
-        n_cols = y.shape[1]
-    else:
-        n_cols = y.get_shape().as_list()[1]
+    n_cols = y.shape[1]
     return n_cols
 
 
