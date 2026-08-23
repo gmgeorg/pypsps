@@ -92,7 +92,7 @@ def split_y_true(
 ) -> Tuple[_Y_PRED_DTYPE, _Y_PRED_DTYPE]:
     """Splits y_true = (outcome, treatment) into separate tensors."""
     outcome_true = y_true[:, :n_outcome_true_cols]
-    treatment_true = y_true[:, n_outcome_true_cols:]
+    treatment_true = y_true[:, n_outcome_true_cols : n_outcome_true_cols + 1]
     return outcome_true, treatment_true
 
 

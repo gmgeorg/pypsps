@@ -5,6 +5,18 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.1.3 - Aug 22, 2026
+
+### Fixed
+
+* `split_y_true` (`pypsps/utils.py`) sliced `treatment_true` as "all remaining columns after
+  the outcome columns" (`y_true[:, n_outcome_true_cols:]`) instead of the single treatment
+  column. Every committed loss/model only ever has one treatment column, so this was correct
+  by accident; passing a `y_true` with extra trailing columns (e.g. survival event indicators
+  or auxiliary features appended after treatment) would silently fold them into
+  `treatment_true` with no error. Fixed to slice exactly one column
+  (`y_true[:, n_outcome_true_cols : n_outcome_true_cols + 1]`).
+
 ## pypsps v0.1.2 - Aug 22, 2026
 
 ### Added
