@@ -45,6 +45,18 @@ def _state_conditional_outcome_mean(
         log_rate = param_blocks[0] if outcome_nll._log_rate else np.log(param_blocks[0])
         return np.exp(-log_rate)
 
+    if isinstance(outcome_nll, neglogliks.NegloglikExponentialScale):
+        # mean of Exponential(scale=mu) = mu = exp(log_scale).
+        log_scale = param_blocks[0]
+        return np.exp(log_scale)
+
+    if isinstance(outcome_nll, neglogliks.NegloglikWeibull):
+        # mean of Weibull(scale=lambda, shape=k) = lambda * Gamma(1 + 1/k).
+        log_scale, log_shape = param_blocks
+        k = np.exp(log_shape)
+        gamma_term = np.exp(tf.math.lgamma(1.0 + 1.0 / k).numpy())
+        return np.exp(log_scale) * gamma_term
+
     raise NotImplementedError(
         f"Don't know how to compute the outcome mean for loss type "
         f"{type(outcome_nll).__name__}; add a case to "
@@ -83,7 +95,8 @@ def predict_counterfactual(
 def predict_ute_binary(model: tf.keras.Model, features: Any) -> Union[pd.Series, np.ndarray]:
     """Predicts unit-level treatment effect for binary treatment.
 
-    Supports models compiled with a Normal or Exponential outcome loss (see
+    Supports models compiled with a Normal, Exponential, Exponential (scale), or Weibull
+    outcome loss (see
     `_state_conditional_outcome_mean`); raises `NotImplementedError` for any other outcome
     distribution rather than silently returning a meaningless number.
 
@@ -136,7 +149,8 @@ def predict_ute_continuous(
 ) -> Union[pd.DataFrame, np.ndarray]:
     """Predicts unit-level treatment effect for continuous treatment.
 
-    Supports models compiled with a Normal or Exponential outcome loss (see
+    Supports models compiled with a Normal, Exponential, Exponential (scale), or Weibull
+    outcome loss (see
     `_state_conditional_outcome_mean`); raises `NotImplementedError` for any other outcome
     distribution rather than silently returning a meaningless number.
 

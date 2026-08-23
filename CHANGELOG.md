@@ -5,6 +5,25 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.1.2 - Aug 22, 2026
+
+### Added
+
+* `NegloglikExponentialScale` / `NegloglikWeibull` (`pypsps/keras/neglogliks.py`): survival
+  losses parameterized by `log_scale` (and `log_shape` for Weibull) instead of `log_rate`,
+  for more numerically stable gradients when predicting the mean survival time directly.
+  Both formulas verified against `tfp.distributions.Exponential`/`Weibull` `log_prob`/
+  `log_survival_function`
+* `NegloglikExponential`/`NegloglikExponentialScale`/`NegloglikWeibull` are now registered
+  Keras-serializable (`register_keras_serializable`); `NegloglikExponential` also gained a
+  `get_config()` override, since without it its `log_rate` flag silently reset to `False` on
+  save/load
+* `_state_conditional_outcome_mean` (`inference.py`) now converts `NegloglikExponentialScale`
+  (`exp(log_scale)`) and `NegloglikWeibull` (`exp(log_scale) * Gamma(1 + 1/shape)`) raw
+  parameters to their distribution mean, so `predict_ute_binary`/`predict_ute_continuous`/
+  `predict_ate_binary`/`predict_ate_continuous` work for these two outcome losses instead of
+  raising `NotImplementedError`
+
 ## pypsps v0.1.1 - Aug 22, 2026
 
 ### Fixed
