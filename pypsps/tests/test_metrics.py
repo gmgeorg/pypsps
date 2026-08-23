@@ -1,7 +1,7 @@
 import numpy as np
 import tensorflow as tf
 
-from pypsps.keras import metrics
+from pypsps.keras import losses, metrics, neglogliks
 
 
 def _make_y_pred(outcome_blocks, weights, treatment_blocks):
@@ -200,3 +200,149 @@ def test_predictive_state_df_gen():
     result = func(None, y_pred)
     # Check that result is a scalar tensor.
     assert result.shape.ndims == 0 or (result.shape.ndims == 1 and result.shape[0] == 1)
+
+
+def _make_treatment_loss(**overrides):
+    """Builds a plain (no-penalty) `TreatmentLoss` with sensible test defaults."""
+    kwargs = dict(
+        loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
+        n_outcome_true_cols=1,
+        n_outcome_pred_cols=2,
+        n_treatment_pred_cols=1,
+        reduction="sum_over_batch_size",
+    )
+    kwargs.update(overrides)
+    return losses.TreatmentLoss(**kwargs)
+
+
+def test_treatment_loss_penalty_free_is_identity_when_no_penalty_declared():
+    """Base `TreatmentLoss.penalty_free()` has no penalty args to drop, so it must return an
+    equivalent (but distinct) instance -- not the same object."""
+    original = _make_treatment_loss()
+    clean = original.penalty_free()
+
+    assert clean is not original
+    assert clean._n_outcome_true_cols == original._n_outcome_true_cols
+    assert clean._n_outcome_pred_cols == original._n_outcome_pred_cols
+    assert clean._n_treatment_pred_cols == original._n_treatment_pred_cols
+    assert clean._loss is original._loss
+
+
+class _BalancePenalizedTreatmentLoss(losses.TreatmentLoss):
+    """Test double simulating a hypothetical within-state balance penalty folded directly
+    into `TreatmentLoss.call` (`self._lambda_balance * balance_penalty`), the pattern
+    `causal_loss_metric_gen` must be robust to -- without relying on the `lambda_balance`
+    name, since `penalty_free()` is reconstructed via explicit constructor arguments, not
+    attribute-name sniffing."""
+
+    def __init__(self, *args, lambda_balance: float = 0.0, **kwargs):
+        """Stores `lambda_balance`, the (test-only) penalty weight."""
+        super().__init__(*args, **kwargs)
+        self._lambda_balance = lambda_balance
+
+    def call(self, y_true, y_pred):
+        """Adds a constant `lambda_balance` penalty on top of the real treatment NLL."""
+        return super().call(y_true, y_pred) + self._lambda_balance
+
+
+def test_treatment_loss_penalty_free_zeros_declared_penalty_without_mutating_original():
+    """A subclass that inherits `penalty_free()` without overriding it drops any constructor
+    argument not explicitly forwarded by the base implementation -- here, `lambda_balance`
+    falls back to its own "off" default (0.0) -- and the original, live instance must be
+    left untouched."""
+    original = _BalancePenalizedTreatmentLoss(
+        loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
+        n_outcome_true_cols=1,
+        n_outcome_pred_cols=2,
+        n_treatment_pred_cols=1,
+        lambda_balance=5.0,
+        reduction="sum_over_batch_size",
+    )
+    clean = original.penalty_free()
+
+    assert clean is not original
+    assert clean._lambda_balance == 0.0
+    assert original._lambda_balance == 5.0
+
+
+def test_treatment_loss_penalty_free_fails_loudly_for_undeclared_required_penalty_arg():
+    """If a subclass adds a *required* penalty argument (no safe "off" default) and doesn't
+    override `penalty_free()` to account for it, reconstruction must raise rather than
+    silently guess a value -- forcing whoever adds the penalty to explicitly decide how
+    `penalty_free()` should handle it."""
+
+    class _RequiredPenaltyTreatmentLoss(losses.TreatmentLoss):
+        """Test double whose penalty weight has no safe "off" default."""
+
+        def __init__(self, *args, lambda_balance: float, **kwargs):
+            """Stores the required `lambda_balance` penalty weight."""
+            super().__init__(*args, **kwargs)
+            self._lambda_balance = lambda_balance
+
+    original = _RequiredPenaltyTreatmentLoss(
+        loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
+        n_outcome_true_cols=1,
+        n_outcome_pred_cols=2,
+        n_treatment_pred_cols=1,
+        lambda_balance=5.0,
+        reduction="sum_over_batch_size",
+    )
+    try:
+        original.penalty_free()
+        assert False, "expected TypeError: lambda_balance is required and not forwarded"
+    except TypeError:
+        pass
+
+
+def test_causal_loss_metric_gen_strips_embedded_treatment_loss_penalty():
+    """causal_loss_metric_gen must report the exact joint likelihood even when the passed-in
+    treatment_loss instance carries an embedded penalty term -- the metric used for
+    EarlyStopping/checkpoint selection/Optuna must never be a penalized proxy."""
+    n_outcome_pred_cols, n_treatment_pred_cols, n_outcome_true_cols = 2, 1, 1
+    weights = [[0.5, 0.5], [0.3, 0.7], [0.9, 0.1]]
+    y_pred = _make_y_pred(
+        outcome_blocks=[np.zeros((3, 2)), np.ones((3, 2))],
+        weights=weights,
+        treatment_blocks=[[[0.9, 0.7], [0.5, 0.5], [0.2, 0.6]]],
+    )
+    y_true = tf.constant([[5.0, 1.0], [3.0, 0.0], [8.0, 1.0]], dtype=tf.float32)
+
+    def _build(lambda_balance):
+        """Builds a matching (outcome_loss, treatment_loss) pair for a given penalty weight."""
+        outcome_loss = losses.OutcomeLoss(
+            loss=neglogliks.NegloglikNormal(reduction="none"),
+            treatment_loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
+            n_outcome_true_cols=n_outcome_true_cols,
+            n_outcome_pred_cols=n_outcome_pred_cols,
+            n_treatment_pred_cols=n_treatment_pred_cols,
+            reduction="sum_over_batch_size",
+        )
+        treatment_loss = _BalancePenalizedTreatmentLoss(
+            loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
+            n_outcome_true_cols=n_outcome_true_cols,
+            n_outcome_pred_cols=n_outcome_pred_cols,
+            n_treatment_pred_cols=n_treatment_pred_cols,
+            lambda_balance=lambda_balance,
+            reduction="sum_over_batch_size",
+        )
+        return outcome_loss, treatment_loss
+
+    penalized_outcome_loss, penalized_treatment_loss = _build(lambda_balance=1000.0)
+    clean_outcome_loss, clean_treatment_loss = _build(lambda_balance=0.0)
+
+    metric_fn = metrics.causal_loss_metric_gen(
+        outcome_loss=penalized_outcome_loss, treatment_loss=penalized_treatment_loss
+    )
+    metric_value = metric_fn(y_true, y_pred).numpy()
+
+    expected_clean = (
+        clean_outcome_loss(y_true, y_pred) + clean_treatment_loss(y_true, y_pred)
+    ).numpy()
+    expected_penalized = (
+        penalized_outcome_loss(y_true, y_pred) + penalized_treatment_loss(y_true, y_pred)
+    ).numpy()
+
+    np.testing.assert_allclose(metric_value, expected_clean, rtol=1e-5)
+    assert not np.isclose(metric_value, expected_penalized, rtol=1e-5)
+    # The original, live training-time loss must be unmodified.
+    assert penalized_treatment_loss._lambda_balance == 1000.0

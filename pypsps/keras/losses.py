@@ -115,6 +115,28 @@ class OutcomeLoss(tf.keras.losses.Loss):
         self._n_outcome_pred_cols = n_outcome_pred_cols
         self._n_treatment_pred_cols = n_treatment_pred_cols
 
+    def penalty_free(self) -> "OutcomeLoss":
+        """Returns a fresh instance of this exact class with no penalty terms applied.
+
+        Rebuilds `type(self)(...)` from only the arguments listed below -- never by copying
+        `self.__dict__` or scanning for attributes by naming convention. This is the explicit
+        contract for stripping penalties out of a metric like `causal_loss_metric_gen`: if a
+        subclass's `call()` ever adds a penalty (e.g. a within-state balance term), that
+        subclass MUST override this method to omit (or zero) that penalty's constructor
+        argument here. Forgetting to do so either raises (if the new argument is required,
+        since it's missing from this call) or silently keeps the penalty out (if it defaults
+        to "off"), but never lets an unrecognized penalty leak through.
+        """
+        return type(self)(
+            loss=self._loss,
+            treatment_loss=self._treatment_loss,
+            n_outcome_true_cols=self._n_outcome_true_cols,
+            n_outcome_pred_cols=self._n_outcome_pred_cols,
+            n_treatment_pred_cols=self._n_treatment_pred_cols,
+            reduction=self.reduction,
+            name=self.name,
+        )
+
     def call(self, y_true, y_pred):
         """Evaluates Causal Loss on (y_true, y_pred) for binary loss and Normal outcomes.
 
@@ -223,6 +245,23 @@ class TreatmentLoss(tf.keras.losses.Loss):
         self._n_outcome_true_cols = n_outcome_true_cols
         self._n_outcome_pred_cols = n_outcome_pred_cols
         self._n_treatment_pred_cols = n_treatment_pred_cols
+
+    def penalty_free(self) -> "TreatmentLoss":
+        """Returns a fresh instance of this exact class with no penalty terms applied.
+
+        See `OutcomeLoss.penalty_free` for the contract: rebuilds `type(self)(...)` from only
+        the arguments below, never by copying `self.__dict__` or scanning attribute names. A
+        subclass whose `call()` adds a penalty (e.g. a within-state balance term) MUST
+        override this method to omit or zero that penalty's constructor argument.
+        """
+        return type(self)(
+            loss=self._loss,
+            n_outcome_true_cols=self._n_outcome_true_cols,
+            n_outcome_pred_cols=self._n_outcome_pred_cols,
+            n_treatment_pred_cols=self._n_treatment_pred_cols,
+            reduction=self.reduction,
+            name=self.name,
+        )
 
     def call(self, y_true, y_pred):
         """Evaluates the marginal treatment (dose) loss -log p(a | x)."""

@@ -5,6 +5,27 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.1.1 - Aug 22, 2026
+
+### Fixed
+
+* `causal_loss_metric_gen` (`pypsps/keras/metrics.py`) reused the exact `outcome_loss`/
+  `treatment_loss` instances it was given, so any penalty term folded into either loss's own
+  `call()` (e.g. a within-state balance penalty) would leak into the metric used for
+  `EarlyStopping`/`ReduceLROnPlateau`/checkpoint selection -- silently turning "pure held-out
+  likelihood" into "likelihood plus whatever penalty this candidate happened to draw",
+  systematically rewarding weaker penalties regardless of fit quality. No such penalty is
+  wired into committed `OutcomeLoss`/`TreatmentLoss` yet, so this was a structural gap rather
+  than an active bug, flagged as a pending follow-up in
+  [dev-docs/20260820-bugfixes-v1.md item 5](dev-docs/20260820-bugfixes-v1.md). Fixed by adding
+  an explicit `penalty_free()` method to `OutcomeLoss`/`TreatmentLoss` that reconstructs the
+  loss from a hand-written list of its own non-penalty constructor arguments (not by scanning
+  attribute names for a naming convention); `causal_loss_metric_gen` now always calls it before
+  wrapping the losses in its internal `CausalLoss`. A future subclass that adds a penalty either
+  gets it correctly zeroed automatically (if it defaults to "off") or `penalty_free()` raises
+  until that subclass explicitly overrides it -- it can never leak through unnoticed. See
+  [dev-docs/20260822-bugfixes-v3.md](dev-docs/20260822-bugfixes-v3.md) for the full writeup.
+
 ## pypsps v0.1.0 - Aug 21, 2026
 
 Breaking: the propensity head's output shape changed (state-conditional instead of
