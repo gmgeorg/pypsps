@@ -7,7 +7,7 @@ import pytest
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-from ..keras import neglogliks
+from ..keras import losses, neglogliks
 
 tfd = tfp.distributions
 
@@ -383,3 +383,59 @@ def test_NegloglikWeibull_sum_over_batch_size():
         np.array([np.log(1.5), np.log(0.8)], dtype="float32"),
     )
     np.testing.assert_allclose(loss_value.numpy(), expected.mean(), atol=1e-4)
+
+
+@pytest.mark.parametrize(
+    "name,treatment_nll_loss,n_params,y_dim",
+    [
+        ("exponential", neglogliks.NegloglikExponential(reduction="none"), 1, 2),
+        ("exponential_scale", neglogliks.NegloglikExponentialScale(reduction="none"), 1, 2),
+        ("weibull", neglogliks.NegloglikWeibull(reduction="none"), 2, 2),
+        ("normal", neglogliks.NegloglikNormal(reduction="none"), 2, 1),
+    ],
+)
+def test_prob_state_given_treatment_features_survives_partial_batch_retrace(
+    name, treatment_nll_loss, n_params, y_dim
+):
+    """Regression test for the bare-squeeze shape-inference bug: model.fit() crashed with
+    `TypeError: unsupported operand type(s) for -: 'NoneType' and 'int'` inside
+    posterior_from_negloglik_per_state whenever Keras retraced train_step for a batch shaped
+    differently from the one used to first trace the graph -- e.g. the partial/remainder final
+    batch you get from n_samples=200, batch_size=32 (last batch has 8 rows). Reproduces without
+    any downstream model builder: a minimal Dense model routed through
+    prob_state_given_treatment_features is enough to trigger it in graph-mode model.fit().
+    """
+    n_states = 3
+    n_features = 5
+    n_samples = 200  # batch_size=32 -> last batch has 8 rows (partial/remainder)
+    batch_size = 32
+
+    np.random.seed(0)
+    x = np.random.randn(n_samples, n_features).astype("float32")
+    event_time = np.random.uniform(1.0, 10.0, size=(n_samples,)).astype("float32")
+    event_indicator = (np.random.uniform(size=(n_samples,)) > 0.5).astype("float32")
+    y = np.stack([event_time, event_indicator], axis=1) if y_dim == 2 else event_time[:, None]
+
+    inp = tf.keras.Input(shape=(n_features,))
+    raw = tf.keras.layers.Dense(units=n_states + n_states * n_params)(inp)
+
+    def custom_loss(y_true, y_pred):
+        weights = tf.nn.softmax(y_pred[:, :n_states], axis=1)
+        # softplus keeps rate/scale params positive -- avoids NaNs from an untrained
+        # random Dense layer, unrelated to the shape bug under test.
+        treatment_pred = tf.nn.softplus(y_pred[:, n_states:]) + 1e-3
+        gamma = losses.prob_state_given_treatment_features(
+            weights=weights,
+            treatment_true=y_true,
+            treatment_pred=treatment_pred,
+            treatment_nll_loss=treatment_nll_loss,
+        )
+        return -tf.reduce_sum(tf.math.log(gamma + 1e-6), axis=1)
+
+    model = tf.keras.Model(inputs=inp, outputs=raw)
+    model.compile(optimizer="adam", loss=custom_loss)
+
+    # Prior to the fix, this raises TypeError: unsupported operand type(s) for -:
+    # 'NoneType' and 'int' when Keras retraces train_step for the 8-row final batch.
+    history = model.fit(x=x, y=y, batch_size=batch_size, epochs=2, verbose=0)
+    assert np.isfinite(history.history["loss"][-1])
