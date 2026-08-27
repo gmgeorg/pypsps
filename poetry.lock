@@ -1877,7 +1877,7 @@ diagrams = ["jinja2", "railroad-diagrams"]
 
 [[package]]
 name = "pypress"
-version = "0.2.3"
+version = "0.2.4"
 description = "Predictive State Smoothing (PRESS) in Python (keras)"
 optional = false
 python-versions = ">=3.12"
@@ -1893,8 +1893,8 @@ tensorflow = ">=2.11.0,<3.0.0"
 [package.source]
 type = "git"
 url = "https://github.com/gmgeorg/pypress.git"
-reference = "v0.2.3"
-resolved_reference = "22cc18f00f26382b65a16e4d6b5e630effadf27e"
+reference = "v0.2.4"
+resolved_reference = "9db5ab7a43367f680d4e29e831ba9575579c75f9"
 
 [[package]]
 name = "pytest"
@@ -2736,4 +2736,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0.0"
-content-hash = "ba17683ba2358d73b33681d6a7fe224cb586f62a4ef8c66ed5a94fe60f31f2a7"
+content-hash = "158fbb16fe388d5e02f32ea3a13f1a662bfb96f92193c5f8eb3abd83343abdf3"
