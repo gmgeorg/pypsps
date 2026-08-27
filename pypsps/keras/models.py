@@ -18,7 +18,7 @@ _EPS = 1e-3
 def _build_binary_exponential_causal_loss(
     n_states: int,
     alpha: float,
-    df_penalty_l1: float,
+    df_penalty_l2: float,
     outcome_loss_weight: float,
 ) -> losses.CausalLoss:
     """Builds an example of binary treatment & continuous outcome causal loss."""
@@ -46,7 +46,7 @@ def _build_binary_exponential_causal_loss(
         treatment_loss=psps_treat_loss,
         alpha=alpha,
         outcome_loss_weight=outcome_loss_weight,
-        predictive_states_regularizer=pypress.keras.regularizers.Uniform(l2=df_penalty_l1),
+        predictive_states_regularizer=pypress.keras.regularizers.Uniform(l2=df_penalty_l2),
         reduction="sum_over_batch_size",
     )
     return psps_causal_loss
@@ -55,7 +55,7 @@ def _build_binary_exponential_causal_loss(
 def _build_binary_normal_causal_loss(
     n_states: int,
     alpha: float,
-    df_penalty_l1: float,
+    df_penalty_l2: float,
 ) -> losses.CausalLoss:
     """Builds an example of binary treatment & Normal outcome causal loss."""
     treatment_nll = tf.keras.losses.BinaryCrossentropy(reduction="none")
@@ -80,7 +80,7 @@ def _build_binary_normal_causal_loss(
         alpha=alpha,
         outcome_loss_weight=1.0,
         predictive_states_regularizer=pypress.keras.regularizers.DegreesOfFreedom(
-            l1=df_penalty_l1,
+            l2=df_penalty_l2,
             target=max(1, np.log(0.5 * n_states)),
         ),
         reduction="sum_over_batch_size",
@@ -93,7 +93,7 @@ def build_toy_model(
     n_features: int,
     compile: bool = True,
     alpha: float = 1.0,
-    df_penalty_l1: float = 1.0,
+    df_penalty_l2: float = 1.0,
     learning_rate: float = 0.01,
 ) -> tf.keras.Model:
     """Builds a pypsps toy model for binary treatment & continuous outcome.
@@ -107,7 +107,7 @@ def build_toy_model(
       n_features: number of (numeric) features to use as input.
       compile: if True, compiles pypsps model with the appropriate pypsps causal loss functions.
       alpha: propensity score penalty (by default alpha = 1., which corresponds to equal weight)
-      df_penalty_l1: l1 parameter for the DF regularization
+      df_penalty_l2: l2 parameter for the DF regularization
       learning_rate: learning rate of the optimizer.
 
     Returns:
@@ -186,7 +186,7 @@ def build_toy_model(
         psps_causal_loss = _build_binary_normal_causal_loss(
             n_states=n_states,
             alpha=alpha,
-            df_penalty_l1=df_penalty_l1,
+            df_penalty_l2=df_penalty_l2,
         )
         model.compile(
             loss=psps_causal_loss,
@@ -220,7 +220,7 @@ def build_model_binary_normal(
     scale_layer: Tuple[int, str] = None,
     compile: bool = True,
     alpha: float = 1.0,
-    df_penalty_l1: float = 1.0,
+    df_penalty_l2: float = 1.0,
     learning_rate: float = 0.01,
     dropout_rate: float = 0.2,
 ) -> tf.keras.Model:
@@ -235,7 +235,7 @@ def build_model_binary_normal(
       n_features: number of (numeric) features to use as input.
       compile: if True, compiles pypsps model with the appropriate pypsps causal loss functions.
       alpha: propensity score penalty (by default alpha = 1., which corresponds to equal weight)
-      df_penalty_l1: l1 parameter for the DF regularization
+      df_penalty_l2: l2 parameter for the DF regularization
       learning_rate: learning rate of the optimizer.
 
     Returns:
@@ -343,7 +343,7 @@ def build_model_binary_normal(
         psps_causal_loss = _build_binary_normal_causal_loss(
             n_states=n_states,
             alpha=alpha,
-            df_penalty_l1=df_penalty_l1,
+            df_penalty_l2=df_penalty_l2,
         )
         model.compile(
             loss=psps_causal_loss,
@@ -377,7 +377,7 @@ def build_model_binary_exponential(
     compile: bool = True,
     alpha: float = 1.0,
     outcome_loss_weight: float = 1.0,
-    df_penalty_l1: float = 1.0,
+    df_penalty_l2: float = 1.0,
     learning_rate: float = 0.01,
     dropout_rate: float = 0.2,
 ) -> tf.keras.Model:
@@ -392,7 +392,7 @@ def build_model_binary_exponential(
       n_features: number of (numeric) features to use as input.
       compile: if True, compiles pypsps model with the appropriate pypsps causal loss functions.
       alpha: propensity score penalty (by default alpha = 1., which corresponds to equal weight)
-      df_penalty_l1: l1 parameter for the DF regularization
+      df_penalty_l2: l2 parameter for the DF regularization
       learning_rate: learning rate of the optimizer.
 
     Returns:
@@ -482,7 +482,7 @@ def build_model_binary_exponential(
         psps_causal_loss = _build_binary_exponential_causal_loss(
             n_states=n_states,
             alpha=alpha,
-            df_penalty_l1=df_penalty_l1,
+            df_penalty_l2=df_penalty_l2,
             outcome_loss_weight=outcome_loss_weight,
         )
         model.compile(

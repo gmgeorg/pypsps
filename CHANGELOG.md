@@ -5,6 +5,24 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.1.6 - Aug 27, 2026
+
+### Fixed
+
+* Bumped the `pypress` dependency to
+  [v0.2.4](https://github.com/gmgeorg/pypress/releases/tag/v0.2.4), which fixes
+  `TargetEntropy`/`Uniform` (`pypress.keras.regularizers`) not being scale-invariant in `K`
+  (the number of predictive states): the squared deviation from the target entropy had a
+  dynamic range that grew as `log(K)^2`, so a fixed `l2` implied a different effective
+  regularization strength depending on `K`. `pypress` v0.2.4 normalizes the deviation by
+  `log(K)` before squaring, bounding the penalty in `[0, l2]` regardless of `K`.
+* `pypress` v0.2.4 also changed `DegreesOfFreedom` from an L1 to a squared L2 penalty,
+  renaming its `l1`/`dof_l1` constructor params to `l2`/`dof_l2`. Updated all `pypsps` call
+  sites accordingly, including renaming the public `df_penalty_l1` parameter (in
+  `pypsps/keras/models.py`'s `build_toy_model`, `build_model_binary_normal`,
+  `build_model_binary_exponential`, etc.) to `df_penalty_l2` to match. This is a breaking
+  rename for any caller passing `df_penalty_l1` by keyword.
+
 ## pypsps v0.1.5 - Aug 23, 2026
 
 ### Fixed
