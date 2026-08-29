@@ -98,7 +98,7 @@ class AlphaScheduleCallback(tf.keras.callbacks.Callback):
                       Larger values = steeper transition
             clamp_threshold: Distance from alpha_end at which to clamp to alpha_end.
                            When |alpha - alpha_end| < clamp_threshold, alpha is set to alpha_end.
-                           Default: None (auto-computed as 25% of |alpha_start - alpha_end|)
+                           Default: None (auto-computed as 10% of |alpha_start - alpha_end|)
             verbose: Whether to print alpha updates (default: True)
 
         Raises:
@@ -124,9 +124,9 @@ class AlphaScheduleCallback(tf.keras.callbacks.Callback):
         self._is_decay = alpha_start > alpha_end
         self._alpha_range = abs(alpha_start - alpha_end)
 
-        # Auto-compute clamp threshold if not provided (25% of range, or 0 if constant)
+        # Auto-compute clamp threshold if not provided (10% of range, or 0 if constant)
         if clamp_threshold is None:
-            self.clamp_threshold = 0.25 * self._alpha_range if self._alpha_range > 0 else 0.0
+            self.clamp_threshold = 0.1 * self._alpha_range if self._alpha_range > 0 else 0.0
         else:
             if clamp_threshold < 0:
                 raise ValueError(f"clamp_threshold must be non-negative, got {clamp_threshold}")

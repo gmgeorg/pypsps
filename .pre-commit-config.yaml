@@ -53,7 +53,7 @@ repos:
   -   repo: local
       hooks:
       -   id: pytest-check
-          stages: [push]
+          stages: [pre-push]
           types: [python]
           name: pytest-check
           entry: python -m pytest -v tests/
