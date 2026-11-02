@@ -3,6 +3,7 @@
 import random
 
 import numpy as np
+import pytest
 import tensorflow as tf
 
 from .. import datasets, utils
@@ -88,6 +89,13 @@ def test_get_column_layout_normal_outcome():
     assert layout == utils.ColumnLayout(
         n_outcome_pred_cols=2, n_treatment_pred_cols=1, n_outcome_true_cols=1
     )
+
+
+def test_get_column_layout_uncompiled_model_raises():
+    """get_column_layout gives a clear RuntimeError (not AttributeError) on an uncompiled model"""
+    model = models.build_toy_model(n_states=3, n_features=4, compile=False)
+    with pytest.raises(RuntimeError, match="[Cc]ompile"):
+        utils.get_column_layout(model)
 
 
 def test_get_column_layout_exponential_outcome():

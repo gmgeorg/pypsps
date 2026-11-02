@@ -5,6 +5,14 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.1.8 - Nov 2, 2026
+
+### Fixed
+
+* `pypsps.utils.get_column_layout` now raises a clear `RuntimeError` telling the caller to
+  compile the model when `model.loss` is not a `CausalLoss`, instead of an opaque
+  `AttributeError` on `model.loss._outcome_loss`.
+
 ## pypsps v0.1.6 - Aug 27, 2026
 
 ### Fixed
