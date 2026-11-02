@@ -169,7 +169,19 @@ def get_column_layout(model: tf.keras.Model) -> ColumnLayout:
 
     Requires `model.loss` to be a `pypsps.keras.losses.CausalLoss` instance, i.e. the model
     must already be compiled via one of this package's `build_*` functions (or equivalent).
+
+    Raises:
+      RuntimeError: if `model.loss` is not a `CausalLoss` (e.g. the model is uncompiled).
     """
+    # Imported lazily: `pypsps.keras.losses` imports this module.
+    from .keras import losses
+
+    if not isinstance(getattr(model, "loss", None), losses.CausalLoss):
+        raise RuntimeError(
+            "Model must be compiled with a `pypsps.keras.losses.CausalLoss` to read its column "
+            f"layout, but model.loss is {type(getattr(model, 'loss', None)).__name__}. "
+            "Compile the model first (e.g. build with `compile=True`)."
+        )
     outcome_loss = model.loss._outcome_loss
     treatment_loss = model.loss._treatment_loss
     return ColumnLayout(
