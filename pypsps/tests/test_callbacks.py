@@ -196,3 +196,188 @@ def test_alpha_schedule_assigns_the_variable_in_place():
     assert model.loss._alpha is alpha_var, "callback rebound the attribute instead of assigning"
     assert isinstance(model.loss._alpha, tf.Variable)
     assert float(model.loss._alpha.numpy()) != 10.0
+
+
+class _WeightsModel:
+    """Stand-in model whose 'weights' are the epoch they were saved at."""
+
+    def __init__(self):
+        """Start before epoch 0 with alpha 1."""
+        self.epoch = -1
+        self.restored = None
+        self.stop_training = False
+        self.loss = _FakeLoss(tf.Variable(1.0))
+
+    def get_weights(self):
+        """Return the current epoch as the weights."""
+        return [np.array(self.epoch)]
+
+    def set_weights(self, w):
+        """Record which epoch was restored."""
+        self.restored = int(w[0])
+
+
+def _drive(cb, series):
+    """Feed a monitored series to a callback as epoch logs; return the stand-in model."""
+    m = _WeightsModel()
+    cb.set_model(m)
+    cb.on_train_begin()
+    for e, v in enumerate(series):
+        m.epoch = e
+        cb.on_epoch_end(e, {"val_m": v})
+        if m.stop_training:
+            break
+    cb.on_train_end()
+    return m
+
+
+def _eligible(series, start=6, patience=50, min_delta=0.0):
+    """Drive an EligibleBestCheckpoint over ``series``."""
+    cb = callbacks.EligibleBestCheckpoint(
+        "val_m", patience=patience, start_from_epoch=start, min_delta=min_delta
+    )
+    return cb, _drive(cb, series)
+
+
+def test_eligible_checkpoint_ignores_epochs_before_start():
+    """Better values before start_from_epoch are never selected."""
+    cb, m = _eligible([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 5.0, 4.0, 3.5, 3.9])
+    assert (cb.selected_epoch, cb.selected_value, m.restored) == (8, 3.5, 8)
+    assert [t["eligible"] for t in cb.trace] == [False] * 6 + [True] * 4
+    assert all(t["alpha"] == 1.0 for t in cb.trace)
+
+
+def test_eligible_checkpoint_skips_nan_and_inf_and_ties_go_to_earliest():
+    """A NaN at the first eligible epoch is not restored; ties keep the earlier epoch."""
+    cb, m = _eligible([1, 1, 1, 1, 1, 1, float("nan"), 3.0, 2.0, 2.0, float("inf")])
+    assert (cb.selected_epoch, m.restored) == (8, 8)
+
+
+def test_eligible_checkpoint_min_delta_requires_a_real_improvement():
+    """An improvement smaller than min_delta does not move the selection."""
+    cb, _ = _eligible([9] * 6 + [3.0, 2.95, 2.5], min_delta=0.1)
+    assert cb.selected_epoch == 8
+
+
+def test_eligible_checkpoint_patience_counts_from_the_first_eligible_epoch():
+    """Patience runs over eligible epochs only, and training stops when it runs out."""
+    cb, m = _eligible([9] * 6 + [3.0, 4.0, 4.0, 4.0, 1.0], patience=3)
+    assert cb.stopped_epoch == 9 and m.restored == 6
+
+
+def test_eligible_checkpoint_raises_when_no_epoch_is_eligible():
+    """No finite value at or after start_from_epoch raises instead of keeping the last weights."""
+    with pytest.raises(callbacks.NoEligibleCheckpointError):
+        _eligible([1.0] * 6 + [float("nan")] * 3)
+
+
+def test_eligible_checkpoint_raises_on_missing_monitor():
+    """A monitor that is not in the logs raises KeyError."""
+    cb = callbacks.EligibleBestCheckpoint("val_missing", patience=2)
+    with pytest.raises(KeyError, match="val_missing"):
+        _drive(cb, [1.0])
+
+
+def test_eligible_checkpoint_validates_arguments():
+    """patience < 1 and a negative start_from_epoch raise ValueError."""
+    with pytest.raises(ValueError, match="patience"):
+        callbacks.EligibleBestCheckpoint("val_m", patience=0)
+    with pytest.raises(ValueError, match="start_from_epoch"):
+        callbacks.EligibleBestCheckpoint("val_m", patience=1, start_from_epoch=-1)
+
+
+def test_lr_plateau_is_inactive_before_start_from_epoch():
+    """No reduction during warmup even on a worsening monitor; the LR is still logged."""
+
+    class _Opt:
+        """Optimizer stand-in."""
+
+        def __init__(self):
+            """Hold a learning-rate variable."""
+            self.learning_rate = tf.Variable(0.01)
+
+    class _M:
+        """Model stand-in."""
+
+        stop_training = False
+
+        def __init__(self):
+            """Hold the optimizer."""
+            self.optimizer = _Opt()
+
+    model = _M()
+    cb = callbacks.WarmupReduceLROnPlateau(
+        monitor="val_m", factor=0.2, patience=1, min_lr=1e-6, mode="min", start_from_epoch=6
+    )
+    cb.set_model(model)
+    cb.on_train_begin()
+    for e in range(6):
+        logs = {"val_m": float(e)}
+        cb.on_epoch_end(e, logs)
+        assert logs["learning_rate"] == pytest.approx(0.01)
+    assert float(np.asarray(model.optimizer.learning_rate)) == pytest.approx(0.01)
+    for e, v in zip(range(6, 9), [5.0, 6.0, 7.0]):
+        cb.on_epoch_end(e, {"val_m": v})
+    assert float(np.asarray(model.optimizer.learning_rate)) < 0.01
+
+
+def test_gaussian_schedule_assigns_the_half_gaussian_values():
+    """The callback assigns alpha_schedule.AlphaSchedule.alpha(e) to the loss each epoch."""
+    cb = callbacks.GaussianAlphaSchedule(alpha_start=10.0, alpha_end=1.0, verbose=False)
+    cb.set_model(_FakeModel(tf.Variable(10.0)))
+    cb.on_train_begin()
+    for epoch in range(8):
+        cb.on_epoch_begin(epoch)
+    want = [cb.schedule.alpha(e) for e in range(8)]
+    assert cb.alpha_history == want
+    assert float(cb.model.loss._alpha.numpy()) == pytest.approx(want[-1])
+    assert cb.warmup_epochs == 6
+    assert isinstance(cb, callbacks.AlphaScheduleCallback)
+
+
+def test_gaussian_schedule_refuses_a_fit_that_does_not_start_at_zero():
+    """Starting at epoch 3 raises MidFitResumeError."""
+    cb = callbacks.GaussianAlphaSchedule(verbose=False)
+    cb.set_model(_FakeModel(tf.Variable(10.0)))
+    cb.on_train_begin()
+    with pytest.raises(callbacks.MidFitResumeError):
+        cb.on_epoch_begin(3)
+
+
+def test_gaussian_schedule_rejects_invalid_parameters():
+    """Validation comes from AlphaSchedule."""
+    with pytest.raises(ValueError, match="decay_const"):
+        callbacks.GaussianAlphaSchedule(decay_const=0.0)
+
+
+def test_gaussian_schedule_and_eligible_checkpoint_in_a_fit():
+    """Schedule, checkpoint and LR callbacks run together in model.fit."""
+    np.random.seed(11)
+    ks_data = datasets.KangSchafer(true_ate=10).sample(n_samples=200)
+    inputs, outputs = ks_data.to_keras_inputs_outputs()
+
+    tf.random.set_seed(11)
+    model = models.build_toy_model(
+        n_states=3, n_features=ks_data.n_features, compile=True, alpha=10.0
+    )
+    schedule = callbacks.GaussianAlphaSchedule(alpha_start=10.0, decay_const=0.5, verbose=False)
+    checkpoint = callbacks.EligibleBestCheckpoint(
+        "val_loss", patience=20, start_from_epoch=schedule.warmup_epochs
+    )
+    plateau = callbacks.WarmupReduceLROnPlateau(
+        monitor="val_loss", patience=2, start_from_epoch=schedule.warmup_epochs
+    )
+    model.fit(
+        inputs,
+        outputs,
+        epochs=8,
+        batch_size=64,
+        validation_split=0.25,
+        verbose=0,
+        callbacks=[schedule, checkpoint, plateau],
+    )
+
+    assert schedule.alpha_history == [schedule.schedule.alpha(e) for e in range(8)]
+    assert float(model.loss._alpha.numpy()) == pytest.approx(schedule.alpha_history[-1])
+    assert checkpoint.selected_epoch >= schedule.warmup_epochs == 4
+    assert [t["alpha"] for t in checkpoint.trace] == pytest.approx(schedule.alpha_history)

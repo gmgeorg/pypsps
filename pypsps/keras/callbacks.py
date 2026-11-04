@@ -1,7 +1,11 @@
 """Module for pypsps training callbacks."""
 
+import math
+
 import numpy as np
 import tensorflow as tf
+
+from pypsps.keras import alpha_schedule
 
 
 class VerboseNEpochs(tf.keras.callbacks.Callback):
@@ -266,6 +270,181 @@ class AlphaScheduleCallback(tf.keras.callbacks.Callback):
     def is_increase(self) -> bool:
         """Returns True if this is an increase schedule (alpha_start < alpha_end)."""
         return not self._is_decay and not self._is_constant
+
+
+class MidFitResumeError(RuntimeError):
+    """A scheduled fit was started at an epoch other than 0."""
+
+
+class NoEligibleCheckpointError(RuntimeError):
+    """No epoch at or after ``start_from_epoch`` produced a finite monitored value."""
+
+
+class GaussianAlphaSchedule(AlphaScheduleCallback):
+    """`AlphaScheduleCallback` with a half-Gaussian ramp-down (see `alpha_schedule`).
+
+    Raises `MidFitResumeError` if training does not start at epoch 0.
+    """
+
+    def __init__(
+        self,
+        alpha_start: float = 10.0,
+        alpha_end: float = 1.0,
+        decay_const: float = alpha_schedule.DEFAULT_DECAY_CONST,
+        epsilon: float = alpha_schedule.DEFAULT_WARMUP_EPSILON,
+        verbose: bool = True,
+    ):
+        """Validate the schedule; ``warmup_epochs`` is its first settled epoch."""
+        self.schedule = alpha_schedule.AlphaSchedule(
+            alpha_start=alpha_start, alpha_end=alpha_end, decay_const=decay_const, epsilon=epsilon
+        )
+        # half_life_epoch only labels plot_schedule: exp(-c * e**2) = 1/2 at sqrt(ln 2 / c).
+        super().__init__(
+            alpha_start=float(alpha_start),
+            alpha_end=float(alpha_end),
+            half_life_epoch=round(math.sqrt(math.log(2.0) / float(decay_const))),
+            clamp_threshold=0.0,
+            verbose=verbose,
+        )
+        self.decay_const = float(decay_const)
+        self._started = False
+
+    @property
+    def warmup_epochs(self) -> int:
+        """First zero-based epoch at which alpha has settled."""
+        return self.schedule.warmup_epochs
+
+    def _compute_alpha(self, epoch):
+        """Alpha for zero-based ``epoch``."""
+        return self.schedule.alpha(int(epoch))
+
+    def on_train_begin(self, logs=None):
+        """Reset the alpha history."""
+        self.alpha_history = []
+        self._started = False
+
+    def on_epoch_begin(self, epoch, logs=None):
+        """Refuse a fit that does not start at epoch 0, then assign the epoch's alpha."""
+        if not self._started:
+            self._started = True
+            if int(epoch) != 0:
+                raise MidFitResumeError(
+                    f"training starts at epoch {epoch}, not 0; the schedule would skip its "
+                    "warmup. Restart the fit from epoch 0."
+                )
+        super().on_epoch_begin(epoch, logs)
+
+
+def _live_alpha(model) -> float | None:
+    """The alpha the model's loss holds now, or None if it has none."""
+    ref = getattr(getattr(model, "loss", None), "_alpha", None)
+    if ref is None:
+        return None
+    return float(ref.numpy()) if hasattr(ref, "numpy") else float(ref)
+
+
+class EligibleBestCheckpoint(tf.keras.callbacks.Callback):
+    """Early stopping that restores the best epoch at or after ``start_from_epoch``.
+
+    An epoch is eligible if it is at or after ``start_from_epoch`` and its monitored value is
+    finite. Ties go to the earliest epoch. Raises `NoEligibleCheckpointError` at the end of
+    training if no epoch was eligible. ``trace`` records each epoch; ``selected_epoch`` and
+    ``selected_value`` are what was restored.
+    """
+
+    def __init__(
+        self,
+        monitor: str,
+        patience: int,
+        start_from_epoch: int = 0,
+        min_delta: float = 0.0,
+        verbose: int = 0,
+    ):
+        """Minimise ``monitor``; stop after ``patience`` eligible epochs without improvement."""
+        super().__init__()
+        if patience < 1:
+            raise ValueError(f"patience must be >= 1, got {patience}")
+        if start_from_epoch < 0:
+            raise ValueError(f"start_from_epoch must be >= 0, got {start_from_epoch}")
+        self.monitor = monitor
+        self.patience = int(patience)
+        self.start_from_epoch = int(start_from_epoch)
+        self.min_delta = abs(float(min_delta))
+        self.verbose = verbose
+        self._reset()
+
+    def _reset(self):
+        """Clear all per-fit state."""
+        self.trace: list[dict] = []
+        self.wait = 0
+        self.best: float | None = None
+        self.best_epoch: int | None = None
+        self.best_weights = None
+        self.stopped_epoch = 0
+        self.selected_epoch: int | None = None
+        self.selected_value: float | None = None
+
+    def on_train_begin(self, logs=None):
+        """Reset the per-fit state."""
+        self._reset()
+
+    def on_epoch_end(self, epoch, logs=None):
+        """Record the epoch and update the best eligible epoch."""
+        logs = logs or {}
+        if self.monitor not in logs:
+            raise KeyError(f"monitor {self.monitor!r} is not in the epoch logs: {sorted(logs)}")
+        current = float(logs[self.monitor])
+        eligible = epoch >= self.start_from_epoch and math.isfinite(current)
+        self.trace.append(
+            {
+                "epoch": int(epoch),
+                "monitored": current,
+                "eligible": bool(eligible),
+                "alpha": _live_alpha(self.model),
+            }
+        )
+        if epoch < self.start_from_epoch:
+            return
+        if eligible and (self.best is None or current < self.best - self.min_delta):
+            self.best = current
+            self.best_epoch = int(epoch)
+            self.best_weights = self.model.get_weights()
+            self.wait = 0
+            return
+        self.wait += 1
+        if self.wait >= self.patience:
+            self.stopped_epoch = int(epoch)
+            self.model.stop_training = True
+
+    def on_train_end(self, logs=None):
+        """Restore the best eligible weights, or raise if no epoch was eligible."""
+        if self.best_weights is None:
+            raise NoEligibleCheckpointError(
+                f"no epoch >= {self.start_from_epoch} produced a finite {self.monitor!r}; "
+                f"monitored values: {[t['monitored'] for t in self.trace]}"
+            )
+        self.model.set_weights(self.best_weights)
+        self.selected_epoch = self.best_epoch
+        self.selected_value = self.best
+        if self.verbose:
+            print(f"\nRestored epoch {self.selected_epoch} ({self.monitor}={self.best:.4f})")
+
+
+class WarmupReduceLROnPlateau(tf.keras.callbacks.ReduceLROnPlateau):
+    """`ReduceLROnPlateau` that does nothing before ``start_from_epoch``."""
+
+    def __init__(self, *args, start_from_epoch: int = 0, **kwargs):
+        """``start_from_epoch`` is the first epoch at which the plateau check runs."""
+        super().__init__(*args, **kwargs)
+        self.start_from_epoch = int(start_from_epoch)
+
+    def on_epoch_end(self, epoch, logs=None):
+        """Skip the plateau check before ``start_from_epoch``; still log the learning rate."""
+        if epoch < self.start_from_epoch:
+            if logs is not None:
+                logs["learning_rate"] = float(np.asarray(self.model.optimizer.learning_rate))
+            return
+        super().on_epoch_end(epoch, logs)
 
 
 def get_default_callbacks(
