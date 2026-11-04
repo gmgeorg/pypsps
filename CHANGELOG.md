@@ -5,6 +5,71 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.3.0 - Nov 4, 2026
+
+Breaking: pypsps requires Keras 3 (`tensorflow>=2.16`). Keras 2 (`TF_USE_LEGACY_KERAS=1`)
+is no longer supported.
+
+Breaking: the metric generators (`causal_loss_metric_gen`, `outcome_nll_metric_gen`,
+`predictive_state_df_gen`, `uniform_entropy_gen`) return Keras metric objects instead of
+functions. Inside `model.compile` their names are unchanged.
+
+Value change: `causal_loss_metric` of the continuous builders now uses alpha = 1
+(`outcome_loss_weight` × outcome NLL + treatment NLL, no penalties). It used to follow the
+scheduled alpha. Their `outcome_loss_weight` applies as before. The toy and binary
+builders' values don't change.
+
+### Added
+
+* A model compiled by any `build_*` function now reloads with
+  `tf.keras.models.load_model(path)`, including its loss, metrics and current alpha, and
+  `pypsps.inference` works on the reloaded model. See "Saving and Loading" in
+  docs/model_building.md.
+* `import pypsps.keras` registers every pypsps layer, loss and metric, and the pypress
+  layers and regularizers the builders use, with Keras.
+* `metrics.CausalLossMetric(outcome_loss, treatment_loss, outcome_loss_weight=1.0)`:
+  `outcome_loss_weight` × outcome NLL + 1 × treatment NLL, without the predictive-state
+  regularizer or any embedded penalty, at alpha = 1 whatever alpha the training loss uses.
+  Values are comparable across epochs and alpha schedules. `outcome_loss_weight=0` is
+  allowed. Every builder compiles it as `causal_loss_metric`, with the training loss's
+  `outcome_loss_weight`.
+* `CausalLoss.alpha`: the alpha variable. `loss.alpha = x` assigns in place, so alpha
+  schedules and every object that reads `loss.alpha` see the new value.
+* `get_config`/`from_config` on `OutcomeLoss`, `TreatmentLoss` and `CausalLoss`. The config
+  stores the current alpha.
+
+### Changed
+
+* Dependencies: `tensorflow>=2.16`; `tf-keras` removed; `tensorflow_probability` is no
+  longer a runtime dependency. pypsps doesn't import it. Install it yourself to pass a
+  `tfp.distributions` constructor to `neglogliks.NegloglikLoss`.
+* `import pypsps.keras` no longer imports TensorFlow Probability, which saves about 1 s
+  of import time.
+* The metric generators return Keras metric objects (`CausalLossMetric` or
+  `tf.keras.metrics.MeanMetricWrapper`). Calling one directly now returns a running mean; use
+  `reset_state()` between calls.
+* `AlphaScheduleCallback` (and `GaussianAlphaSchedule`) require the model's loss to be a
+  `CausalLoss`.
+* `penalty_free()` rebuilds the loss from its base class's config; the constructor arguments
+  are listed once.
+
+### Deprecated
+
+* `CausalLoss._alpha`: use `CausalLoss.alpha`. It warns with `FutureWarning` and is removed
+  in v0.4.0.
+* The `alpha` argument of `causal_loss_metric_gen`. It warns with `FutureWarning`, is
+  ignored, and is removed in v0.5.0.
+
+### Removed
+
+* `pypsps.keras.metrics._penalty_free_copy` (private pass-through to `penalty_free()`).
+
+### Fixed
+
+* `load_model` on a compiled pypsps model raised `TypeError`.
+* `AlphaScheduleCallback` silently did nothing for a loss whose alpha was a plain float; that
+  fallback is removed.
+
 ## pypsps v0.2.2 - Nov 4, 2026
 
 Breaking (logged metric keys): four metric classes log under new default names, and the

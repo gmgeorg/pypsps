@@ -91,8 +91,11 @@ Metrics built from the loss (`causal_loss_metric_gen`, `outcome_nll_metric_gen`)
 same likelihood. See the
 [Training Guide](training_guide.md#4-interventional-and-observational-outcome-likelihood).
 
-To make `causal_loss_metric_gen` follow an alpha schedule, pass it the training loss's
-variable, `alpha=causal_loss._alpha`. A float alpha stays fixed.
+`causal_loss_metric` (`metrics.CausalLossMetric`, or `causal_loss_metric_gen`) is
+`outcome_loss_weight` × outcome NLL + 1 × treatment NLL: alpha is fixed at 1 and no
+penalties are included, so it doesn't follow the alpha schedule. The builders pass it the
+training loss's `outcome_loss_weight`. The training loss's alpha is `causal_loss.alpha`, a
+`tf.Variable`; `causal_loss.alpha = x` assigns it.
 
 ## Continuous Treatment, Time-to-Event Outcome
 
@@ -123,3 +126,30 @@ time unit. With `max_time`, the builder raises if
 Weibull negative log-likelihood overflows float32 (near 88.7). See the
 [Training Guide](training_guide.md#5-time-to-event-parameter-bounds) for choosing the
 bounds.
+
+## Saving and Loading
+
+A model compiled by any `build_*` function saves and reloads with its loss, metrics and
+current alpha:
+
+```python
+import pypsps.keras  # registers the pypsps (and pypress) classes with Keras
+import tensorflow as tf
+
+model.save("model.keras")
+model = tf.keras.models.load_model("model.keras")
+```
+
+* Import `pypsps.keras` before `load_model`, or Keras raises `Could not locate class`.
+  A bare `import pypsps` is not enough.
+* The training loss reloads with the alpha it had when saved, so a model saved in the
+  middle of an alpha schedule keeps that alpha. `causal_loss_metric` has no alpha.
+* A model loaded with `compile=False` can `predict`, but `pypsps.inference` and
+  `utils.get_column_layout` need the compiled loss: load with `compile=True` (the default).
+* A custom elementwise NLL must be registered with
+  `tf.keras.utils.register_keras_serializable` to load. `neglogliks.NegloglikLoss`, which
+  holds a distribution constructor, isn't serializable.
+* Models saved before v0.3.0 don't load with `compile=True`: their saved loss config is
+  empty. Load them with `load_model(path, compile=False)`, rebuild the same architecture
+  with the matching `build_*(..., compile=True)`, and copy the weights with
+  `built.set_weights(loaded.get_weights())`. Saving `built` produces a file that reloads.
