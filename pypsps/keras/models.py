@@ -200,7 +200,10 @@ def build_toy_model(
                     n_outcome_pred_cols=2, n_treatment_pred_cols=1
                 ),
                 metrics.PropensityScoreAUC(
-                    n_outcome_pred_cols=2, n_treatment_pred_cols=1, curve="PR"
+                    n_outcome_pred_cols=2,
+                    n_treatment_pred_cols=1,
+                    curve="PR",
+                    name="propensity_score_aupr",
                 ),
                 metrics.OutcomeMeanSquaredError(
                     n_outcome_pred_cols=2, n_treatment_pred_cols=1, n_outcome_true_cols=1
@@ -361,7 +364,10 @@ def build_model_binary_normal(
                     n_outcome_pred_cols=2, n_treatment_pred_cols=1
                 ),
                 metrics.PropensityScoreAUC(
-                    n_outcome_pred_cols=2, n_treatment_pred_cols=1, curve="PR"
+                    n_outcome_pred_cols=2,
+                    n_treatment_pred_cols=1,
+                    curve="PR",
+                    name="propensity_score_aupr",
                 ),
                 metrics.OutcomeMeanSquaredError(
                     n_outcome_pred_cols=2, n_treatment_pred_cols=1, n_outcome_true_cols=1
@@ -507,6 +513,7 @@ def build_model_binary_exponential(
                 ),
                 metrics.PropensityScoreAUC(
                     curve="PR",
+                    name="propensity_score_aupr",
                     n_treatment_pred_cols=_n_treatment_pred_cols,
                     n_outcome_pred_cols=_n_outcome_pred_cols,
                 ),

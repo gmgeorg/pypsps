@@ -5,6 +5,31 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.2.2 - Nov 4, 2026
+
+Breaking (logged metric keys): four metric classes log under new default names, and the
+binary builders' propensity AUC is logged as `propensity_score_aupr`.
+
+### Fixed
+
+* `PropensityScoreAUC(curve="PR")` computed the ROC AUC: every metric class in
+  `pypsps.keras.metrics` ignored `name` and other keyword arguments. The binary builders
+  (`build_toy_model`, `build_model_binary_normal`, `build_model_binary_exponential`) now
+  report the PR AUC they asked for.
+
+### Changed
+
+* Default metric names: `outcome_mean_squared_error`, `outcome_mean_absolute_error`,
+  `treatment_mean_squared_error`, `treatment_mean_absolute_error` (previously
+  `mean_squared_error` / `mean_absolute_error`), and `propensity_score_auc` without a
+  per-session `_N` suffix. The binary builders name their PR AUC `propensity_score_aupr`,
+  so `val_mean_squared_error` becomes `val_outcome_mean_squared_error` and
+  `val_propensity_score_auc_N` becomes `val_propensity_score_aupr`.
+
+### Added
+
+* `get_config` on the six metric classes, so they round-trip through `from_config`.
+
 ## pypsps v0.2.1 - Nov 4, 2026
 
 ### Added
