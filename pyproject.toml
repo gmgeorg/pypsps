@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pypsps"
-version = "0.2.2"
+version = "0.3.0"
 description = "Predictive State Propensity Subclassification (PSPS) in Python (keras)"
 authors = ["Georg M. Goerg <im@gmge.org>"]
 license = "MIT"
@@ -12,9 +12,7 @@ python = ">=3.12,<4.0.0"
 
 numpy = ">=1.11.0"
 pandas = ">=1.0.0"
-tensorflow = ">=2.11.0"
-tensorflow_probability = ">=0.18.0"
-tf-keras = ">=2.14.1"
+tensorflow = ">=2.16"
 tqdm = ">=4.62"
 pypress = { git = "https://github.com/gmgeorg/pypress.git", rev = "v0.3.1" }
 
@@ -28,6 +26,9 @@ scikit-learn = "^1.6.1"
 optuna = "^4.2.1"
 pydot = "^3.0.4"
 scikit-survival = "^0.24.0"
+# Reference implementation in test_neglogliks.py only; pypsps itself never imports it.
+# TFP needs tf-keras, which its [tf] extra installs.
+tensorflow-probability = { version = ">=0.24", extras = ["tf"] }
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

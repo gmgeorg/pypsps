@@ -1,14 +1,14 @@
 """Module to implement distributions and log-likelihood loss fcts."""
 
 import math
-from typing import Callable, Union
+from typing import TYPE_CHECKING, Callable, Union
 
 import tensorflow as tf
-import tensorflow_probability as tfp
 
 import pypsps.utils
 
-tfd = tfp.distributions
+if TYPE_CHECKING:  # annotation only: pypsps never imports TensorFlow Probability at runtime
+    import tensorflow_probability as tfp
 
 
 _EPS = 1e-6
@@ -20,11 +20,13 @@ LossLike = Union[tf.keras.losses.Loss, Callable[[tf.Tensor, tf.Tensor], tf.Tenso
 class NegloglikLoss(tf.keras.losses.Loss):
     """Computes the negative log-likelihood of y ~ Distribution.
 
-    This is a general purpose class for any (!) tfd.Distribution.
+    This is a general purpose class for any (!) ``tfp.distributions.Distribution``. The
+    caller passes the constructor, so the caller needs TensorFlow Probability installed;
+    pypsps itself does not depend on it.
     """
 
-    def __init__(self, distribution_constructor: tfd.Distribution, **kwargs):
-        """Stores the tfd.Distribution constructor used to build the loss."""
+    def __init__(self, distribution_constructor: "tfp.distributions.Distribution", **kwargs):
+        """Stores the distribution constructor used to build the loss."""
         self._distribution_constructor = distribution_constructor
         super().__init__(**kwargs)
 
