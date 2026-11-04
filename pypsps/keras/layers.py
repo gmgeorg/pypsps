@@ -2,6 +2,7 @@
 
 from typing import Optional
 
+import numpy as np
 import tensorflow as tf
 
 
@@ -83,4 +84,43 @@ class StateColumnGate(tf.keras.layers.Layer):
         """Returns the layer config, including ``index``."""
         config = super().get_config()
         config.update({"index": self.index})
+        return config
+
+
+@tf.keras.utils.register_keras_serializable(package="pypsps")
+class SoftClip(tf.keras.layers.Layer):
+    """Maps inputs smoothly into ``(min_value, max_value)``: ``min + (max - min) * sigmoid(x)``.
+
+    Unlike a hard clip, the gradient does not drop to zero at the bounds, so a parameter near a
+    bound can still move back.
+    """
+
+    def __init__(self, min_value: float, max_value: float, **kwargs):
+        """Stores the bounds; requires finite ``min_value < max_value``."""
+        super().__init__(**kwargs)
+        min_value, max_value = float(min_value), float(max_value)
+        if not (np.isfinite(min_value) and np.isfinite(max_value) and min_value < max_value):
+            raise ValueError(
+                f"need finite min_value < max_value, got ({min_value!r}, {max_value!r})"
+            )
+        self.min_value = min_value
+        self.max_value = max_value
+
+    def call(self, inputs):
+        """Returns ``min_value + (max_value - min_value) * sigmoid(inputs)``."""
+        return self.min_value + (self.max_value - self.min_value) * tf.sigmoid(inputs)
+
+    def inverse(self, value: float) -> float:
+        """Returns the input that maps to ``value``, which must lie strictly inside the bounds."""
+        if not self.min_value < value < self.max_value:
+            raise ValueError(
+                f"value must lie in ({self.min_value}, {self.max_value}), got {value!r}"
+            )
+        frac = (value - self.min_value) / (self.max_value - self.min_value)
+        return float(np.log(frac / (1.0 - frac)))
+
+    def get_config(self):
+        """Returns the layer config, including the bounds."""
+        config = super().get_config()
+        config.update({"min_value": self.min_value, "max_value": self.max_value})
         return config
