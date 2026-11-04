@@ -5,23 +5,33 @@ import pytest
 import tensorflow as tf
 
 from .. import datasets
-from ..keras import callbacks, models
+from ..keras import callbacks, losses, models, neglogliks
 
 
-class _FakeLoss:
-    """Minimal stand-in for a CausalLoss, exposing only `_alpha`."""
-
-    def __init__(self, alpha):
-        """Stores the alpha value."""
-        self._alpha = alpha
+def _causal_loss(alpha=1.0) -> losses.CausalLoss:
+    """A real CausalLoss (Normal outcome, binary treatment); the callbacks only use alpha."""
+    treatment_nll = tf.keras.losses.BinaryCrossentropy(reduction="none")
+    kwargs = dict(n_outcome_true_cols=1, n_outcome_pred_cols=2, n_treatment_pred_cols=1)
+    return losses.CausalLoss(
+        outcome_loss=losses.OutcomeLoss(
+            loss=neglogliks.NegloglikNormal(reduction="none"),
+            treatment_loss=treatment_nll,
+            reduction="sum_over_batch_size",
+            **kwargs,
+        ),
+        treatment_loss=losses.TreatmentLoss(
+            loss=treatment_nll, reduction="sum_over_batch_size", **kwargs
+        ),
+        alpha=alpha,
+    )
 
 
 class _FakeModel:
     """Minimal stand-in for a compiled keras model, exposing only `.loss`."""
 
-    def __init__(self, alpha=None):
-        """Wraps a `_FakeLoss` with the given alpha."""
-        self.loss = _FakeLoss(alpha)
+    def __init__(self, alpha=1.0):
+        """Wraps a CausalLoss with the given alpha."""
+        self.loss = _causal_loss(alpha)
 
 
 def test_constructor_validates_steepness():
@@ -72,12 +82,12 @@ def test_decay_schedule_starts_high_ends_low_and_monotonic():
     alphas = []
     for epoch in range(40):
         cb.on_epoch_begin(epoch)
-        alphas.append(cb.model.loss._alpha)
+        alphas.append(float(cb.model.loss.alpha))
 
     assert alphas[0] == pytest.approx(10.0, abs=0.5)
     assert alphas[-1] == pytest.approx(1.0, abs=1e-6)
     assert all(a >= b - 1e-9 for a, b in zip(alphas, alphas[1:]))
-    assert cb.alpha_history == alphas
+    assert cb.alpha_history == pytest.approx(alphas, rel=1e-6)
 
 
 def test_increase_schedule_starts_low_ends_high_and_monotonic():
@@ -90,7 +100,7 @@ def test_increase_schedule_starts_low_ends_high_and_monotonic():
     alphas = []
     for epoch in range(40):
         cb.on_epoch_begin(epoch)
-        alphas.append(cb.model.loss._alpha)
+        alphas.append(float(cb.model.loss.alpha))
 
     assert alphas[0] == pytest.approx(1.0, abs=0.5)
     assert alphas[-1] == pytest.approx(10.0, abs=1e-6)
@@ -104,7 +114,7 @@ def test_constant_schedule_keeps_alpha_fixed():
 
     for epoch in range(5):
         cb.on_epoch_begin(epoch)
-        assert cb.model.loss._alpha == 5.0
+        assert float(cb.model.loss.alpha) == 5.0
 
 
 def test_clamps_to_alpha_end_near_convergence():
@@ -115,14 +125,24 @@ def test_clamps_to_alpha_end_near_convergence():
     cb.set_model(_FakeModel())
 
     cb.on_epoch_begin(100)
-    assert cb.model.loss._alpha == cb.alpha_end
+    assert float(cb.model.loss.alpha) == pytest.approx(cb.alpha_end)
 
 
 def test_raises_if_model_has_no_loss_with_alpha_attribute():
-    """Test AttributeError is raised when the model's loss has no `_alpha`."""
+    """AttributeError, naming the loss type, when the model's loss isn't a CausalLoss."""
     cb = callbacks.AlphaScheduleCallback(verbose=False)
     cb.set_model(_FakeModel.__new__(_FakeModel))  # no `.loss` attribute set at all
-    with pytest.raises(AttributeError, match="_alpha"):
+    with pytest.raises(AttributeError, match="CausalLoss.*NoneType"):
+        cb.on_epoch_begin(0)
+
+
+def test_raises_for_a_non_causal_loss_with_a_float_alpha():
+    """A loss with its own float `alpha` (eg Keras's focal loss) is not a CausalLoss."""
+    model = _FakeModel()
+    model.loss = tf.keras.losses.BinaryFocalCrossentropy(alpha=0.25)
+    cb = callbacks.AlphaScheduleCallback(verbose=False)
+    cb.set_model(model)
+    with pytest.raises(AttributeError, match="BinaryFocalCrossentropy"):
         cb.on_epoch_begin(0)
 
 
@@ -155,8 +175,8 @@ def test_alpha_schedule_updates_causal_loss_alpha_during_fit():
     model = models.build_toy_model(
         n_states=3, n_features=ks_data.n_features, compile=True, alpha=10.0
     )
-    assert isinstance(model.loss._alpha, tf.Variable)
-    assert float(model.loss._alpha.numpy()) == 10.0
+    assert isinstance(model.loss.alpha, tf.Variable)
+    assert float(model.loss.alpha.numpy()) == 10.0
 
     alpha_schedule = callbacks.AlphaScheduleCallback(
         alpha_start=10.0, alpha_end=1.0, half_life_epoch=1, steepness=1.0, verbose=False
@@ -173,7 +193,7 @@ def test_alpha_schedule_updates_causal_loss_alpha_during_fit():
     assert len(alpha_schedule.alpha_history) == 5
     assert alpha_schedule.alpha_history[0] < 10.0
     assert alpha_schedule.alpha_history[-1] < alpha_schedule.alpha_history[0]
-    assert float(model.loss._alpha.numpy()) == alpha_schedule.alpha_history[-1]
+    assert float(model.loss.alpha.numpy()) == alpha_schedule.alpha_history[-1]
 
 
 def test_alpha_schedule_assigns_the_variable_in_place():
@@ -184,7 +204,7 @@ def test_alpha_schedule_assigns_the_variable_in_place():
     test_losses.test_causal_loss_alpha_assign_reaches_traced_graph for the underlying mechanism.
     """
     model = models.build_toy_model(n_states=2, n_features=3, compile=True, alpha=10.0)
-    alpha_var = model.loss._alpha
+    alpha_var = model.loss.alpha
     assert isinstance(alpha_var, tf.Variable)
 
     alpha_schedule = callbacks.AlphaScheduleCallback(
@@ -193,9 +213,9 @@ def test_alpha_schedule_assigns_the_variable_in_place():
     alpha_schedule.set_model(model)
     alpha_schedule.on_epoch_begin(5)
 
-    assert model.loss._alpha is alpha_var, "callback rebound the attribute instead of assigning"
-    assert isinstance(model.loss._alpha, tf.Variable)
-    assert float(model.loss._alpha.numpy()) != 10.0
+    assert model.loss.alpha is alpha_var, "callback rebound the attribute instead of assigning"
+    assert isinstance(model.loss.alpha, tf.Variable)
+    assert float(model.loss.alpha.numpy()) != 10.0
 
 
 class _WeightsModel:
@@ -206,7 +226,7 @@ class _WeightsModel:
         self.epoch = -1
         self.restored = None
         self.stop_training = False
-        self.loss = _FakeLoss(tf.Variable(1.0))
+        self.loss = _causal_loss(1.0)
 
     def get_weights(self):
         """Return the current epoch as the weights."""
@@ -324,13 +344,13 @@ def test_lr_plateau_is_inactive_before_start_from_epoch():
 def test_gaussian_schedule_assigns_the_half_gaussian_values():
     """The callback assigns alpha_schedule.AlphaSchedule.alpha(e) to the loss each epoch."""
     cb = callbacks.GaussianAlphaSchedule(alpha_start=10.0, alpha_end=1.0, verbose=False)
-    cb.set_model(_FakeModel(tf.Variable(10.0)))
+    cb.set_model(_FakeModel(10.0))
     cb.on_train_begin()
     for epoch in range(8):
         cb.on_epoch_begin(epoch)
     want = [cb.schedule.alpha(e) for e in range(8)]
     assert cb.alpha_history == want
-    assert float(cb.model.loss._alpha.numpy()) == pytest.approx(want[-1])
+    assert float(cb.model.loss.alpha.numpy()) == pytest.approx(want[-1])
     assert cb.warmup_epochs == 6
     assert isinstance(cb, callbacks.AlphaScheduleCallback)
 
@@ -338,7 +358,7 @@ def test_gaussian_schedule_assigns_the_half_gaussian_values():
 def test_gaussian_schedule_refuses_a_fit_that_does_not_start_at_zero():
     """Starting at epoch 3 raises MidFitResumeError."""
     cb = callbacks.GaussianAlphaSchedule(verbose=False)
-    cb.set_model(_FakeModel(tf.Variable(10.0)))
+    cb.set_model(_FakeModel(10.0))
     cb.on_train_begin()
     with pytest.raises(callbacks.MidFitResumeError):
         cb.on_epoch_begin(3)
@@ -378,6 +398,6 @@ def test_gaussian_schedule_and_eligible_checkpoint_in_a_fit():
     )
 
     assert schedule.alpha_history == [schedule.schedule.alpha(e) for e in range(8)]
-    assert float(model.loss._alpha.numpy()) == pytest.approx(schedule.alpha_history[-1])
+    assert float(model.loss.alpha.numpy()) == pytest.approx(schedule.alpha_history[-1])
     assert checkpoint.selected_epoch >= schedule.warmup_epochs == 4
     assert [t["alpha"] for t in checkpoint.trace] == pytest.approx(schedule.alpha_history)

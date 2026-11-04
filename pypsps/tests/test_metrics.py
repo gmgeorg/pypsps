@@ -226,7 +226,7 @@ def test_treatment_loss_penalty_free_is_identity_when_no_penalty_declared():
     assert clean._n_outcome_true_cols == original._n_outcome_true_cols
     assert clean._n_outcome_pred_cols == original._n_outcome_pred_cols
     assert clean._n_treatment_pred_cols == original._n_treatment_pred_cols
-    assert clean._loss is original._loss
+    assert clean.get_config() == original.get_config()
 
 
 class _BalancePenalizedTreatmentLoss(losses.TreatmentLoss):
