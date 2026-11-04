@@ -1,7 +1,7 @@
 """Module for pypsps losses."""
 
 import warnings
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 import tensorflow as tf
 
@@ -79,7 +79,7 @@ _ALPHA_DEPRECATION = (
 )
 
 
-def _check_elementwise(loss, what: str) -> None:
+def _check_elementwise(loss: Any, what: str) -> None:
     """Raises unless ``loss`` is a Keras loss with ``reduction="none"``."""
     if not isinstance(loss, tf.keras.losses.Loss):
         raise TypeError(f"{what} must be a tf.keras.losses.Loss, got {type(loss).__name__}")
@@ -87,7 +87,7 @@ def _check_elementwise(loss, what: str) -> None:
         raise ValueError(f"{what} must have reduction='none', got {loss.reduction!r}")
 
 
-def _require_counts(**counts) -> None:
+def _require_counts(**counts: Optional[int]) -> None:
     """Raises if any of the legacy three-int arguments is missing."""
     missing = [name for name, value in counts.items() if value is None]
     if missing:
@@ -162,7 +162,7 @@ class OutcomeLoss(_MixtureLossMixin, tf.keras.losses.Loss):
         outcome_likelihood: Union[OutcomeLikelihood, str] = OutcomeLikelihood.INTERVENTIONAL,
         *,
         loss: Optional[tf.keras.losses.Loss] = None,
-        **kwargs,
+        **kwargs: Any,
     ):
         """Initializes the outcome loss.
 
@@ -249,7 +249,7 @@ class OutcomeLoss(_MixtureLossMixin, tf.keras.losses.Loss):
         """
         return type(self).from_config(OutcomeLoss.get_config(self))
 
-    def call(self, y_true, y_pred):
+    def call(self, y_true: tf.Tensor, y_pred: tf.Tensor):
         """The reduced outcome mixture NLL; see `StateMixture.outcome_nll`."""
         nll = self._mixture.outcome_nll(y_true, y_pred, self._outcome_likelihood)
         return mixture_lib.reduce(nll, self.reduction)
@@ -280,7 +280,7 @@ class TreatmentLoss(_MixtureLossMixin, tf.keras.losses.Loss):
         n_treatment_pred_cols: Optional[int] = None,
         *,
         loss: Optional[tf.keras.losses.Loss] = None,
-        **kwargs,
+        **kwargs: Any,
     ):
         """Initializes the treatment loss.
 
@@ -338,7 +338,7 @@ class TreatmentLoss(_MixtureLossMixin, tf.keras.losses.Loss):
         """
         return type(self).from_config(TreatmentLoss.get_config(self))
 
-    def call(self, y_true, y_pred):
+    def call(self, y_true: tf.Tensor, y_pred: tf.Tensor):
         """The reduced treatment mixture NLL; see `StateMixture.treatment_nll`."""
         return mixture_lib.reduce(self._mixture.treatment_nll(y_true, y_pred), self.reduction)
 
@@ -416,7 +416,7 @@ class CausalLoss(tf.keras.losses.Loss):
         alpha: Union[float, tf.Variable] = 1.0,
         outcome_loss_weight: float = 1.0,
         predictive_states_regularizer: Optional[tf.keras.regularizers.Regularizer] = None,
-        **kwargs,
+        **kwargs: Any,
     ):
         """Initializes the causal loss class.
 
@@ -471,7 +471,7 @@ class CausalLoss(tf.keras.losses.Loss):
         outcome_loss_weight: float = 1.0,
         predictive_states_regularizer: Optional[tf.keras.regularizers.Regularizer] = None,
         reduction: str = "sum_over_batch_size",
-        **kwargs,
+        **kwargs: Any,
     ) -> "CausalLoss":
         """A causal loss whose outcome and treatment losses share one `StateMixture`."""
         return cls(
@@ -570,7 +570,7 @@ class CausalLoss(tf.keras.losses.Loss):
             )
             self._outcome_loss.reduction = self.reduction
 
-    def call(self, y_true, y_pred):
+    def call(self, y_true: tf.Tensor, y_pred: tf.Tensor):
         """Computes the causal loss from y_true and multi-output predictions."""
         loss_outcome = self._outcome_loss(y_true, y_pred)
         loss_treatment = self._treatment_loss(y_true, y_pred)

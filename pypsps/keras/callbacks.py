@@ -1,6 +1,7 @@
 """Module for pypsps training callbacks."""
 
 import math
+from typing import Any, Optional
 
 import numpy as np
 import tensorflow as tf
@@ -8,7 +9,7 @@ import tensorflow as tf
 from pypsps.keras import alpha_schedule, losses
 
 
-def _alpha_variable(model) -> tf.Variable | None:
+def _alpha_variable(model: tf.keras.Model) -> tf.Variable | None:
     """The alpha variable of the model's `CausalLoss`, or None if the loss isn't one.
 
     An isinstance check, not duck typing on ``.alpha``: Keras's own focal losses have a float
@@ -29,7 +30,7 @@ class VerboseNEpochs(tf.keras.callbacks.Callback):
         super().__init__()
         self.n = n
 
-    def on_epoch_end(self, epoch, logs=None):
+    def on_epoch_end(self, epoch: int, logs: Optional[dict] = None):
         """call at end of epoch"""
         # logs is a dictionary containing metric names and values.
         if (epoch == 0) or ((epoch + 1) % self.n == 0):
@@ -146,7 +147,7 @@ class AlphaScheduleCallback(tf.keras.callbacks.Callback):
                 raise ValueError(f"clamp_threshold must be non-negative, got {clamp_threshold}")
             self.clamp_threshold = clamp_threshold
 
-    def _compute_alpha(self, epoch):
+    def _compute_alpha(self, epoch: int):
         """
         Compute alpha value for the current epoch using sigmoid schedule.
 
@@ -169,7 +170,7 @@ class AlphaScheduleCallback(tf.keras.callbacks.Callback):
 
         return alpha
 
-    def on_epoch_begin(self, epoch, logs=None):
+    def on_epoch_begin(self, epoch: int, logs: Optional[dict] = None):
         """Update alpha at the beginning of each epoch."""
         # Compute new alpha value
         new_alpha = self._compute_alpha(epoch)
@@ -191,12 +192,12 @@ class AlphaScheduleCallback(tf.keras.callbacks.Callback):
             direction = "↓" if self._is_decay else "↑"
             print(f"\n[Epoch {epoch}] Alpha: {old_alpha:.4f} {direction} {new_alpha:.4f}")
 
-    def on_train_end(self, logs=None):
+    def on_train_end(self, logs: Optional[dict] = None):
         """Print final alpha value at the end of training."""
         if self.verbose and len(self.alpha_history) > 0:
             print(f"\n[Training Complete] Final Alpha: {self.alpha_history[-1]:.4f}")
 
-    def plot_schedule(self, max_epochs=200, figsize=(10, 6)):
+    def plot_schedule(self, max_epochs: int = 200, figsize: tuple[float, float] = (10, 6)):
         """
         Plot the alpha schedule for visualization.
 
@@ -313,16 +314,16 @@ class GaussianAlphaSchedule(AlphaScheduleCallback):
         """First zero-based epoch at which alpha has settled."""
         return self.schedule.warmup_epochs
 
-    def _compute_alpha(self, epoch):
+    def _compute_alpha(self, epoch: int):
         """Alpha for zero-based ``epoch``."""
         return self.schedule.alpha(int(epoch))
 
-    def on_train_begin(self, logs=None):
+    def on_train_begin(self, logs: Optional[dict] = None):
         """Reset the alpha history."""
         self.alpha_history = []
         self._started = False
 
-    def on_epoch_begin(self, epoch, logs=None):
+    def on_epoch_begin(self, epoch: int, logs: Optional[dict] = None):
         """Refuse a fit that does not start at epoch 0, then assign the epoch's alpha."""
         if not self._started:
             self._started = True
@@ -334,7 +335,7 @@ class GaussianAlphaSchedule(AlphaScheduleCallback):
         super().on_epoch_begin(epoch, logs)
 
 
-def _live_alpha(model) -> float | None:
+def _live_alpha(model: tf.keras.Model) -> float | None:
     """The alpha the model's loss holds now, or None if it has none."""
     alpha = _alpha_variable(model)
     return None if alpha is None else float(alpha.numpy())
@@ -381,11 +382,11 @@ class EligibleBestCheckpoint(tf.keras.callbacks.Callback):
         self.selected_epoch: int | None = None
         self.selected_value: float | None = None
 
-    def on_train_begin(self, logs=None):
+    def on_train_begin(self, logs: Optional[dict] = None):
         """Reset the per-fit state."""
         self._reset()
 
-    def on_epoch_end(self, epoch, logs=None):
+    def on_epoch_end(self, epoch: int, logs: Optional[dict] = None):
         """Record the epoch and update the best eligible epoch."""
         logs = logs or {}
         if self.monitor not in logs:
@@ -413,7 +414,7 @@ class EligibleBestCheckpoint(tf.keras.callbacks.Callback):
             self.stopped_epoch = int(epoch)
             self.model.stop_training = True
 
-    def on_train_end(self, logs=None):
+    def on_train_end(self, logs: Optional[dict] = None):
         """Restore the best eligible weights, or raise if no epoch was eligible."""
         if self.best_weights is None:
             raise NoEligibleCheckpointError(
@@ -430,12 +431,12 @@ class EligibleBestCheckpoint(tf.keras.callbacks.Callback):
 class WarmupReduceLROnPlateau(tf.keras.callbacks.ReduceLROnPlateau):
     """`ReduceLROnPlateau` that does nothing before ``start_from_epoch``."""
 
-    def __init__(self, *args, start_from_epoch: int = 0, **kwargs):
+    def __init__(self, *args: Any, start_from_epoch: int = 0, **kwargs: Any):
         """``start_from_epoch`` is the first epoch at which the plateau check runs."""
         super().__init__(*args, **kwargs)
         self.start_from_epoch = int(start_from_epoch)
 
-    def on_epoch_end(self, epoch, logs=None):
+    def on_epoch_end(self, epoch: int, logs: Optional[dict] = None):
         """Skip the plateau check before ``start_from_epoch``; still log the learning rate."""
         if epoch < self.start_from_epoch:
             if logs is not None:

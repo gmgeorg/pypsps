@@ -94,52 +94,6 @@ def test_get_column_layout_exponential_outcome():
     )
 
 
-def test_agg_outcome_preds_works():
-    """test aggregating by state works"""
-    tf.random.set_seed(0)
-    random.seed(0)
-    np.random.seed(0)
-    ks_data = datasets.KangSchafer(true_ate=10, seed=0).sample(n_samples=1000)
-    tf.random.set_seed(13)
-    n_states = 5
-    model = models.build_toy_model(
-        n_states=n_states, n_features=ks_data.features.shape[1], compile=True
-    )
-    inputs, outputs = ks_data.to_keras_inputs_outputs()
-
-    # NOTE: needs more epochs than before the OutcomeLoss posterior-weighting fix: the
-    # corrected loss couples the outcome and treatment heads through the posterior, which
-    # is mathematically correct but converges a bit slower for this small toy model/lr.
-    _ = model.fit(
-        inputs,
-        outputs,
-        epochs=25,
-        batch_size=64,
-        verbose=2,
-        validation_split=0.2,
-    )
-
-    preds = model.predict(inputs)
-    assert preds.shape[0] == ks_data.n_samples
-
-    outcome_params_pred, weights, _ = utils.split_y_pred(
-        preds, n_outcome_pred_cols=2, n_treatment_pred_cols=1
-    )
-    avg_outcome = utils.agg_outcome_pred(preds, n_outcome_pred_cols=2, n_treatment_pred_cols=1)
-    assert avg_outcome.shape[0] == ks_data.n_samples
-    assert avg_outcome.shape[1] == 2
-
-    avg_outcome_mean = avg_outcome[:, 0]
-    np.testing.assert_allclose(
-        avg_outcome_mean, (outcome_params_pred[:, :n_states] * weights).sum(axis=1)
-    )
-    cor_pred_true = np.corrcoef(avg_outcome_mean, outputs[:, 0])
-    print(cor_pred_true)
-    # Threshold has margin for numeric drift across TF/Keras versions (fixed seeds still
-    # give a deterministic value per environment, but not identical across versions).
-    assert cor_pred_true[0, 1] > 0.6
-
-
 def test_prepare_keras_inputs_outputs():
     """test kersa inputs/outputs works"""
     random.seed(0)

@@ -1,6 +1,6 @@
 """Module for models & layers for pypsps."""
 
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 import tensorflow as tf
@@ -18,13 +18,13 @@ class BiasOnly(tf.keras.layers.Layer):
         self,
         units: int = 1,
         bias_regularizer: Optional[tf.keras.regularizers.Regularizer] = None,
-        **kwargs,
+        **kwargs: Any,
     ):
         super(BiasOnly, self).__init__(**kwargs)
         self._bias_regularizer = bias_regularizer
         self._units = units
 
-    def build(self, input_shape):
+    def build(self, input_shape: tuple):
         """Builds the layer based on input_shape."""
         self._constant = self.add_weight(
             name="constant",
@@ -36,7 +36,7 @@ class BiasOnly(tf.keras.layers.Layer):
             trainable=True,
         )
 
-    def call(self, x):
+    def call(self, x: tf.Tensor):
         """Apply layer on a tensor."""
         return tf.expand_dims(tf.ones_like(x[:, 0]), 1) * self._constant
 
@@ -55,7 +55,7 @@ class BiasOnly(tf.keras.layers.Layer):
         return config
 
     @classmethod
-    def from_config(cls, config):
+    def from_config(cls, config: dict):
         """Deserializes `bias_regularizer` back into a Regularizer instance."""
         config = config.copy()
         config["bias_regularizer"] = tf.keras.regularizers.deserialize(config["bias_regularizer"])
@@ -69,14 +69,14 @@ class StateColumnGate(tf.keras.layers.Layer):
     A serializable replacement for ``Lambda(lambda x: x[:, i : i + 1])`` in a per-state loop.
     """
 
-    def __init__(self, index: int, **kwargs):
+    def __init__(self, index: int, **kwargs: Any):
         """Stores the column ``index`` to select."""
         super().__init__(**kwargs)
         if isinstance(index, bool) or int(index) != index or index < 0:
             raise ValueError(f"index must be a non-negative integer, got {index!r}")
         self.index = int(index)
 
-    def call(self, inputs):
+    def call(self, inputs: tf.Tensor):
         """Returns ``inputs[:, index : index + 1]``."""
         return inputs[:, self.index : self.index + 1]
 
@@ -95,7 +95,7 @@ class SoftClip(tf.keras.layers.Layer):
     bound can still move back.
     """
 
-    def __init__(self, min_value: float, max_value: float, **kwargs):
+    def __init__(self, min_value: float, max_value: float, **kwargs: Any):
         """Stores the bounds; requires finite ``min_value < max_value``."""
         super().__init__(**kwargs)
         min_value, max_value = float(min_value), float(max_value)
@@ -106,7 +106,7 @@ class SoftClip(tf.keras.layers.Layer):
         self.min_value = min_value
         self.max_value = max_value
 
-    def call(self, inputs):
+    def call(self, inputs: tf.Tensor):
         """Returns ``min_value + (max_value - min_value) * sigmoid(inputs)``."""
         return self.min_value + (self.max_value - self.min_value) * tf.sigmoid(inputs)
 

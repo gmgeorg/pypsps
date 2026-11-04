@@ -70,7 +70,7 @@ def _check_max_time_positive(max_time: float) -> float:
     return float(max_time)
 
 
-def _float(x) -> tf.Tensor:
+def _float(x: Any) -> tf.Tensor:
     """``x`` as a float32 tensor."""
     return tf.cast(tf.convert_to_tensor(x), tf.float32)
 
@@ -253,14 +253,14 @@ class Normal(Family):
         """``loc`` (linear) and ``scale`` (softplus)."""
         return (ParamSpec("loc"), ParamSpec("scale", activation="softplus"))
 
-    def nll(self, y_true, params):
+    def nll(self, y_true: tf.Tensor, params: Mapping[str, tf.Tensor]):
         """Gaussian NLL via `neglogliks._negloglik_normal`."""
         nll = neglogliks._negloglik_normal(
             y=_float(y_true)[:, :1], loc=params["loc"], scale=params["scale"]
         )
         return _pin_states(nll, params)
 
-    def mean(self, params):
+    def mean(self, params: Mapping[str, tf.Tensor]):
         """``loc``."""
         return _float(params["loc"])
 
@@ -280,14 +280,14 @@ class Bernoulli(Family):
         """True."""
         return True
 
-    def nll(self, y_true, params):
+    def nll(self, y_true: tf.Tensor, params: Mapping[str, tf.Tensor]):
         """Binary cross-entropy, computed exactly as `tf.keras.losses.BinaryCrossentropy`."""
         prob = _float(params["prob"])
         y = tf.zeros_like(prob) + _float(y_true)[:, :1]  # [N, K], exact broadcast
         nll = tf.keras.losses.binary_crossentropy(y[..., None], prob[..., None])
         return _pin_states(nll, params)
 
-    def mean(self, params):
+    def mean(self, params: Mapping[str, tf.Tensor]):
         """``prob``."""
         return _float(params["prob"])
 
@@ -299,11 +299,11 @@ class _ExponentialLogScale:
         """Stores the optional ``log_scale`` bounds."""
         self.params = (ParamSpec("log_scale", bounds=bounds, init=_midpoint(bounds)),)
 
-    def nll(self, time, event, params):
+    def nll(self, time: tf.Tensor, event: tf.Tensor, params: Mapping[str, tf.Tensor]):
         """Censored NLL via `neglogliks._negloglik_exponential_scale`."""
         return neglogliks._negloglik_exponential_scale(time, event, params["log_scale"])
 
-    def mean(self, params):
+    def mean(self, params: Mapping[str, tf.Tensor]):
         """``exp(log_scale)``."""
         return tf.exp(_float(params["log_scale"]))
 
@@ -322,11 +322,11 @@ class _ExponentialLogRate:
         """Stores the optional ``log_rate`` bounds."""
         self.params = (ParamSpec("log_rate", bounds=bounds, init=_midpoint(bounds)),)
 
-    def nll(self, time, event, params):
+    def nll(self, time: tf.Tensor, event: tf.Tensor, params: Mapping[str, tf.Tensor]):
         """Censored NLL via `neglogliks._negloglik_exponential` with ``rate = exp(log_rate)``."""
         return neglogliks._negloglik_exponential(time, event, tf.exp(params["log_rate"]))
 
-    def mean(self, params):
+    def mean(self, params: Mapping[str, tf.Tensor]):
         """``exp(-log_rate)``."""
         return tf.exp(-_float(params["log_rate"]))
 
@@ -347,11 +347,11 @@ class _ExponentialRate:
             raise ValueError("bounds apply to parameterization 'log_scale' or 'log_rate' only")
         self.params = (ParamSpec("rate", activation="softplus"),)
 
-    def nll(self, time, event, params):
+    def nll(self, time: tf.Tensor, event: tf.Tensor, params: Mapping[str, tf.Tensor]):
         """Censored NLL via `neglogliks._negloglik_exponential`."""
         return neglogliks._negloglik_exponential(time, event, params["rate"])
 
-    def mean(self, params):
+    def mean(self, params: Mapping[str, tf.Tensor]):
         """``1 / rate``."""
         return 1.0 / _float(params["rate"])
 
@@ -398,12 +398,12 @@ class Exponential(SurvivalFamily):
         """The one parameter of the chosen parameterization."""
         return self._impl.params
 
-    def nll(self, y_true, params):
+    def nll(self, y_true: tf.Tensor, params: Mapping[str, tf.Tensor]):
         """Censored exponential NLL."""
         time, event = self._time_and_event(y_true)
         return _pin_states(self._impl.nll(time, event, params), params)
 
-    def mean(self, params):
+    def mean(self, params: Mapping[str, tf.Tensor]):
         """The mean time: ``exp(log_scale)``, ``exp(-log_rate)`` or ``1 / rate``."""
         return self._impl.mean(params)
 
@@ -450,7 +450,7 @@ class Weibull(SurvivalFamily):
             ParamSpec("log_shape", bounds=shape_bounds, init=shape_init),
         )
 
-    def nll(self, y_true, params):
+    def nll(self, y_true: tf.Tensor, params: Mapping[str, tf.Tensor]):
         """Censored Weibull NLL via `neglogliks._negloglik_weibull`."""
         time, event = self._time_and_event(y_true)
         nll = neglogliks._negloglik_weibull(
@@ -458,7 +458,7 @@ class Weibull(SurvivalFamily):
         )
         return _pin_states(nll, params)
 
-    def mean(self, params):
+    def mean(self, params: Mapping[str, tf.Tensor]):
         """``exp(log_scale) * Gamma(1 + 1 / shape)``."""
         log_scale = _float(params["log_scale"])
         log_shape = _float(params["log_shape"])
@@ -509,7 +509,7 @@ class LossFamily(Family):
         """``param_0, ...`` (linear)."""
         return tuple(ParamSpec(f"param_{i}") for i in range(self.n_params))
 
-    def nll(self, y_true, params):
+    def nll(self, y_true: tf.Tensor, params: Mapping[str, tf.Tensor]):
         """Calls the loss once per state on that state's ``[N, P]`` parameters."""
         y_true = _float(y_true)
         if y_true.shape.rank == 1:
@@ -522,14 +522,14 @@ class LossFamily(Family):
             per_state.append(self.loss(y_true, state_params))
         return _pin_states(tf.stack(per_state, axis=1), params)
 
-    def mean(self, params):
+    def mean(self, params: Mapping[str, tf.Tensor]):
         """Raises: a generic loss does not say what its mean is."""
         raise NotImplementedError(
             f"the mean of a LossFamily ({type(self.loss).__name__}) is unknown; use one of the "
             "built-in families (Normal, Bernoulli, Exponential, Weibull) instead"
         )
 
-    def __eq__(self, other):
+    def __eq__(self, other: object):
         """Same loss object and counts."""
         return (
             type(other) is LossFamily
@@ -565,7 +565,7 @@ _BY_NAME = {
 }
 
 
-def get(name: str, **kwargs) -> Family:
+def get(name: str, **kwargs: Any) -> Family:
     """The built-in family called ``name`` (case-insensitive), built with ``kwargs``.
 
     Example: ``families.get("weibull", log_scale_bounds=(0, 5), log_shape_bounds=(-1, 1))``.

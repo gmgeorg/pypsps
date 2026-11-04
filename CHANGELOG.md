@@ -5,6 +5,33 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.3.3 - Nov 4, 2026
+
+### Fixed
+
+* `OutcomeMeanSquaredError` and `OutcomeMeanAbsoluteError` mixed the raw per-state
+  parameters, so a Normal outcome was also scored against the mixed `scale` column. They
+  now score the mixed family mean `sum_k P(s_k | x) * E[Y | s_k]`. **Their values change**
+  for the toy and binary-Normal builders. `TreatmentMeanSquaredError` and
+  `TreatmentMeanAbsoluteError` get the same fix: a Normal treatment uses `loc` only.
+* For a time-to-event outcome, the outcome MSE and MAE use only units with an observed
+  event, and report `NaN` (not 0) when no event has been seen since the last reset.
+* The propensity metrics read the treatment column through the column layout instead of
+  the last `y_true` column.
+
+### Changed
+
+* The propensity, treatment and outcome metrics take the model's `StateMixture`, e.g.
+  `metrics.OutcomeMeanSquaredError(model.loss.mixture)`. `predictive_state_df_gen` and
+  `uniform_entropy_gen` take its `ColumnLayout`. The metric configs store the mixture (or
+  the layout).
+* The column-count constructors still work, and configs saved by v0.3.0 to v0.3.2 still
+  load. They infer the family from the counts: 2 parameters and 1 `y_true` column is
+  Normal, and 1 parameter is used as the mean directly. Any other count raises a
+  `ValueError` asking for the mixture.
+* The builders create one `StateMixture` and pass it to `CausalLoss.from_mixture` and to
+  every metric. Builder signatures are unchanged.
+
 ## pypsps v0.3.2 - Nov 4, 2026
 
 ### Added

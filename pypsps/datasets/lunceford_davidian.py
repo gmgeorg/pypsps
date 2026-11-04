@@ -1,6 +1,7 @@
 """Lunceford-Davidian simulation to evaluate observational causal algorithms."""
 
 import enum
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -50,14 +51,14 @@ A1 = np.array([1, 1, -1.0, -1.0])
 class LuncefordDavidian(base.BaseSimulator):
     """Implements Lunceford Davidian simulation."""
 
-    def __init__(self, association: Association, **kwargs):
+    def __init__(self, association: Association, **kwargs: Any):
         super().__init__(**kwargs)
         if isinstance(association, str):
             association = Association(association)
         self._association = association
         self._rng = np.random.RandomState(self._seed)
 
-    def sample(self, n_samples: int, **kwargs) -> base.CausalDataset:
+    def sample(self, n_samples: int, **kwargs: Any) -> base.CausalDataset:
         """Implements the Lunceford Davidian simulation."""
         x3 = pd.Series(self._rng.binomial(n=1, p=0.25, size=(n_samples,)), name="x3")
         prob_z3 = 0.75 * x3 + 0.25 * (1 - x3)

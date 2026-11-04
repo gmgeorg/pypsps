@@ -1,0 +1,138 @@
+[
+ {
+  "class_name": "MeanMetricWrapper",
+  "config": {
+   "dtype": "float32",
+   "fn": {
+    "class_name": "OutcomeLoss",
+    "config": {
+     "loss": {
+      "class_name": "NegloglikExponentialScale",
+      "config": {
+       "name": "negloglik_exponential_scale",
+       "reduction": "none"
+      },
+      "module": "pypsps.keras.neglogliks",
+      "registered_name": "pypsps>NegloglikExponentialScale"
+     },
+     "n_outcome_pred_cols": 1,
+     "n_outcome_true_cols": 2,
+     "n_treatment_pred_cols": 2,
+     "name": "outcome_loss_3",
+     "outcome_likelihood": "interventional",
+     "reduction": "sum_over_batch_size",
+     "treatment_loss": {
+      "class_name": "NegloglikNormal",
+      "config": {
+       "name": "negloglik_normal_2",
+       "reduction": "none"
+      },
+      "module": "pypsps.keras.neglogliks",
+      "registered_name": "pypsps>NegloglikNormal"
+     }
+    },
+    "module": "pypsps.keras.losses",
+    "registered_name": "pypsps>OutcomeLoss"
+   },
+   "name": "outcome_nll_metric"
+  },
+  "module": "keras.metrics",
+  "registered_name": null
+ },
+ {
+  "class_name": "CausalLossMetric",
+  "config": {
+   "dtype": "float32",
+   "name": "causal_loss_metric",
+   "outcome_loss": {
+    "class_name": "OutcomeLoss",
+    "config": {
+     "loss": {
+      "class_name": "NegloglikExponentialScale",
+      "config": {
+       "name": "negloglik_exponential_scale",
+       "reduction": "none"
+      },
+      "module": "pypsps.keras.neglogliks",
+      "registered_name": "pypsps>NegloglikExponentialScale"
+     },
+     "n_outcome_pred_cols": 1,
+     "n_outcome_true_cols": 2,
+     "n_treatment_pred_cols": 2,
+     "name": "outcome_loss_3",
+     "outcome_likelihood": "interventional",
+     "reduction": "sum_over_batch_size",
+     "treatment_loss": {
+      "class_name": "NegloglikNormal",
+      "config": {
+       "name": "negloglik_normal_2",
+       "reduction": "none"
+      },
+      "module": "pypsps.keras.neglogliks",
+      "registered_name": "pypsps>NegloglikNormal"
+     }
+    },
+    "module": "pypsps.keras.losses",
+    "registered_name": "pypsps>OutcomeLoss"
+   },
+   "outcome_loss_weight": 1.0,
+   "treatment_loss": {
+    "class_name": "TreatmentLoss",
+    "config": {
+     "loss": {
+      "class_name": "NegloglikNormal",
+      "config": {
+       "name": "negloglik_normal_2",
+       "reduction": "none"
+      },
+      "module": "pypsps.keras.neglogliks",
+      "registered_name": "pypsps>NegloglikNormal"
+     },
+     "n_outcome_pred_cols": 1,
+     "n_outcome_true_cols": 2,
+     "n_treatment_pred_cols": 2,
+     "name": "treatment_loss_3",
+     "reduction": "sum_over_batch_size"
+    },
+    "module": "pypsps.keras.losses",
+    "registered_name": "pypsps>TreatmentLoss"
+   }
+  },
+  "module": "pypsps.keras.metrics",
+  "registered_name": "pypsps>CausalLossMetric"
+ },
+ {
+  "class_name": "MeanMetricWrapper",
+  "config": {
+   "dtype": "float32",
+   "fn": {
+    "class_name": "function",
+    "config": "pypsps>predictive_state_df",
+    "module": "builtins",
+    "registered_name": "function"
+   },
+   "n_outcome_pred_cols": 1,
+   "n_treatment_pred_cols": 2,
+   "name": "predictive_state_df"
+  },
+  "module": "keras.metrics",
+  "registered_name": null
+ },
+ {
+  "class_name": "MeanMetricWrapper",
+  "config": {
+   "dtype": "float32",
+   "fn": {
+    "class_name": "function",
+    "config": "pypsps>uniform_entropy",
+    "module": "builtins",
+    "registered_name": "function"
+   },
+   "n_outcome_pred_cols": 1,
+   "n_treatment_pred_cols": 2,
+   "name": "uniform_entropy"
+  },
+  "module": "keras.metrics",
+  "registered_name": null
+ }
+]

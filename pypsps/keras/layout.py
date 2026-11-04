@@ -21,6 +21,7 @@ a layout is safe to capture in a traced function.
 """
 
 import dataclasses
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Mapping, NamedTuple, Optional, Union
 
 import numpy as np
@@ -72,7 +73,7 @@ def _concat(blocks: list[Array]) -> Array:
     return tf.concat(blocks, axis=-1)
 
 
-def _check_names(names, what: str) -> tuple[str, ...]:
+def _check_names(names: Iterable[str], what: str) -> tuple[str, ...]:
     """Returns ``names`` as a tuple of str; raises if empty or not unique."""
     names = tuple(str(n) for n in names)
     if not names:
@@ -247,7 +248,7 @@ class ColumnLayout:
         if self.n_states is not None and k != self.n_states:
             raise ValueError(f"state_weights has {k} columns; the layout has K={self.n_states}")
 
-        def blocks(parts, names, what):
+        def blocks(parts: Mapping[str, Array], names: tuple[str, ...], what: str):
             """Returns ``parts`` in ``names`` order, checking keys and shapes."""
             if set(parts) != set(names):
                 raise KeyError(f"{what} keys must be {list(names)}, got {sorted(parts)}")

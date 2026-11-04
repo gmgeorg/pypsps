@@ -1,7 +1,7 @@
 """Module to implement distributions and log-likelihood loss fcts."""
 
 import math
-from typing import TYPE_CHECKING, Callable, Union
+from typing import TYPE_CHECKING, Any, Callable, Union
 
 import tensorflow as tf
 
@@ -25,12 +25,12 @@ class NegloglikLoss(tf.keras.losses.Loss):
     pypsps itself does not depend on it.
     """
 
-    def __init__(self, distribution_constructor: "tfp.distributions.Distribution", **kwargs):
+    def __init__(self, distribution_constructor: "tfp.distributions.Distribution", **kwargs: Any):
         """Stores the distribution constructor used to build the loss."""
         self._distribution_constructor = distribution_constructor
         super().__init__(**kwargs)
 
-    def call(self, y_true, y_pred):
+    def call(self, y_true: tf.Tensor, y_pred: tf.Tensor):
         """Implements the loss function call."""
         n_params = pypsps.utils.get_n_cols(y_pred)
 
@@ -61,7 +61,7 @@ def _negloglik_normal(y: tf.Tensor, loc: tf.Tensor, scale: tf.Tensor) -> tf.Tens
 class NegloglikNormal(tf.keras.losses.Loss):
     """Computes the negative log-likelihood of y ~ N(mu, sigma^2)."""
 
-    def call(self, y_true, y_pred):
+    def call(self, y_true: tf.Tensor, y_pred: tf.Tensor):
         """Implements the loss function call."""
         if y_true.shape.rank == 2 and y_true.shape[-1] == 1:
             y_true = tf.squeeze(y_true, axis=-1)
@@ -127,9 +127,9 @@ class NegloglikExponential(tf.keras.losses.Loss):
 
     def __init__(
         self,
-        reduction=tf.keras.losses.Reduction.AUTO,
+        reduction: str = tf.keras.losses.Reduction.AUTO,
         log_rate: bool = False,
-        name="negloglik_exponential",
+        name: str = "negloglik_exponential",
     ):
         """Stores whether y_pred is the rate itself or its log (log_rate)."""
         super().__init__(reduction=reduction, name=name)
@@ -141,7 +141,7 @@ class NegloglikExponential(tf.keras.losses.Loss):
         config.update({"log_rate": self._log_rate})
         return config
 
-    def call(self, y_true, y_pred):
+    def call(self, y_true: tf.Tensor, y_pred: tf.Tensor):
         """Implements the loss function call."""
         event_time = y_true[:, 0]
         event_indicator = y_true[:, 1]
@@ -235,13 +235,13 @@ class NegloglikExponentialScale(tf.keras.losses.Loss):
 
     def __init__(
         self,
-        reduction=tf.keras.losses.Reduction.AUTO,
-        name="negloglik_exponential_scale",
+        reduction: str = tf.keras.losses.Reduction.AUTO,
+        name: str = "negloglik_exponential_scale",
     ):
         """Standard Loss constructor; no extra state beyond reduction/name."""
         super().__init__(reduction=reduction, name=name)
 
-    def call(self, y_true, y_pred):
+    def call(self, y_true: tf.Tensor, y_pred: tf.Tensor):
         """Implements the loss function call.
 
         Args:
@@ -358,13 +358,13 @@ class NegloglikWeibull(tf.keras.losses.Loss):
 
     def __init__(
         self,
-        reduction=tf.keras.losses.Reduction.AUTO,
-        name="negloglik_weibull",
+        reduction: str = tf.keras.losses.Reduction.AUTO,
+        name: str = "negloglik_weibull",
     ):
         """Standard Loss constructor; no extra state beyond reduction/name."""
         super().__init__(reduction=reduction, name=name)
 
-    def call(self, y_true, y_pred):
+    def call(self, y_true: tf.Tensor, y_pred: tf.Tensor):
         """Implements the loss function call.
 
         Args:

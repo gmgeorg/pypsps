@@ -1,6 +1,6 @@
 """Example model architectures for pypsps."""
 
-from typing import List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import numpy as np
 import pypress
@@ -8,7 +8,8 @@ import pypress.keras.layers
 import pypress.keras.regularizers
 import tensorflow as tf
 
-from . import families, layers, losses, metrics, neglogliks
+from . import families, layers, losses, metrics
+from . import mixture as mixture_lib
 
 tfk = tf.keras
 
@@ -21,35 +22,16 @@ def _build_binary_exponential_causal_loss(
     df_penalty_l2: float,
     outcome_loss_weight: float,
 ) -> losses.CausalLoss:
-    """Builds an example of binary treatment & continuous outcome causal loss."""
-
-    del n_states  # not used in this function, but kept for consistency with other loss builders
-
-    treatment_nll = tf.keras.losses.BinaryCrossentropy(reduction="none")
-    psps_outcome_loss = losses.OutcomeLoss(
-        loss=neglogliks.NegloglikExponential(reduction="none", log_rate=True),
-        treatment_loss=treatment_nll,
-        n_outcome_true_cols=2,
-        n_outcome_pred_cols=1,
-        n_treatment_pred_cols=1,
-        reduction="sum_over_batch_size",
-    )
-    psps_treat_loss = losses.TreatmentLoss(
-        loss=treatment_nll,
-        n_outcome_true_cols=2,
-        n_outcome_pred_cols=1,
-        n_treatment_pred_cols=1,
-        reduction="sum_over_batch_size",
-    )
-    psps_causal_loss = losses.CausalLoss(
-        outcome_loss=psps_outcome_loss,
-        treatment_loss=psps_treat_loss,
+    """Causal loss for a binary treatment and an exponential (log-rate) survival outcome."""
+    return losses.CausalLoss.from_mixture(
+        mixture_lib.StateMixture(
+            families.Exponential("log_rate"), families.Bernoulli(), n_states=n_states
+        ),
         alpha=alpha,
         outcome_loss_weight=outcome_loss_weight,
         predictive_states_regularizer=pypress.keras.regularizers.Uniform(l2=df_penalty_l2),
         reduction="sum_over_batch_size",
     )
-    return psps_causal_loss
 
 
 def _build_binary_normal_causal_loss(
@@ -57,26 +39,9 @@ def _build_binary_normal_causal_loss(
     alpha: float,
     df_penalty_l2: float,
 ) -> losses.CausalLoss:
-    """Builds an example of binary treatment & Normal outcome causal loss."""
-    treatment_nll = tf.keras.losses.BinaryCrossentropy(reduction="none")
-    psps_outcome_loss = losses.OutcomeLoss(
-        loss=neglogliks.NegloglikNormal(reduction="none"),
-        treatment_loss=treatment_nll,
-        n_outcome_true_cols=1,
-        n_outcome_pred_cols=2,
-        n_treatment_pred_cols=1,
-        reduction="sum_over_batch_size",
-    )
-    psps_treat_loss = losses.TreatmentLoss(
-        loss=treatment_nll,
-        n_outcome_true_cols=1,
-        n_outcome_pred_cols=2,
-        n_treatment_pred_cols=1,
-        reduction="sum_over_batch_size",
-    )
-    psps_causal_loss = losses.CausalLoss(
-        outcome_loss=psps_outcome_loss,
-        treatment_loss=psps_treat_loss,
+    """Causal loss for a binary treatment and a Normal outcome."""
+    return losses.CausalLoss.from_mixture(
+        mixture_lib.StateMixture(families.Normal(), families.Bernoulli(), n_states=n_states),
         alpha=alpha,
         outcome_loss_weight=1.0,
         predictive_states_regularizer=pypress.keras.regularizers.DegreesOfFreedom(
@@ -85,7 +50,22 @@ def _build_binary_normal_causal_loss(
         ),
         reduction="sum_over_batch_size",
     )
-    return psps_causal_loss
+
+
+def _binary_metrics(
+    causal_loss: losses.CausalLoss,
+) -> Tuple[List[tf.keras.metrics.Metric], metrics.CausalLossMetric]:
+    """``(propensity metrics, causal loss metric)`` of the binary-treatment builders."""
+    mixture = causal_loss.mixture
+    return [
+        metrics.PropensityScoreBinaryCrossentropy(mixture),
+        metrics.PropensityScoreAUC(mixture, curve="ROC", name="propensity_score_auroc"),
+        metrics.PropensityScoreAUC(mixture, curve="PR", name="propensity_score_aupr"),
+    ], metrics.CausalLossMetric(
+        causal_loss._outcome_loss,
+        causal_loss._treatment_loss,
+        outcome_loss_weight=causal_loss._outcome_loss_weight,
+    )
 
 
 def build_toy_model(
@@ -192,33 +172,14 @@ def build_toy_model(
             alpha=alpha,
             df_penalty_l2=df_penalty_l2,
         )
+        propensity_metrics, causal_loss_metric = _binary_metrics(psps_causal_loss)
         model.compile(
             loss=psps_causal_loss,
             optimizer=tfk.optimizers.Nadam(learning_rate=learning_rate),
             metrics=[
-                metrics.PropensityScoreBinaryCrossentropy(
-                    n_outcome_pred_cols=2, n_treatment_pred_cols=1
-                ),
-                metrics.PropensityScoreAUC(
-                    n_outcome_pred_cols=2,
-                    n_treatment_pred_cols=1,
-                    curve="ROC",
-                    name="propensity_score_auroc",
-                ),
-                metrics.PropensityScoreAUC(
-                    n_outcome_pred_cols=2,
-                    n_treatment_pred_cols=1,
-                    curve="PR",
-                    name="propensity_score_aupr",
-                ),
-                metrics.OutcomeMeanSquaredError(
-                    n_outcome_pred_cols=2, n_treatment_pred_cols=1, n_outcome_true_cols=1
-                ),
-                metrics.CausalLossMetric(
-                    psps_causal_loss._outcome_loss,
-                    psps_causal_loss._treatment_loss,
-                    outcome_loss_weight=psps_causal_loss._outcome_loss_weight,
-                ),
+                *propensity_metrics,
+                metrics.OutcomeMeanSquaredError(psps_causal_loss.mixture),
+                causal_loss_metric,
             ],
         )
 
@@ -363,33 +324,14 @@ def build_model_binary_normal(
             alpha=alpha,
             df_penalty_l2=df_penalty_l2,
         )
+        propensity_metrics, causal_loss_metric = _binary_metrics(psps_causal_loss)
         model.compile(
             loss=psps_causal_loss,
             optimizer=tfk.optimizers.Nadam(learning_rate=learning_rate),
             metrics=[
-                metrics.PropensityScoreBinaryCrossentropy(
-                    n_outcome_pred_cols=2, n_treatment_pred_cols=1
-                ),
-                metrics.PropensityScoreAUC(
-                    n_outcome_pred_cols=2,
-                    n_treatment_pred_cols=1,
-                    curve="ROC",
-                    name="propensity_score_auroc",
-                ),
-                metrics.PropensityScoreAUC(
-                    n_outcome_pred_cols=2,
-                    n_treatment_pred_cols=1,
-                    curve="PR",
-                    name="propensity_score_aupr",
-                ),
-                metrics.OutcomeMeanSquaredError(
-                    n_outcome_pred_cols=2, n_treatment_pred_cols=1, n_outcome_true_cols=1
-                ),
-                metrics.CausalLossMetric(
-                    psps_causal_loss._outcome_loss,
-                    psps_causal_loss._treatment_loss,
-                    outcome_loss_weight=psps_causal_loss._outcome_loss_weight,
-                ),
+                *propensity_metrics,
+                metrics.OutcomeMeanSquaredError(psps_causal_loss.mixture),
+                causal_loss_metric,
             ],
         )
 
@@ -505,11 +447,6 @@ def build_model_binary_exponential(
 
     model = tfk.models.Model(inputs=[features, treat], outputs=outputs_concat)
 
-    # Binary treatment & continuous exponential survival model architecture.
-    _n_outcome_true_cols = 2  # (outcome, event indicator)
-    _n_outcome_pred_cols = 1  # (log_rate)
-    _n_treatment_pred_cols = 1  # (propensity score)
-
     if compile:
         psps_causal_loss = _build_binary_exponential_causal_loss(
             n_states=n_states,
@@ -517,35 +454,14 @@ def build_model_binary_exponential(
             df_penalty_l2=df_penalty_l2,
             outcome_loss_weight=outcome_loss_weight,
         )
+        propensity_metrics, causal_loss_metric = _binary_metrics(psps_causal_loss)
         model.compile(
             loss=psps_causal_loss,
             optimizer=tfk.optimizers.Nadam(learning_rate=learning_rate),
             metrics=[
-                metrics.PropensityScoreBinaryCrossentropy(
-                    n_treatment_pred_cols=_n_treatment_pred_cols,
-                    n_outcome_pred_cols=_n_outcome_pred_cols,
-                ),
-                metrics.PropensityScoreAUC(
-                    curve="ROC",
-                    name="propensity_score_auroc",
-                    n_treatment_pred_cols=_n_treatment_pred_cols,
-                    n_outcome_pred_cols=_n_outcome_pred_cols,
-                ),
-                metrics.PropensityScoreAUC(
-                    curve="PR",
-                    name="propensity_score_aupr",
-                    n_treatment_pred_cols=_n_treatment_pred_cols,
-                    n_outcome_pred_cols=_n_outcome_pred_cols,
-                ),
-                metrics.predictive_state_df_gen(
-                    n_treatment_pred_cols=_n_treatment_pred_cols,
-                    n_outcome_pred_cols=_n_outcome_pred_cols,
-                ),
-                metrics.CausalLossMetric(
-                    psps_causal_loss._outcome_loss,
-                    psps_causal_loss._treatment_loss,
-                    outcome_loss_weight=psps_causal_loss._outcome_loss_weight,
-                ),
+                *propensity_metrics,
+                metrics.predictive_state_df_gen(psps_causal_loss.layout),
+                causal_loss_metric,
             ],
         )
 
@@ -573,47 +489,6 @@ def _dense_stack(
         x = tfk.layers.Dropout(dropout_rate, name=f"{name}_dropout_{i}")(x)
         x = tfk.layers.BatchNormalization(name=f"{name}_bn_{i}")(x)
     return x
-
-
-def _build_continuous_survival_causal_loss(
-    distribution: str,
-    alpha: float,
-    outcome_loss_weight: float,
-    outcome_likelihood: Union[losses.OutcomeLikelihood, str],
-    predictive_states_regularizer: Optional[tf.keras.regularizers.Regularizer],
-) -> losses.CausalLoss:
-    """Causal loss for a Normal continuous treatment and an exponential or Weibull outcome."""
-    n_outcome_pred_cols = 2 if distribution == "weibull" else 1
-    outcome_nll = (
-        neglogliks.NegloglikWeibull(reduction="none")
-        if distribution == "weibull"
-        else neglogliks.NegloglikExponentialScale(reduction="none")
-    )
-    treatment_nll = neglogliks.NegloglikNormal(reduction="none")
-    psps_outcome_loss = losses.OutcomeLoss(
-        loss=outcome_nll,
-        treatment_loss=treatment_nll,
-        n_outcome_true_cols=2,
-        n_outcome_pred_cols=n_outcome_pred_cols,
-        n_treatment_pred_cols=2,
-        outcome_likelihood=outcome_likelihood,
-        reduction="sum_over_batch_size",
-    )
-    psps_treat_loss = losses.TreatmentLoss(
-        loss=treatment_nll,
-        n_outcome_true_cols=2,
-        n_outcome_pred_cols=n_outcome_pred_cols,
-        n_treatment_pred_cols=2,
-        reduction="sum_over_batch_size",
-    )
-    return losses.CausalLoss(
-        outcome_loss=psps_outcome_loss,
-        treatment_loss=psps_treat_loss,
-        alpha=alpha,
-        outcome_loss_weight=outcome_loss_weight,
-        predictive_states_regularizer=predictive_states_regularizer,
-        reduction="sum_over_batch_size",
-    )
 
 
 def build_model_continuous_survival(
@@ -766,14 +641,14 @@ def build_model_continuous_survival(
     model = tfk.models.Model(inputs=[features, treat], outputs=outputs)
 
     if compile:
-        causal_loss = _build_continuous_survival_causal_loss(
-            distribution=distribution,
+        causal_loss = losses.CausalLoss.from_mixture(
+            mixture_lib.StateMixture(outcome_family, families.Normal(), n_states=n_states),
             alpha=alpha,
-            outcome_loss_weight=outcome_loss_weight,
             outcome_likelihood=outcome_likelihood,
+            outcome_loss_weight=outcome_loss_weight,
             predictive_states_regularizer=predictive_states_regularizer,
+            reduction="sum_over_batch_size",
         )
-        n_outcome_pred_cols = 2 if is_weibull else 1
         model.compile(
             loss=causal_loss,
             optimizer=tfk.optimizers.Nadam(learning_rate=learning_rate, clipnorm=clipnorm),
@@ -784,12 +659,8 @@ def build_model_continuous_survival(
                     causal_loss._treatment_loss,
                     outcome_loss_weight=causal_loss._outcome_loss_weight,
                 ),
-                metrics.predictive_state_df_gen(
-                    n_outcome_pred_cols=n_outcome_pred_cols, n_treatment_pred_cols=2
-                ),
-                metrics.uniform_entropy_gen(
-                    n_outcome_pred_cols=n_outcome_pred_cols, n_treatment_pred_cols=2
-                ),
+                metrics.predictive_state_df_gen(causal_loss.layout),
+                metrics.uniform_entropy_gen(causal_loss.layout),
             ],
         )
     return model
@@ -801,7 +672,7 @@ def build_model_continuous_exponential(
     predictive_state_hidden_layers: List[Tuple[int, str]],
     outcome_hidden_layers: List[Tuple[int, str]],
     log_scale_bounds: Tuple[float, float],
-    **kwargs,
+    **kwargs: Any,
 ) -> tf.keras.Model:
     """`build_model_continuous_survival` with an exponential outcome (``log_scale = log mean``)."""
     return build_model_continuous_survival(
@@ -822,7 +693,7 @@ def build_model_continuous_weibull(
     outcome_hidden_layers: List[Tuple[int, str]],
     log_scale_bounds: Tuple[float, float],
     log_shape_bounds: Tuple[float, float],
-    **kwargs,
+    **kwargs: Any,
 ) -> tf.keras.Model:
     """`build_model_continuous_survival` with a Weibull outcome (``log_scale``, ``log_shape``)."""
     return build_model_continuous_survival(

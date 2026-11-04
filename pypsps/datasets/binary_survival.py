@@ -1,6 +1,7 @@
 """Toy example survival of a cancer treatment to survival times."""
 
 import math
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -11,7 +12,7 @@ from . import base
 _FEAT_COLS = ["gender", "age", "comorbidity", "cancer_severity"]
 
 
-def _simple_custom_uuid(val):
+def _simple_custom_uuid(val: Any):
     """
     Returns a simple custom UUID string for the given value.
     This function uses the built-in hash() and converts the absolute hash value
@@ -32,7 +33,7 @@ def _simple_custom_uuid(val):
 class CancerSurvivalSimulator(base.BaseSimulator):
     """Cancer survival simulation."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
         self._rng = np.random.RandomState(self._seed)
 
