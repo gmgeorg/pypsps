@@ -121,8 +121,8 @@ def test_build_model_binary_exponential():
         models.build_model_binary_exponential,
     ],
 )
-def test_binary_builders_log_propensity_score_aupr(builder):
-    """The binary builders compile a PR-curve propensity AUC, logged as `propensity_score_aupr`."""
+def test_binary_builders_log_propensity_score_auroc_and_aupr(builder):
+    """The binary builders log the propensity ROC AUC and PR AUC under explicit names."""
     if builder is models.build_model_binary_exponential:
         data = datasets.CancerSurvivalSimulator(seed=42).sample(n_samples=64)
         extra = {"log_rate_layer": (5, "selu")}
@@ -143,19 +143,15 @@ def test_binary_builders_log_propensity_score_aupr(builder):
     model = builder(n_states=2, n_features=data.n_features, compile=True, **extra)
 
     result = model.evaluate(inputs, outputs, verbose=0, return_dict=True)
-    assert "propensity_score_aupr" in result
     assert "propensity_score_auc" not in result
 
-    aupr = [m for m in model.metrics if m.name == "propensity_score_aupr"]
-    if not aupr:  # Keras 3 nests compiled metrics in a CompileMetrics container.
-        aupr = [
-            m
-            for container in model.metrics
-            for m in getattr(container, "metrics", [])
-            if m.name == "propensity_score_aupr"
-        ]
-    assert len(aupr) == 1
-    assert aupr[0].curve.name == "PR"
+    compiled = {m.name: m for m in model.metrics}
+    # Keras 3 nests compiled metrics in a CompileMetrics container.
+    for container in model.metrics:
+        compiled.update({m.name: m for m in getattr(container, "metrics", [])})
+    for name, curve in [("propensity_score_auroc", "ROC"), ("propensity_score_aupr", "PR")]:
+        assert name in result
+        assert compiled[name].curve.name == curve
 
 
 _LOG_SCALE_BOUNDS = (-3.0, 6.0)

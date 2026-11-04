@@ -547,7 +547,7 @@ def test_propensity_score_auc_config_keeps_curve():
     assert rebuilt.num_thresholds == 50
 
 
-def test_propensity_score_auc_honours_curve():
+def test_propensity_score_auc_honors_curve():
     """`curve="PR"` computes the PR AUC; it used to be dropped, which gave the ROC AUC."""
     y_true, y_pred, weights, treatment_by_state = _metric_fixture()
     marginal_propensity = (weights * treatment_by_state).sum(axis=1)[:, None]

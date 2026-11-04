@@ -202,6 +202,12 @@ def build_toy_model(
                 metrics.PropensityScoreAUC(
                     n_outcome_pred_cols=2,
                     n_treatment_pred_cols=1,
+                    curve="ROC",
+                    name="propensity_score_auroc",
+                ),
+                metrics.PropensityScoreAUC(
+                    n_outcome_pred_cols=2,
+                    n_treatment_pred_cols=1,
                     curve="PR",
                     name="propensity_score_aupr",
                 ),
@@ -366,6 +372,12 @@ def build_model_binary_normal(
                 metrics.PropensityScoreAUC(
                     n_outcome_pred_cols=2,
                     n_treatment_pred_cols=1,
+                    curve="ROC",
+                    name="propensity_score_auroc",
+                ),
+                metrics.PropensityScoreAUC(
+                    n_outcome_pred_cols=2,
+                    n_treatment_pred_cols=1,
                     curve="PR",
                     name="propensity_score_aupr",
                 ),
@@ -508,6 +520,12 @@ def build_model_binary_exponential(
             optimizer=tfk.optimizers.Nadam(learning_rate=learning_rate),
             metrics=[
                 metrics.PropensityScoreBinaryCrossentropy(
+                    n_treatment_pred_cols=_n_treatment_pred_cols,
+                    n_outcome_pred_cols=_n_outcome_pred_cols,
+                ),
+                metrics.PropensityScoreAUC(
+                    curve="ROC",
+                    name="propensity_score_auroc",
                     n_treatment_pred_cols=_n_treatment_pred_cols,
                     n_outcome_pred_cols=_n_outcome_pred_cols,
                 ),

@@ -8,23 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## pypsps v0.2.2 - Nov 4, 2026
 
 Breaking (logged metric keys): four metric classes log under new default names, and the
-binary builders' propensity AUC is logged as `propensity_score_aupr`.
+binary builders log the propensity AUC as `propensity_score_auroc` and `propensity_score_aupr`.
 
 ### Fixed
 
 * `PropensityScoreAUC(curve="PR")` computed the ROC AUC: every metric class in
   `pypsps.keras.metrics` ignored `name` and other keyword arguments. The binary builders
   (`build_toy_model`, `build_model_binary_normal`, `build_model_binary_exponential`) now
-  report the PR AUC they asked for.
+  report the PR AUC they asked for, and the ROC AUC alongside it.
 
 ### Changed
 
 * Default metric names: `outcome_mean_squared_error`, `outcome_mean_absolute_error`,
   `treatment_mean_squared_error`, `treatment_mean_absolute_error` (previously
   `mean_squared_error` / `mean_absolute_error`), and `propensity_score_auc` without a
-  per-session `_N` suffix. The binary builders name their PR AUC `propensity_score_aupr`,
-  so `val_mean_squared_error` becomes `val_outcome_mean_squared_error` and
-  `val_propensity_score_auc_N` becomes `val_propensity_score_aupr`.
+  per-session `_N` suffix. `val_mean_squared_error` becomes
+  `val_outcome_mean_squared_error`.
+* The binary builders compile two propensity AUC metrics with explicit names:
+  `propensity_score_auroc` (`curve="ROC"`) and `propensity_score_aupr` (`curve="PR"`).
+  `val_propensity_score_auc_N`, which was the ROC AUC despite asking for PR, becomes
+  `val_propensity_score_auroc`.
 
 ### Added
 
