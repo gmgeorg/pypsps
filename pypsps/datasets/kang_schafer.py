@@ -1,5 +1,7 @@
 """Module for the KangSchafer simulation."""
 
+from typing import Any
+
 import numpy as np
 import pandas as pd
 
@@ -18,7 +20,7 @@ class KangSchafer(base.BaseSimulator):
         self,
         true_ate: float = 0.0,
         observe_transformed_features: bool = False,
-        **kwargs,
+        **kwargs: Any,
     ):
         """Initializes a `BaseSimulator` instance that returns a `CausalDataset` at .run().
 
@@ -35,7 +37,7 @@ class KangSchafer(base.BaseSimulator):
         self._observe_transformed_features = observe_transformed_features
         self._rng = np.random.RandomState(self._seed)
 
-    def sample(self, n_samples: int, **kwargs) -> base.CausalDataset:
+    def sample(self, n_samples: int, **kwargs: Any) -> base.CausalDataset:
         """Implements the Kang-Schafer simulation."""
 
         z_arr = pd.DataFrame(

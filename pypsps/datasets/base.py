@@ -1,13 +1,13 @@
 """Base module for all (simulated) datasets."""
 
 import abc
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
 
 
-def expit(x):
+def expit(x: Union[float, np.ndarray]):
     """Expit function (inverse of logit)."""
     return 1.0 / (1.0 + np.exp(-x))
 
@@ -104,13 +104,13 @@ class CausalDataset(object):
 class BaseSimulator(abc.ABC):
     """Base class for simulating causal datasets."""
 
-    def __init__(self, seed: Optional[int] = None, **kwargs):
+    def __init__(self, seed: Optional[int] = None, **kwargs: Any):
         """Initializes the class."""
         super().__init__(**kwargs)
         self._seed = seed
 
     @abc.abstractmethod
-    def sample(self, n_samples: int, **kwargs) -> CausalDataset:
+    def sample(self, n_samples: int, **kwargs: Any) -> CausalDataset:
         """Implements the simulation and adds ._causal_dataset.
 
         Args:

@@ -1,6 +1,6 @@
 """Example model architectures for pypsps."""
 
-from typing import List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import numpy as np
 import pypress
@@ -672,7 +672,7 @@ def build_model_continuous_exponential(
     predictive_state_hidden_layers: List[Tuple[int, str]],
     outcome_hidden_layers: List[Tuple[int, str]],
     log_scale_bounds: Tuple[float, float],
-    **kwargs,
+    **kwargs: Any,
 ) -> tf.keras.Model:
     """`build_model_continuous_survival` with an exponential outcome (``log_scale = log mean``)."""
     return build_model_continuous_survival(
@@ -693,7 +693,7 @@ def build_model_continuous_weibull(
     outcome_hidden_layers: List[Tuple[int, str]],
     log_scale_bounds: Tuple[float, float],
     log_shape_bounds: Tuple[float, float],
-    **kwargs,
+    **kwargs: Any,
 ) -> tf.keras.Model:
     """`build_model_continuous_survival` with a Weibull outcome (``log_scale``, ``log_shape``)."""
     return build_model_continuous_survival(

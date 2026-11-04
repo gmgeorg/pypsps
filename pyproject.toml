@@ -37,3 +37,10 @@ build-backend = "poetry.core.masonry.api"
 [tool.ruff]
 line-length = 100
 fix = true
+
+[tool.ruff.lint]
+# Every function argument in the library carries a type annotation.
+extend-select = ["ANN001", "ANN002", "ANN003"]
+
+[tool.ruff.lint.per-file-ignores]
+"pypsps/tests/*" = ["ANN001", "ANN002", "ANN003"]

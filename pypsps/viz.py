@@ -3,6 +3,8 @@
 This is only available if installed with [dev] extras, which includes seaborn and matplotlib.
 """
 
+from typing import Optional
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -13,9 +15,9 @@ import sklearn.metrics
 def plot_propensity_eval(
     y_true: np.ndarray | pd.Series,
     y_score: np.ndarray | pd.Series,
-    figsize=(12, 5),
-    hist_kws=None,
-    pr_kws=None,
+    figsize: tuple[float, float] = (12, 5),
+    hist_kws: Optional[dict] = None,
+    pr_kws: Optional[dict] = None,
 ):
     """Plot propensity-score distributions by treatment and the Precision-Recall curve.
 

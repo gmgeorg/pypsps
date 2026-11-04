@@ -21,7 +21,7 @@ import tensorflow as tf
 
 from .. import utils
 from . import families as families_lib
-from .layout import ColumnLayout
+from .layout import Array, ColumnLayout, PredParts
 
 _ser = tf.keras.utils.serialize_keras_object
 _deser = tf.keras.utils.deserialize_keras_object
@@ -136,16 +136,16 @@ class StateMixture:
 
     # --- per-state quantities ---
 
-    def _outcome_nll_per_state(self, y_true, pred) -> tf.Tensor:
+    def _outcome_nll_per_state(self, y_true: Array, pred: PredParts) -> tf.Tensor:
         """``[N, K]`` outcome NLL from decoded parts."""
         return self._outcome_family.nll(self._layout.decode_true(y_true).outcome, pred.outcome)
 
-    def _treatment_nll_per_state(self, y_true, pred) -> tf.Tensor:
+    def _treatment_nll_per_state(self, y_true: Array, pred: PredParts) -> tf.Tensor:
         """``[N, K]`` treatment NLL from decoded parts."""
         treatment = self._layout.decode_true(y_true).treatment
         return self._treatment_family.nll(treatment, pred.treatment)
 
-    def nll_per_state(self, y_true, y_pred) -> PerStateNLL:
+    def nll_per_state(self, y_true: Array, y_pred: Array) -> PerStateNLL:
         """Outcome and treatment NLL per unit and state, each ``[N, K]``."""
         pred = self._layout.decode_pred(y_pred)
         return PerStateNLL(
@@ -153,7 +153,7 @@ class StateMixture:
             treatment=self._treatment_nll_per_state(y_true, pred),
         )
 
-    def state_posterior(self, y_true, y_pred) -> tf.Tensor:
+    def state_posterior(self, y_true: Array, y_pred: Array) -> tf.Tensor:
         """P(s_k | x, a), ``[N, K]``; rows sum to 1."""
         pred = self._layout.decode_pred(y_pred)
         return posterior(pred.state_weights, self._treatment_nll_per_state(y_true, pred))
@@ -162,8 +162,8 @@ class StateMixture:
 
     def outcome_nll(
         self,
-        y_true,
-        y_pred,
+        y_true: Array,
+        y_pred: Array,
         likelihood: Union[OutcomeLikelihood, str] = OutcomeLikelihood.INTERVENTIONAL,
     ) -> tf.Tensor:
         """``-log sum_k gamma_k p(y | a, x, s_k)`` per unit, ``[N]``.
@@ -180,15 +180,15 @@ class StateMixture:
             gamma = posterior(pred.state_weights, self._treatment_nll_per_state(y_true, pred))
         return _mixture_nll(gamma, nll_y)
 
-    def treatment_nll(self, y_true, y_pred) -> tf.Tensor:
+    def treatment_nll(self, y_true: Array, y_pred: Array) -> tf.Tensor:
         """``-log sum_k P(s_k | x) p(a | s_k)`` per unit, ``[N]``: the propensity likelihood."""
         pred = self._layout.decode_pred(y_pred)
         return _mixture_nll(pred.state_weights, self._treatment_nll_per_state(y_true, pred))
 
     def causal_nll(
         self,
-        y_true,
-        y_pred,
+        y_true: Array,
+        y_pred: Array,
         likelihood: Union[OutcomeLikelihood, str] = OutcomeLikelihood.INTERVENTIONAL,
         outcome_loss_weight: float = 1.0,
     ) -> tf.Tensor:
@@ -206,7 +206,7 @@ class StateMixture:
 
     # --- means ---
 
-    def outcome_mean(self, y_pred, per_state: bool = False) -> tf.Tensor:
+    def outcome_mean(self, y_pred: Array, per_state: bool = False) -> tf.Tensor:
         """E[Y | a, x]: ``[N, 1]`` mixing the family means; ``per_state=True`` gives ``[N, K]``."""
         pred = self._layout.decode_pred(y_pred)
         means = self._outcome_family.mean(pred.outcome)
@@ -214,7 +214,7 @@ class StateMixture:
             return means
         return tf.reduce_sum(pred.state_weights * means, axis=1, keepdims=True)
 
-    def treatment_mean(self, y_pred) -> tf.Tensor:
+    def treatment_mean(self, y_pred: Array) -> tf.Tensor:
         """E[A | x] = ``sum_k P(s_k | x) * mean_k``, ``[N, 1]``; the propensity for Bernoulli."""
         pred = self._layout.decode_pred(y_pred)
         means = self._treatment_family.mean(pred.treatment)
@@ -239,7 +239,7 @@ class StateMixture:
             n_states=config.get("n_states"),
         )
 
-    def __eq__(self, other) -> bool:
+    def __eq__(self, other: object) -> bool:
         """Equal families and ``n_states``."""
         return (
             isinstance(other, StateMixture)

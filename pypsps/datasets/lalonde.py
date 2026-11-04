@@ -5,7 +5,7 @@ https://rugg2.github.io/Lalonde%20dataset%20-%20Causal%20Inference.html
 """
 
 import os
-from typing import Dict
+from typing import Any, Dict
 
 import pandas as pd
 
@@ -82,7 +82,7 @@ class Lalonde(base.CausalDataset):
         self,
         observational_control: bool = False,
         add_is_unemployed_features: bool = False,
-        **kwargs,
+        **kwargs: Any,
     ):
         """Initializes the class.
 
