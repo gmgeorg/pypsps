@@ -73,6 +73,14 @@ log-likelihood alone, with penalties stripped and no alpha. Monitoring
 `val_outcome_nll_metric` selects every model by the same rule. The continuous survival
 builders compile this metric.
 
+`causal_loss_metric`, which every builder compiles, is the joint version: the
+`outcome_loss_weight`-weighted outcome NLL plus the treatment NLL, at alpha = 1 and without
+penalties. It doesn't move with the alpha schedule either, so `val_causal_loss_metric` is
+comparable across epochs and across schedules, and keeping `start_from_epoch` at the
+warmup only skips epochs whose weights were still fit under a large alpha. Models compiled
+this way save and reload with their losses and metrics; see
+[Saving and Loading](model_building.md#saving-and-loading).
+
 ## 4. Interventional and Observational Outcome Likelihood
 
 The predictive states S are determined by the features X, before treatment, so

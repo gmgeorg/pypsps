@@ -9,6 +9,9 @@ import tensorflow as tf
 from .. import utils
 from . import neglogliks
 
+_ser = tf.keras.utils.serialize_keras_object
+_deser = tf.keras.utils.deserialize_keras_object
+
 
 def _gen_col_selectors(x: int, n: int, k: int) -> list:
     return utils.get_state_column_indices(x, n, k)
@@ -65,6 +68,12 @@ def prob_state_given_treatment_features(
 
     gamma = neglogliks.posterior_from_negloglik_per_state(weights, nll)
     return gamma
+
+
+_ALPHA_DEPRECATION = (
+    "CausalLoss._alpha is deprecated since v0.3.0 and will be removed in v0.4.0; "
+    "use CausalLoss.alpha"
+)
 
 
 class OutcomeLikelihood(str, enum.Enum):
@@ -139,28 +148,38 @@ class OutcomeLoss(tf.keras.losses.Loss):
         self._n_outcome_pred_cols = n_outcome_pred_cols
         self._n_treatment_pred_cols = n_treatment_pred_cols
 
+    def get_config(self) -> dict:
+        """Returns the config; the nested elementwise NLLs are serialized Keras objects."""
+        return {
+            **super().get_config(),
+            "loss": _ser(self._loss),
+            "treatment_loss": _ser(self._treatment_loss),
+            "n_outcome_true_cols": self._n_outcome_true_cols,
+            "n_outcome_pred_cols": self._n_outcome_pred_cols,
+            "n_treatment_pred_cols": self._n_treatment_pred_cols,
+            "outcome_likelihood": self._outcome_likelihood.value,
+        }
+
+    @classmethod
+    def from_config(cls, config: dict) -> "OutcomeLoss":
+        """Rebuilds the loss, deserializing the nested elementwise NLLs."""
+        config = dict(config)
+        config["loss"] = _deser(config["loss"])
+        config["treatment_loss"] = _deser(config["treatment_loss"])
+        return cls(**config)
+
     def penalty_free(self) -> "OutcomeLoss":
         """Returns a fresh instance of this exact class with no penalty terms applied.
 
-        Rebuilds `type(self)(...)` from only the arguments listed below -- never by copying
-        `self.__dict__` or scanning for attributes by naming convention. This is the explicit
-        contract for stripping penalties out of a metric like `causal_loss_metric_gen`: if a
-        subclass's `call()` ever adds a penalty (e.g. a within-state balance term), that
-        subclass MUST override this method to omit (or zero) that penalty's constructor
-        argument here. Forgetting to do so either raises (if the new argument is required,
-        since it's missing from this call) or silently keeps the penalty out (if it defaults
-        to "off"), but never lets an unrecognized penalty leak through.
+        Rebuilds `type(self)` from `OutcomeLoss.get_config(self)`, the *base* class's config,
+        never from `self.get_config()` or by scanning attributes by naming convention. That is
+        the contract for stripping penalties out of a metric like `CausalLossMetric`: a
+        subclass whose `call()` adds a penalty (e.g. a within-state balance term) may
+        serialize it in its own `get_config`, and it still won't reach the penalty-free copy.
+        A penalty argument with an "off" default falls back to off; a required one raises. A
+        subclass that adds a *non-penalty* constructor argument must override this method.
         """
-        return type(self)(
-            loss=self._loss,
-            treatment_loss=self._treatment_loss,
-            n_outcome_true_cols=self._n_outcome_true_cols,
-            n_outcome_pred_cols=self._n_outcome_pred_cols,
-            n_treatment_pred_cols=self._n_treatment_pred_cols,
-            outcome_likelihood=self._outcome_likelihood,
-            reduction=self.reduction,
-            name=self.name,
-        )
+        return type(self).from_config(OutcomeLoss.get_config(self))
 
     def call(self, y_true, y_pred):
         """Evaluates Causal Loss on (y_true, y_pred) for binary loss and Normal outcomes.
@@ -275,22 +294,30 @@ class TreatmentLoss(tf.keras.losses.Loss):
         self._n_outcome_pred_cols = n_outcome_pred_cols
         self._n_treatment_pred_cols = n_treatment_pred_cols
 
+    def get_config(self) -> dict:
+        """Returns the config; the nested elementwise NLL is a serialized Keras object."""
+        return {
+            **super().get_config(),
+            "loss": _ser(self._loss),
+            "n_outcome_true_cols": self._n_outcome_true_cols,
+            "n_outcome_pred_cols": self._n_outcome_pred_cols,
+            "n_treatment_pred_cols": self._n_treatment_pred_cols,
+        }
+
+    @classmethod
+    def from_config(cls, config: dict) -> "TreatmentLoss":
+        """Rebuilds the loss, deserializing the nested elementwise NLL."""
+        config = dict(config)
+        config["loss"] = _deser(config["loss"])
+        return cls(**config)
+
     def penalty_free(self) -> "TreatmentLoss":
         """Returns a fresh instance of this exact class with no penalty terms applied.
 
-        See `OutcomeLoss.penalty_free` for the contract: rebuilds `type(self)(...)` from only
-        the arguments below, never by copying `self.__dict__` or scanning attribute names. A
-        subclass whose `call()` adds a penalty (e.g. a within-state balance term) MUST
-        override this method to omit or zero that penalty's constructor argument.
+        Rebuilds `type(self)` from `TreatmentLoss.get_config(self)`, the base class's config.
+        See `OutcomeLoss.penalty_free` for the contract.
         """
-        return type(self)(
-            loss=self._loss,
-            n_outcome_true_cols=self._n_outcome_true_cols,
-            n_outcome_pred_cols=self._n_outcome_pred_cols,
-            n_treatment_pred_cols=self._n_treatment_pred_cols,
-            reduction=self.reduction,
-            name=self.name,
-        )
+        return type(self).from_config(TreatmentLoss.get_config(self))
 
     def call(self, y_true, y_pred):
         """Evaluates the marginal treatment (dose) loss -log p(a | x)."""
@@ -392,20 +419,72 @@ class CausalLoss(tf.keras.losses.Loss):
         self._treatment_loss = treatment_loss
         # A tf.Variable, not a plain float: `call()` is traced into model.fit()'s compiled
         # training function (run_eagerly=False by default). A plain float gets baked into that
-        # graph as a constant at the first trace; a callback rebinding `loss._alpha` afterward
-        # (e.g. AlphaScheduleCallback) would then be updating an eager Python attribute that the
+        # graph as a constant at the first trace; a callback rebinding it afterward (e.g.
+        # AlphaScheduleCallback) would then be updating an eager Python attribute that the
         # traced graph never reads again. A tf.Variable's value is re-read via ReadVariableOp on
-        # every graph execution, so `loss._alpha.assign(...)` between epochs actually reaches the
-        # optimizer. Callers must use `.assign(...)`, not `=`, to update it after construction.
+        # every graph execution, so assigning it between epochs actually reaches the optimizer.
+        # The `alpha` property's setter assigns; it never rebinds.
         if isinstance(alpha, tf.Variable):
             if alpha.dtype != tf.float32:
                 raise ValueError(f"alpha variable must be float32, got {alpha.dtype}")
-            self._alpha = alpha
+            self._alpha_var = alpha
         else:
-            self._alpha = tf.Variable(float(alpha), trainable=False, dtype=tf.float32, name="alpha")
+            self._alpha_var = tf.Variable(
+                float(alpha), trainable=False, dtype=tf.float32, name="alpha"
+            )
         self._outcome_loss_weight = outcome_loss_weight
         self._predictive_states_regularizer = predictive_states_regularizer
         self._update_loss_reduction()
+
+    @property
+    def alpha(self) -> tf.Variable:
+        """The float32 variable holding alpha.
+
+        Read it with ``float(loss.alpha)``; share it by passing it to another `CausalLoss`;
+        change it with ``loss.alpha = x`` or ``loss.alpha.assign(x)``.
+        """
+        return self._alpha_var
+
+    @alpha.setter
+    def alpha(self, value: float) -> None:
+        if isinstance(value, tf.Variable):
+            raise TypeError(
+                "Pass a shared alpha variable to the constructor, CausalLoss(alpha=var); "
+                "assigning one later would leave the traced training graph reading the old one."
+            )
+        self._alpha_var.assign(float(value))
+
+    @property
+    def _alpha(self) -> tf.Variable:
+        """Deprecated alias of `alpha`."""
+        warnings.warn(_ALPHA_DEPRECATION, FutureWarning, stacklevel=2)
+        return self._alpha_var
+
+    @_alpha.setter
+    def _alpha(self, value: float) -> None:
+        warnings.warn(_ALPHA_DEPRECATION, FutureWarning, stacklevel=2)
+        self.alpha = value
+
+    def get_config(self) -> dict:
+        """Returns the config, with the *current* alpha value and serialized nested objects."""
+        reg = self._predictive_states_regularizer
+        return {
+            **super().get_config(),
+            "outcome_loss": _ser(self._outcome_loss),
+            "treatment_loss": _ser(self._treatment_loss),
+            "alpha": float(self._alpha_var.numpy()),
+            "outcome_loss_weight": float(self._outcome_loss_weight),
+            "predictive_states_regularizer": None if reg is None else _ser(reg),
+        }
+
+    @classmethod
+    def from_config(cls, config: dict) -> "CausalLoss":
+        """Rebuilds the loss; alpha becomes a fresh float32 variable with the saved value."""
+        config = dict(config)
+        for key in ("outcome_loss", "treatment_loss", "predictive_states_regularizer"):
+            if config.get(key) is not None:
+                config[key] = _deser(config[key])
+        return cls(**config)
 
     def _update_loss_reduction(self):
         """Updates loss reduction of outcome & treatment according to causal reduction loss."""
@@ -428,7 +507,7 @@ class CausalLoss(tf.keras.losses.Loss):
         loss_outcome = self._outcome_loss(y_true, y_pred)
         loss_treatment = self._treatment_loss(y_true, y_pred)
 
-        total_loss = self._outcome_loss_weight * loss_outcome + self._alpha * loss_treatment
+        total_loss = self._outcome_loss_weight * loss_outcome + self._alpha_var * loss_treatment
         if self._predictive_states_regularizer is not None:
             weights = utils.split_y_pred(
                 y_pred=y_pred,

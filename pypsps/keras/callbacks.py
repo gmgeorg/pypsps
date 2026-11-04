@@ -5,7 +5,17 @@ import math
 import numpy as np
 import tensorflow as tf
 
-from pypsps.keras import alpha_schedule
+from pypsps.keras import alpha_schedule, losses
+
+
+def _alpha_variable(model) -> tf.Variable | None:
+    """The alpha variable of the model's `CausalLoss`, or None if the loss isn't one.
+
+    An isinstance check, not duck typing on ``.alpha``: Keras's own focal losses have a float
+    ``alpha`` attribute that is not the causal-loss alpha.
+    """
+    loss = getattr(model, "loss", None)
+    return loss.alpha if isinstance(loss, losses.CausalLoss) else None
 
 
 class VerboseNEpochs(tf.keras.callbacks.Callback):
@@ -164,33 +174,22 @@ class AlphaScheduleCallback(tf.keras.callbacks.Callback):
         # Compute new alpha value
         new_alpha = self._compute_alpha(epoch)
 
-        # Update the model's loss function alpha parameter
-        if hasattr(self.model, "loss") and hasattr(self.model.loss, "_alpha"):
-            alpha_ref = self.model.loss._alpha
-            old_alpha = float(alpha_ref.numpy()) if hasattr(alpha_ref, "assign") else alpha_ref
-
-            # ASSIGN, do not rebind. `_alpha` is a tf.Variable so that the new value reaches
-            # the already-traced training graph (model.fit() runs with run_eagerly=False by
-            # default); rebinding the attribute would only update this eager Python object,
-            # which the compiled training function never reads again.
-            if hasattr(alpha_ref, "assign"):
-                alpha_ref.assign(new_alpha)
-            else:
-                # Backward compatibility with a loss whose `_alpha` is still a plain float.
-                self.model.loss._alpha = new_alpha
-
-            # Store in history
-            self.alpha_history.append(new_alpha)
-
-            # Print update if verbose (skip for constant schedules)
-            if self.verbose and not self._is_constant and (epoch % 10 == 0 or epoch < 5):
-                direction = "↓" if self._is_decay else "↑"
-                print(f"\n[Epoch {epoch}] Alpha: {old_alpha:.4f} {direction} {new_alpha:.4f}")
-        else:
+        alpha = _alpha_variable(self.model)
+        if alpha is None:
+            loss_type = type(getattr(self.model, "loss", None)).__name__
             raise AttributeError(
-                "Model's loss function does not have an '_alpha' attribute. "
-                "Ensure the model is compiled with a CausalLoss."
+                f"model.loss must be a pypsps CausalLoss with an alpha variable; got {loss_type}"
             )
+        old_alpha = float(alpha.numpy())
+        # ASSIGN, do not rebind: the already-traced training graph (model.fit() runs with
+        # run_eagerly=False by default) reads the variable, never a rebound Python attribute.
+        alpha.assign(new_alpha)
+        self.alpha_history.append(new_alpha)
+
+        # Print update if verbose (skip for constant schedules)
+        if self.verbose and not self._is_constant and (epoch % 10 == 0 or epoch < 5):
+            direction = "↓" if self._is_decay else "↑"
+            print(f"\n[Epoch {epoch}] Alpha: {old_alpha:.4f} {direction} {new_alpha:.4f}")
 
     def on_train_end(self, logs=None):
         """Print final alpha value at the end of training."""
@@ -337,10 +336,8 @@ class GaussianAlphaSchedule(AlphaScheduleCallback):
 
 def _live_alpha(model) -> float | None:
     """The alpha the model's loss holds now, or None if it has none."""
-    ref = getattr(getattr(model, "loss", None), "_alpha", None)
-    if ref is None:
-        return None
-    return float(ref.numpy()) if hasattr(ref, "numpy") else float(ref)
+    alpha = _alpha_variable(model)
+    return None if alpha is None else float(alpha.numpy())
 
 
 class EligibleBestCheckpoint(tf.keras.callbacks.Callback):

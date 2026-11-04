@@ -226,7 +226,7 @@ def test_treatment_loss_penalty_free_is_identity_when_no_penalty_declared():
     assert clean._n_outcome_true_cols == original._n_outcome_true_cols
     assert clean._n_outcome_pred_cols == original._n_outcome_pred_cols
     assert clean._n_treatment_pred_cols == original._n_treatment_pred_cols
-    assert clean._loss is original._loss
+    assert clean.get_config() == original.get_config()
 
 
 class _BalancePenalizedTreatmentLoss(losses.TreatmentLoss):
@@ -331,10 +331,12 @@ def test_causal_loss_metric_gen_strips_embedded_treatment_loss_penalty():
     penalized_outcome_loss, penalized_treatment_loss = _build(lambda_balance=1000.0)
     clean_outcome_loss, clean_treatment_loss = _build(lambda_balance=0.0)
 
-    metric_fn = metrics.causal_loss_metric_gen(
+    metric = metrics.causal_loss_metric_gen(
         outcome_loss=penalized_outcome_loss, treatment_loss=penalized_treatment_loss
     )
-    metric_value = metric_fn(y_true, y_pred).numpy()
+    assert isinstance(metric, metrics.CausalLossMetric)
+    metric.update_state(y_true, y_pred)
+    metric_value = metric.result().numpy()
 
     expected_clean = (
         clean_outcome_loss(y_true, y_pred) + clean_treatment_loss(y_true, y_pred)
@@ -392,7 +394,7 @@ def test_outcome_nll_metric_equals_the_outcome_loss():
     outcome = _normal_outcome_loss()
     y_true, y_pred = _normal_fixture()
     metric = metrics.outcome_nll_metric_gen(outcome)
-    assert metric.__name__ == "outcome_nll_metric"
+    assert metric.name == "outcome_nll_metric"
     np.testing.assert_allclose(
         float(metric(y_true, y_pred)), float(outcome(y_true, y_pred)), rtol=1e-7
     )
@@ -429,37 +431,146 @@ def test_outcome_nll_metric_does_not_move_with_alpha():
         return res["loss"], res["outcome_nll_metric"]
 
     loss_1, nll_1 = evaluate()
-    model.loss._alpha.assign(10.0)
+    model.loss.alpha = 10.0
     loss_10, nll_10 = evaluate()
     assert loss_10 > loss_1
     np.testing.assert_allclose(nll_10, nll_1, rtol=1e-6)
 
 
-def test_causal_loss_metric_follows_a_shared_alpha_variable():
-    """Given the training loss's alpha variable, the metric moves when it is assigned."""
-    outcome = _normal_outcome_loss()
-    treatment = losses.TreatmentLoss(
+def _metric_value(metric, y_true, y_pred) -> float:
+    """One-shot value of a stateful metric: reset, update once, read."""
+    metric.reset_state()
+    metric.update_state(y_true, y_pred)
+    return float(metric.result())
+
+
+def test_causal_loss_metric_ignores_the_training_alpha():
+    """The metric is the alpha-1 joint NLL, whatever alpha the training loss holds."""
+    outcome, treatment = _normal_outcome_loss(), _make_treatment_loss()
+    y_true, y_pred = _normal_fixture()
+    training = losses.CausalLoss(outcome, treatment, alpha=1.0)
+    metric = metrics.CausalLossMetric(outcome, treatment)
+
+    at_one = _metric_value(metric, y_true, y_pred)
+    np.testing.assert_allclose(at_one, float(training(y_true, y_pred)), rtol=1e-6)
+    training.alpha = 5.0
+    assert float(training(y_true, y_pred)) > at_one
+    np.testing.assert_allclose(_metric_value(metric, y_true, y_pred), at_one, rtol=1e-7)
+
+
+def test_causal_loss_metric_weights_the_outcome_nll():
+    """value = outcome_loss_weight * outcome NLL + treatment NLL."""
+    outcome, treatment = _normal_outcome_loss(), _make_treatment_loss()
+    y_true, y_pred = _normal_fixture()
+    nll_y, nll_a = float(outcome(y_true, y_pred)), float(treatment(y_true, y_pred))
+    for weight in (1.0, 2.5):
+        metric = metrics.CausalLossMetric(outcome, treatment, outcome_loss_weight=weight)
+        np.testing.assert_allclose(
+            _metric_value(metric, y_true, y_pred), weight * nll_y + nll_a, rtol=1e-6
+        )
+
+
+@pytest.mark.parametrize("weight", [1.0, 2.5, 0.0])
+def test_causal_loss_metric_config_round_trips(weight):
+    """The config holds both losses and the weight, and no alpha; the rebuilt metric agrees."""
+    import json
+
+    y_true, y_pred = _normal_fixture()
+    metric = metrics.CausalLossMetric(
+        _normal_outcome_loss(), _make_treatment_loss(), outcome_loss_weight=weight
+    )
+    config = metric.get_config()
+    json.dumps(config)
+    assert "alpha" not in config
+    assert config["outcome_loss_weight"] == weight
+    assert {"outcome_loss", "treatment_loss"} <= set(config)
+
+    rebuilt = metrics.CausalLossMetric.from_config(config)
+    assert rebuilt._outcome_loss_weight == weight
+    np.testing.assert_allclose(
+        _metric_value(rebuilt, y_true, y_pred), _metric_value(metric, y_true, y_pred), rtol=1e-6
+    )
+
+
+def test_causal_loss_metric_allows_zero_outcome_loss_weight():
+    """outcome_loss_weight=0 is legal: the metric is the treatment NLL alone."""
+    treatment = _make_treatment_loss()
+    y_true, y_pred = _normal_fixture()
+    metric = metrics.CausalLossMetric(_normal_outcome_loss(), treatment, outcome_loss_weight=0)
+    np.testing.assert_allclose(
+        _metric_value(metric, y_true, y_pred), float(treatment(y_true, y_pred)), rtol=1e-6
+    )
+
+
+def test_causal_loss_metric_rejects_alpha_and_wrong_loss_types():
+    """There is no alpha parameter; the two losses must be pypsps outcome/treatment losses."""
+    outcome, treatment = _normal_outcome_loss(), _make_treatment_loss()
+    with pytest.raises(TypeError):
+        metrics.CausalLossMetric(outcome, treatment, alpha=1.0)
+    with pytest.raises(TypeError, match="OutcomeLoss"):
+        metrics.CausalLossMetric(treatment, treatment)
+    with pytest.raises(TypeError, match="TreatmentLoss"):
+        metrics.CausalLossMetric(outcome, outcome)
+
+
+def test_causal_loss_metric_gen_alpha_is_deprecated_and_ignored():
+    """A passed alpha warns (FutureWarning, naming v0.5.0) and doesn't change the value."""
+    import warnings
+
+    outcome, treatment = _normal_outcome_loss(), _make_treatment_loss()
+    y_true, y_pred = _normal_fixture()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        plain = metrics.causal_loss_metric_gen(outcome, treatment)
+        weighted = metrics.causal_loss_metric_gen(outcome, treatment, outcome_loss_weight=2.0)
+    with pytest.warns(FutureWarning, match="v0.5.0"):
+        with_alpha = metrics.causal_loss_metric_gen(outcome, treatment, alpha=5.0)
+
+    value = _metric_value(plain, y_true, y_pred)
+    np.testing.assert_allclose(_metric_value(with_alpha, y_true, y_pred), value, rtol=1e-7)
+    assert _metric_value(weighted, y_true, y_pred) != pytest.approx(value)
+
+
+def test_metric_generators_return_serializable_metrics():
+    """The three MeanMetricWrapper generators round-trip through Keras serialization."""
+    y_true, y_pred = _normal_fixture()
+    for metric in (
+        metrics.outcome_nll_metric_gen(_normal_outcome_loss()),
+        metrics.predictive_state_df_gen(n_outcome_pred_cols=2, n_treatment_pred_cols=1),
+        metrics.uniform_entropy_gen(n_outcome_pred_cols=2, n_treatment_pred_cols=1),
+    ):
+        rebuilt = tf.keras.utils.deserialize_keras_object(
+            tf.keras.utils.serialize_keras_object(metric)
+        )
+        assert rebuilt.name == metric.name
+        np.testing.assert_allclose(
+            _metric_value(rebuilt, y_true, y_pred),
+            _metric_value(metric, y_true, y_pred),
+            rtol=1e-6,
+        )
+
+
+def test_penalty_free_drops_a_penalty_even_if_get_config_serializes_it():
+    """penalty_free() rebuilds from the base class's config, so a subclass that serializes
+    its penalty in its own get_config still gets the "off" default in the copy."""
+
+    class _SerializedPenaltyTreatmentLoss(_BalancePenalizedTreatmentLoss):
+        """Serializes its penalty, as a well-behaved Keras subclass would."""
+
+        def get_config(self):
+            """Adds lambda_balance to the config."""
+            return {**super().get_config(), "lambda_balance": self._lambda_balance}
+
+    original = _SerializedPenaltyTreatmentLoss(
         loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
         n_outcome_true_cols=1,
         n_outcome_pred_cols=2,
         n_treatment_pred_cols=1,
+        lambda_balance=5.0,
         reduction="sum_over_batch_size",
     )
-    y_true, y_pred = _normal_fixture()
-    alpha = tf.Variable(1.0, trainable=False, dtype=tf.float32)
-    shared = metrics.causal_loss_metric_gen(outcome, treatment, alpha=alpha)
-    fixed = metrics.causal_loss_metric_gen(outcome, treatment, alpha=1.0)
-
-    at_one = float(shared(y_true, y_pred))
-    np.testing.assert_allclose(at_one, float(fixed(y_true, y_pred)), rtol=1e-7)
-    alpha.assign(3.0)
-    at_three = float(shared(y_true, y_pred))
-    np.testing.assert_allclose(
-        at_three,
-        float(metrics.causal_loss_metric_gen(outcome, treatment, alpha=3.0)(y_true, y_pred)),
-        rtol=1e-6,
-    )
-    np.testing.assert_allclose(float(fixed(y_true, y_pred)), at_one, rtol=1e-7)
+    assert original.get_config()["lambda_balance"] == 5.0
+    assert original.penalty_free()._lambda_balance == 0.0
 
 
 def test_outcome_nll_metric_keeps_outcome_likelihood():

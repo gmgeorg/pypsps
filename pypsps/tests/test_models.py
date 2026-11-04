@@ -303,8 +303,8 @@ def test_continuous_survival_init_scale_sets_the_head_bias():
         np.testing.assert_allclose(bias, [want], rtol=1e-6)
 
 
-def test_continuous_survival_compiles_outcome_likelihood_and_shared_alpha():
-    """The loss uses the requested outcome likelihood and the metrics share its alpha."""
+def test_continuous_survival_compiles_outcome_likelihood_and_alpha_free_metrics():
+    """The loss uses the requested outcome likelihood; the metrics don't follow its alpha."""
     model = _continuous_model("weibull")
     assert model.loss._outcome_loss._outcome_likelihood is losses.OutcomeLikelihood.INTERVENTIONAL
     observational = _continuous_model("weibull", outcome_likelihood="observational")
@@ -313,9 +313,10 @@ def test_continuous_survival_compiles_outcome_likelihood_and_shared_alpha():
     )
     inputs, y_true, _ = _synthetic_continuous_survival(n_samples=64)
     before = model.evaluate(inputs, y_true, verbose=0, return_dict=True)
-    model.loss._alpha.assign(5.0)
+    model.loss.alpha = 5.0
     after = model.evaluate(inputs, y_true, verbose=0, return_dict=True)
-    assert after["causal_loss_metric"] > before["causal_loss_metric"]
+    assert after["loss"] > before["loss"]
+    np.testing.assert_allclose(after["causal_loss_metric"], before["causal_loss_metric"], rtol=1e-6)
     np.testing.assert_allclose(after["outcome_nll_metric"], before["outcome_nll_metric"], rtol=1e-6)
 
 

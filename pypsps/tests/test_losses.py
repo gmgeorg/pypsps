@@ -83,12 +83,12 @@ def test_psps_causal_loss(reduction, expected_shape):
 
 
 def test_causal_loss_alpha_is_a_variable_assigned_not_rebound():
-    """CausalLoss._alpha must be a tf.Variable, and .assign() must reach an already-traced
+    """CausalLoss.alpha must be a tf.Variable, and .assign() must reach an already-traced
     (tf.function-compiled) call -- the way model.fit() actually evaluates the loss
     (run_eagerly=False by default).
 
     A plain-float `_alpha` gets baked into the graph as a constant at the first trace; a
-    schedule rebinding `loss._alpha` afterward (e.g. AlphaScheduleCallback) would then only be
+    schedule rebinding a plain-float alpha afterward (e.g. AlphaScheduleCallback) would then only be
     updating an eager Python attribute the compiled training function never reads again -- the
     schedule would silently never reach the optimizer. This is the regression guard for that.
     """
@@ -113,7 +113,7 @@ def test_causal_loss_alpha_is_a_variable_assigned_not_rebound():
         alpha=1.0,
         reduction="sum_over_batch_size",
     )
-    assert isinstance(causal_loss._alpha, tf.Variable)
+    assert isinstance(causal_loss.alpha, tf.Variable)
 
     rng = np.random.RandomState(0)
     n_rows, n_states = 8, 2
@@ -128,9 +128,9 @@ def test_causal_loss_alpha_is_a_variable_assigned_not_rebound():
     )
 
     traced = tf.function(lambda yt, yp: causal_loss(yt, yp))
-    causal_loss._alpha.assign(1.0)
+    causal_loss.alpha.assign(1.0)
     loss_alpha_1 = traced(y_true, y_pred).numpy()
-    causal_loss._alpha.assign(100.0)
+    causal_loss.alpha.assign(100.0)
     loss_alpha_100 = traced(y_true, y_pred).numpy()
 
     assert not np.isclose(loss_alpha_1, loss_alpha_100), (
@@ -362,7 +362,7 @@ def test_causal_loss_shares_an_alpha_variable():
     )
     alpha = tf.Variable(3.0, trainable=False, dtype=tf.float32)
     causal = losses.CausalLoss(_normal_outcome_loss("sum_over_batch_size"), treatment, alpha=alpha)
-    assert causal._alpha is alpha
+    assert causal.alpha is alpha
     with pytest.raises(ValueError, match="float32"):
         losses.CausalLoss(
             _normal_outcome_loss("sum_over_batch_size"),
