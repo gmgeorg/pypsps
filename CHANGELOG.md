@@ -5,6 +5,25 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.1.9 - Nov 4, 2026
+
+### Added
+
+* `pypsps.keras.alpha_schedule`: a half-Gaussian schedule for the treatment-loss weight,
+  `alpha(e) = alpha_end + (alpha_start - alpha_end) * exp(-c * e**2)`, with validation
+  (`AlphaSchedule`) and the first settled epoch (`warmup_epochs`).
+* `pypsps.keras.callbacks.GaussianAlphaSchedule`, an `AlphaScheduleCallback` that follows it.
+* `pypsps.keras.callbacks.EligibleBestCheckpoint`: early stopping that selects and restores
+  the best epoch at or after `start_from_epoch`, skips NaN and infinite epochs, and raises
+  `NoEligibleCheckpointError` if no epoch was eligible.
+* `pypsps.keras.callbacks.WarmupReduceLROnPlateau`: `ReduceLROnPlateau` that is inactive
+  before `start_from_epoch`.
+
+### Changed
+
+* Bumped the `pypress` dependency to
+  [v0.3.1](https://github.com/gmgeorg/pypress/releases/tag/v0.3.1).
+
 ## pypsps v0.1.8 - Nov 2, 2026
 
 ### Fixed
