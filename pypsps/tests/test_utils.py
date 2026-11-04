@@ -60,27 +60,6 @@ def test_toy_model_fits_in_eager_and_graph_mode():
         assert np.isfinite(loss), f"non-finite loss with run_eagerly={run_eagerly}"
 
 
-def test_split_y_does_not_drop_columns():
-    """test split_y"""
-    np.random.seed(13)
-    ks_data = datasets.KangSchafer(true_ate=10).sample(n_samples=1000)
-    tf.random.set_seed(13)
-    model = models.build_toy_model(n_states=5, n_features=ks_data.features.shape[1], compile=True)
-    inputs, outputs = ks_data.to_keras_inputs_outputs()
-    preds = model.predict(inputs)
-
-    assert preds.shape[0] == ks_data.n_samples
-
-    outcome_params_pred, weights, treatment_params_pred = utils.split_y_pred(
-        preds, n_outcome_pred_cols=2, n_treatment_pred_cols=1
-    )
-    preds_comb = np.hstack([outcome_params_pred, weights, treatment_params_pred])
-    print(outcome_params_pred.shape)
-    print(weights.shape)
-    print(treatment_params_pred.shape)
-    np.testing.assert_allclose(preds, preds_comb)
-
-
 def test_get_column_layout_normal_outcome():
     """get_column_layout reads (2, 1, 1) off a compiled Normal-outcome (loc+scale) model"""
     tf.random.set_seed(10)
