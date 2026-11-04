@@ -9,8 +9,29 @@ from .. import utils
 from . import losses
 
 
+class _ColumnArgsMixin:
+    """Stores the y_pred / y_true column counts and adds them to ``get_config``.
+
+    Subclasses set ``_COLUMN_ARGS`` to the constructor arguments they store as ``_<name>``.
+    Every other constructor argument (``name``, ``dtype``, ``curve``, ...) goes to the Keras
+    base metric, whose ``get_config`` returns it, so ``cls.from_config(m.get_config())``
+    rebuilds the metric.
+    """
+
+    _COLUMN_ARGS: tuple[str, ...] = ("n_outcome_pred_cols", "n_treatment_pred_cols")
+
+    def get_config(self) -> dict:
+        """Returns the base metric's config plus the column counts."""
+        config = super().get_config()
+        config.update({k: getattr(self, f"_{k}") for k in self._COLUMN_ARGS})
+        return config
+
+
+_WITH_OUTCOME_TRUE_COLS = ("n_outcome_pred_cols", "n_treatment_pred_cols", "n_outcome_true_cols")
+
+
 @tf.keras.utils.register_keras_serializable(package="pypsps")
-class PropensityScoreBinaryCrossentropy(tf.keras.metrics.BinaryCrossentropy):
+class PropensityScoreBinaryCrossentropy(_ColumnArgsMixin, tf.keras.metrics.BinaryCrossentropy):
     """Computes cross entropy for the propensity score. Used as a metric in pypsps model."""
 
     def __init__(
@@ -20,7 +41,7 @@ class PropensityScoreBinaryCrossentropy(tf.keras.metrics.BinaryCrossentropy):
         name="propensity_score_binary_crossentropy",
         **kwargs,
     ):
-        super().__init__(name=name)
+        super().__init__(name=name, **kwargs)
         self._n_outcome_pred_cols = n_outcome_pred_cols
         self._n_treatment_pred_cols = n_treatment_pred_cols
 
@@ -39,11 +60,20 @@ class PropensityScoreBinaryCrossentropy(tf.keras.metrics.BinaryCrossentropy):
 
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")
-class PropensityScoreAUC(tf.keras.metrics.AUC):
-    """AUC computed on the output for propensity part."""
+class PropensityScoreAUC(_ColumnArgsMixin, tf.keras.metrics.AUC):
+    """AUC computed on the output for propensity part.
 
-    def __init__(self, n_outcome_pred_cols: int, n_treatment_pred_cols: int, **kwargs):
-        super().__init__()
+    Keyword arguments (``curve``, ``num_thresholds``, ...) go to ``tf.keras.metrics.AUC``.
+    """
+
+    def __init__(
+        self,
+        n_outcome_pred_cols: int,
+        n_treatment_pred_cols: int,
+        name="propensity_score_auc",
+        **kwargs,
+    ):
+        super().__init__(name=name, **kwargs)
         self._n_outcome_pred_cols = n_outcome_pred_cols
         self._n_treatment_pred_cols = n_treatment_pred_cols
 
@@ -63,45 +93,20 @@ class PropensityScoreAUC(tf.keras.metrics.AUC):
 
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")
-class TreatmentMeanSquaredError(tf.keras.metrics.MeanSquaredError):
+class TreatmentMeanSquaredError(_ColumnArgsMixin, tf.keras.metrics.MeanSquaredError):
     """MSE computed on continuous treatment prediction."""
 
-    def __init__(
-        self,
-        n_outcome_pred_cols: int,
-        n_treatment_pred_cols: int,
-        n_outcome_true_cols: int,
-        **kwargs,
-    ):
-        super().__init__()
-        self._n_outcome_true_cols = n_outcome_true_cols
-        self._n_outcome_pred_cols = n_outcome_pred_cols
-        self._n_treatment_pred_cols = n_treatment_pred_cols
-
-    def update_state(self, y_true, y_pred, sample_weight=None):
-        """Updates state"""
-        treat_pred = utils.agg_treatment_pred(
-            y_pred,
-            n_outcome_pred_cols=self._n_outcome_pred_cols,
-            n_treatment_pred_cols=self._n_treatment_pred_cols,
-        )
-        treat_true = utils.split_y_true(y_true, n_outcome_true_cols=self._n_outcome_true_cols)[1]
-        super().update_state(y_true=treat_true, y_pred=treat_pred, sample_weight=sample_weight)
-
-
-# TODO: add unit test for Outcome* metrics
-@tf.keras.utils.register_keras_serializable(package="pypsps")
-class TreatmentMeanAbsoluteError(tf.keras.metrics.MeanAbsoluteError):
-    """MSE computed on the output for weighted average outcome prediction."""
+    _COLUMN_ARGS = _WITH_OUTCOME_TRUE_COLS
 
     def __init__(
         self,
         n_outcome_pred_cols: int,
         n_treatment_pred_cols: int,
         n_outcome_true_cols: int,
+        name="treatment_mean_squared_error",
         **kwargs,
     ):
-        super().__init__()
+        super().__init__(name=name, **kwargs)
         self._n_outcome_true_cols = n_outcome_true_cols
         self._n_outcome_pred_cols = n_outcome_pred_cols
         self._n_treatment_pred_cols = n_treatment_pred_cols
@@ -118,17 +123,50 @@ class TreatmentMeanAbsoluteError(tf.keras.metrics.MeanAbsoluteError):
 
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")
-class OutcomeMeanSquaredError(tf.keras.metrics.MeanSquaredError):
-    """MSE computed on the output for weighted average outcome prediction."""
+class TreatmentMeanAbsoluteError(_ColumnArgsMixin, tf.keras.metrics.MeanAbsoluteError):
+    """MAE computed on continuous treatment prediction."""
+
+    _COLUMN_ARGS = _WITH_OUTCOME_TRUE_COLS
 
     def __init__(
         self,
         n_outcome_pred_cols: int,
         n_treatment_pred_cols: int,
         n_outcome_true_cols: int,
+        name="treatment_mean_absolute_error",
         **kwargs,
     ):
-        super().__init__()
+        super().__init__(name=name, **kwargs)
+        self._n_outcome_true_cols = n_outcome_true_cols
+        self._n_outcome_pred_cols = n_outcome_pred_cols
+        self._n_treatment_pred_cols = n_treatment_pred_cols
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        """Updates state"""
+        treat_pred = utils.agg_treatment_pred(
+            y_pred,
+            n_outcome_pred_cols=self._n_outcome_pred_cols,
+            n_treatment_pred_cols=self._n_treatment_pred_cols,
+        )
+        treat_true = utils.split_y_true(y_true, n_outcome_true_cols=self._n_outcome_true_cols)[1]
+        super().update_state(y_true=treat_true, y_pred=treat_pred, sample_weight=sample_weight)
+
+
+@tf.keras.utils.register_keras_serializable(package="pypsps")
+class OutcomeMeanSquaredError(_ColumnArgsMixin, tf.keras.metrics.MeanSquaredError):
+    """MSE computed on the output for weighted average outcome prediction."""
+
+    _COLUMN_ARGS = _WITH_OUTCOME_TRUE_COLS
+
+    def __init__(
+        self,
+        n_outcome_pred_cols: int,
+        n_treatment_pred_cols: int,
+        n_outcome_true_cols: int,
+        name="outcome_mean_squared_error",
+        **kwargs,
+    ):
+        super().__init__(name=name, **kwargs)
         self._n_outcome_true_cols = n_outcome_true_cols
         self._n_outcome_pred_cols = n_outcome_pred_cols
         self._n_treatment_pred_cols = n_treatment_pred_cols
@@ -144,19 +182,21 @@ class OutcomeMeanSquaredError(tf.keras.metrics.MeanSquaredError):
         super().update_state(y_true=outcome_true, y_pred=avg_outcome, sample_weight=sample_weight)
 
 
-# TODO: add unit test for Outcome* metrics
 @tf.keras.utils.register_keras_serializable(package="pypsps")
-class OutcomeMeanAbsoluteError(tf.keras.metrics.MeanAbsoluteError):
-    """MSE computed on the output for weighted average outcome prediction."""
+class OutcomeMeanAbsoluteError(_ColumnArgsMixin, tf.keras.metrics.MeanAbsoluteError):
+    """MAE computed on the output for weighted average outcome prediction."""
+
+    _COLUMN_ARGS = _WITH_OUTCOME_TRUE_COLS
 
     def __init__(
         self,
         n_outcome_pred_cols: int,
         n_treatment_pred_cols: int,
         n_outcome_true_cols: int,
+        name="outcome_mean_absolute_error",
         **kwargs,
     ):
-        super().__init__()
+        super().__init__(name=name, **kwargs)
         self._n_outcome_true_cols = n_outcome_true_cols
         self._n_outcome_pred_cols = n_outcome_pred_cols
         self._n_treatment_pred_cols = n_treatment_pred_cols

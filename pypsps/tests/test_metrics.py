@@ -471,3 +471,97 @@ def test_outcome_nll_metric_keeps_outcome_likelihood():
         got = float(metrics.outcome_nll_metric_gen(chosen)(y_true, y_pred))
         np.testing.assert_allclose(got, float(chosen(y_true, y_pred)), rtol=1e-7)
         assert got != pytest.approx(float(other(y_true, y_pred)))
+
+
+_COL_KWARGS = {"n_outcome_pred_cols": 1, "n_treatment_pred_cols": 1}
+_COL_KWARGS_WITH_TRUE = {**_COL_KWARGS, "n_outcome_true_cols": 1}
+
+_METRIC_CLASSES = [
+    (
+        metrics.PropensityScoreBinaryCrossentropy,
+        _COL_KWARGS,
+        "propensity_score_binary_crossentropy",
+    ),
+    (metrics.PropensityScoreAUC, _COL_KWARGS, "propensity_score_auc"),
+    (metrics.TreatmentMeanSquaredError, _COL_KWARGS_WITH_TRUE, "treatment_mean_squared_error"),
+    (metrics.TreatmentMeanAbsoluteError, _COL_KWARGS_WITH_TRUE, "treatment_mean_absolute_error"),
+    (metrics.OutcomeMeanSquaredError, _COL_KWARGS_WITH_TRUE, "outcome_mean_squared_error"),
+    (metrics.OutcomeMeanAbsoluteError, _COL_KWARGS_WITH_TRUE, "outcome_mean_absolute_error"),
+]
+_METRIC_IDS = [cls.__name__ for cls, _, _ in _METRIC_CLASSES]
+
+
+def _metric_fixture():
+    """y_true (outcome, treatment) and a 2-state y_pred with 1 outcome and 1 treatment col."""
+    weights = [[0.5, 0.5], [0.3, 0.7], [0.9, 0.1], [0.1, 0.9], [0.6, 0.4], [0.2, 0.8]]
+    outcome_by_state = [[1.0, 2.0], [0.5, -1.0], [3.0, 0.0], [-2.0, 1.0], [0.0, 0.0], [1.5, 2.5]]
+    treatment_by_state = [[0.9, 0.1], [0.5, 0.5], [0.2, 0.8], [0.7, 0.3], [0.4, 0.6], [0.8, 0.9]]
+    y_pred = _make_y_pred(
+        outcome_blocks=[outcome_by_state],
+        weights=weights,
+        treatment_blocks=[treatment_by_state],
+    )
+    y_true = tf.constant(
+        [[1.0, 1.0], [0.0, 0.0], [2.0, 1.0], [-1.0, 0.0], [0.5, 0.0], [2.0, 1.0]],
+        dtype=tf.float32,
+    )
+    return y_true, y_pred, np.asarray(weights), np.asarray(treatment_by_state)
+
+
+@pytest.mark.parametrize("cls,col_kwargs,default_name", _METRIC_CLASSES, ids=_METRIC_IDS)
+def test_metrics_have_explicit_default_names(cls, col_kwargs, default_name):
+    """The default name is explicit, so Keras doesn't add a per-session `_N` suffix."""
+    assert cls(**col_kwargs).name == default_name
+    assert cls(**col_kwargs).name == default_name
+
+
+@pytest.mark.parametrize("cls,col_kwargs,default_name", _METRIC_CLASSES, ids=_METRIC_IDS)
+def test_metrics_forward_name_and_kwargs(cls, col_kwargs, default_name):
+    """`name` and other keyword arguments reach the Keras base metric."""
+    metric = cls(**col_kwargs, name="custom", dtype="float64")
+    assert metric.name == "custom"
+    assert metric.dtype == "float64"
+
+
+@pytest.mark.parametrize("cls,col_kwargs,default_name", _METRIC_CLASSES, ids=_METRIC_IDS)
+def test_metric_config_round_trips(cls, col_kwargs, default_name):
+    """`from_config(get_config())` rebuilds the metric with the same columns and result."""
+    y_true, y_pred, _, _ = _metric_fixture()
+    metric = cls(**col_kwargs, name="custom")
+    config = metric.get_config()
+    for key, value in col_kwargs.items():
+        assert config[key] == value
+
+    rebuilt = cls.from_config(config)
+    assert rebuilt.name == "custom"
+    metric.update_state(y_true, y_pred)
+    rebuilt.update_state(y_true, y_pred)
+    np.testing.assert_allclose(rebuilt.result().numpy(), metric.result().numpy(), rtol=1e-6)
+
+
+def test_propensity_score_auc_config_keeps_curve():
+    """The AUC's own arguments (`curve`, `num_thresholds`) survive a config round trip."""
+    metric = metrics.PropensityScoreAUC(**_COL_KWARGS, curve="PR", num_thresholds=50)
+    rebuilt = metrics.PropensityScoreAUC.from_config(metric.get_config())
+    assert rebuilt.curve.name == "PR"
+    assert rebuilt.num_thresholds == 50
+
+
+def test_propensity_score_auc_honors_curve():
+    """`curve="PR"` computes the PR AUC; it used to be dropped, which gave the ROC AUC."""
+    y_true, y_pred, weights, treatment_by_state = _metric_fixture()
+    marginal_propensity = (weights * treatment_by_state).sum(axis=1)[:, None]
+    treatment_true = y_true[:, -1:]
+
+    expected = {}
+    for curve in ("ROC", "PR"):
+        reference = tf.keras.metrics.AUC(curve=curve)
+        reference.update_state(treatment_true, marginal_propensity)
+        expected[curve] = reference.result().numpy()
+    # The fixture must tell the two curves apart, or the test proves nothing.
+    assert abs(expected["PR"] - expected["ROC"]) > 1e-3
+
+    for curve in ("ROC", "PR"):
+        metric = metrics.PropensityScoreAUC(**_COL_KWARGS, curve=curve)
+        metric.update_state(y_true, y_pred)
+        np.testing.assert_allclose(metric.result().numpy(), expected[curve], rtol=1e-5)
