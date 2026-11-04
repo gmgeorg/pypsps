@@ -61,6 +61,10 @@ def test_end_to_end_dataset_model_fit_and_inference():
     preds = model.predict(inputs)
 
     assert preds.shape[0] == ks_data.n_samples
+    # The mixed outcome mean tracks the observed outcome (moved from the deleted
+    # test_utils.py::test_agg_outcome_preds_works, which pinned the raw-parameter mix).
+    outcome_mean = np.asarray(model.loss.mixture.outcome_mean(preds))[:, 0]
+    assert np.corrcoef(outcome_mean, outputs[:, 0])[0, 1] > 0.6
 
     ute = inference.predict_ute_binary(model, inputs[0])
     assert ute.shape[0] == ks_data.n_samples

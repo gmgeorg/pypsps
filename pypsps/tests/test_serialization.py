@@ -12,7 +12,7 @@ import pytest
 import tensorflow as tf
 
 from .. import datasets, utils
-from ..keras import families, losses, mixture, models, neglogliks
+from ..keras import families, losses, metrics, mixture, models, neglogliks
 from .test_models import _continuous_model, _synthetic_continuous_survival
 
 
@@ -295,3 +295,53 @@ def test_causal_loss_from_config_shares_one_mixture():
     rebuilt = tf.keras.utils.deserialize_keras_object(tf.keras.utils.serialize_keras_object(loss))
     assert rebuilt.mixture == mix
     assert rebuilt._outcome_loss.mixture is rebuilt._treatment_loss.mixture
+
+
+def _metric_value(metric, y_true, y_pred) -> float:
+    """One-shot value of a stateful metric: reset, update once, read."""
+    metric.reset_state()
+    metric.update_state(y_true, y_pred)
+    return float(metric.result())
+
+
+@pytest.mark.parametrize("name", list(_FIXTURE_BUILDERS))
+def test_three_int_metric_configs_still_load(name):
+    """The compiled metrics saved by v0.3.0 (three ints, int generator kwargs) load, and each
+    equals today's metric of the same name.
+
+    The values agree because v0.3.0's builders only used counts that the shape rule maps
+    onto the right family: Normal (2, 1) and the 1-parameter identity. Delete in v0.5.0.
+    """
+    configs = json.loads((_FIXTURES / f"{name}_metrics.json").read_text())
+    model, inputs, outputs = _FIXTURE_BUILDERS[name]()
+    current = {
+        m.name: m
+        for m in map(tf.keras.utils.deserialize_keras_object, model.get_compile_config()["metrics"])
+    }
+    y_pred = tf.constant(model.predict(inputs, verbose=0))
+    y_true = tf.constant(outputs, tf.float32)
+    assert sorted(c["config"]["name"] for c in configs) == sorted(current)
+    for config in configs:
+        assert "mixture" not in config["config"]
+        loaded = tf.keras.utils.deserialize_keras_object(config)
+        if isinstance(loaded, metrics.OutcomeMeanSquaredError):
+            assert loaded.mixture.outcome_family == families.Normal()
+        np.testing.assert_allclose(
+            _metric_value(loaded, y_true, y_pred),
+            _metric_value(current[loaded.name], y_true, y_pred),
+            rtol=1e-5,
+            err_msg=loaded.name,
+        )
+
+
+@pytest.mark.parametrize("builder_id", ["toy", "binary_normal", "binary_exponential"])
+def test_propensity_metric_name_aupr(builder_id):
+    """The binary builders compile the PR-curve AUC as propensity_score_aupr (decision B1b),
+    and every mixture metric shares the loss's mixture."""
+    model, _, _ = dict(_BUILDERS)[builder_id]()
+    compiled = model._compile_config.config["metrics"]
+    aupr = [m for m in compiled if m.name == "propensity_score_aupr"]
+    assert len(aupr) == 1 and aupr[0].curve.name == "PR"
+    for metric in compiled:
+        if isinstance(metric, metrics._MixtureMetricMixin):
+            assert metric.mixture is model.loss.mixture

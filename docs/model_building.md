@@ -12,7 +12,11 @@ All components are fully compatible with the standard `tf.keras` API.
   exponential or Weibull time-to-event outcome.
 * **`layers`**: Custom PSPS layer implementations.
 * **`losses`**: Causal loss functions optimized for predictive state learning.
-* **`metrics`**: Custom evaluation metrics for causal estimation.
+* **`metrics`**: Custom evaluation metrics for causal estimation. The propensity,
+  treatment and outcome metrics take the model's mixture (`metrics.PropensityScoreAUC(mixture)`,
+  `metrics.OutcomeMeanSquaredError(mixture)`); `predictive_state_df_gen` and
+  `uniform_entropy_gen` take its layout (`mixture.layout`). See
+  [Outcome and Treatment Metrics](#outcome-and-treatment-metrics).
 * **`callbacks`**: Training helpers (e.g., `get_default_callbacks()`).
 * **`neglogliks`**: Negative log-likelihood functions.
 * **`layout`**: `ColumnLayout`, the one place that knows the column order of `y_pred`
@@ -87,6 +91,34 @@ log-likelihood alone, with penalties stripped and no alpha. Monitoring
 `val_outcome_nll_metric` therefore selects every model by the same rule, whatever
 alpha schedule it was trained with. See the
 [Training Guide](training_guide.md#3-selecting-on-the-outcome-term).
+
+## Outcome and Treatment Metrics
+
+`OutcomeMeanSquaredError`, `OutcomeMeanAbsoluteError`, `TreatmentMeanSquaredError` and
+`TreatmentMeanAbsoluteError` score the mixed mean `sum_k P(s_k | x) * E[. | s_k]`, where
+each state's mean comes from its family: `loc` for Normal, `exp(log_scale) * Gamma(1 + 1 /
+shape)` for Weibull. The propensity metrics score `sum_k P(s_k | x) * p_k`.
+
+```python
+from pypsps.keras import metrics
+
+mixture = model.loss.mixture
+model.compile(loss=model.loss, optimizer="adam",
+              metrics=[metrics.OutcomeMeanSquaredError(mixture)])
+```
+
+For a time-to-event outcome, the outcome MSE and MAE use only units with an observed
+event. A censored unit's time is only a lower bound, so it adds no error and no weight. A
+batch without events therefore leaves the metric unchanged. If no event has been seen since
+the last reset, the metric reports `NaN`, not 0. Don't monitor `val_outcome_mean_squared_error`
+on a heavily censored validation set: if the first epoch is `NaN`, `EarlyStopping` keeps it
+as the best value and stops after `patience` epochs. `TerminateOnNaN` reads only the loss,
+so it is not affected.
+
+The legacy constructors with three column counts (`n_outcome_pred_cols`,
+`n_treatment_pred_cols`, `n_outcome_true_cols`) still work. They infer the family from the
+counts: 2 parameters and 1 `y_true` column is Normal, and 1 parameter is used as the mean
+directly. Any other count raises a `ValueError`; pass the mixture instead.
 
 ## Per-State Column Selection
 

@@ -1,0 +1,131 @@
+[
+ {
+  "class_name": "PropensityScoreBinaryCrossentropy",
+  "config": {
+   "dtype": "float32",
+   "from_logits": false,
+   "label_smoothing": 0,
+   "n_outcome_pred_cols": 2,
+   "n_treatment_pred_cols": 1,
+   "name": "propensity_score_binary_crossentropy"
+  },
+  "module": "pypsps.keras.metrics",
+  "registered_name": "pypsps>PropensityScoreBinaryCrossentropy"
+ },
+ {
+  "class_name": "PropensityScoreAUC",
+  "config": {
+   "curve": "ROC",
+   "dtype": "float32",
+   "from_logits": false,
+   "label_weights": null,
+   "multi_label": false,
+   "n_outcome_pred_cols": 2,
+   "n_treatment_pred_cols": 1,
+   "name": "propensity_score_auroc",
+   "num_labels": null,
+   "num_thresholds": 200,
+   "summation_method": "interpolation"
+  },
+  "module": "pypsps.keras.metrics",
+  "registered_name": "pypsps>PropensityScoreAUC"
+ },
+ {
+  "class_name": "PropensityScoreAUC",
+  "config": {
+   "curve": "PR",
+   "dtype": "float32",
+   "from_logits": false,
+   "label_weights": null,
+   "multi_label": false,
+   "n_outcome_pred_cols": 2,
+   "n_treatment_pred_cols": 1,
+   "name": "propensity_score_aupr",
+   "num_labels": null,
+   "num_thresholds": 200,
+   "summation_method": "interpolation"
+  },
+  "module": "pypsps.keras.metrics",
+  "registered_name": "pypsps>PropensityScoreAUC"
+ },
+ {
+  "class_name": "OutcomeMeanSquaredError",
+  "config": {
+   "dtype": "float32",
+   "n_outcome_pred_cols": 2,
+   "n_outcome_true_cols": 1,
+   "n_treatment_pred_cols": 1,
+   "name": "outcome_mean_squared_error"
+  },
+  "module": "pypsps.keras.metrics",
+  "registered_name": "pypsps>OutcomeMeanSquaredError"
+ },
+ {
+  "class_name": "CausalLossMetric",
+  "config": {
+   "dtype": "float32",
+   "name": "causal_loss_metric",
+   "outcome_loss": {
+    "class_name": "OutcomeLoss",
+    "config": {
+     "loss": {
+      "class_name": "NegloglikNormal",
+      "config": {
+       "name": "negloglik_normal",
+       "reduction": "none"
+      },
+      "module": "pypsps.keras.neglogliks",
+      "registered_name": "pypsps>NegloglikNormal"
+     },
+     "n_outcome_pred_cols": 2,
+     "n_outcome_true_cols": 1,
+     "n_treatment_pred_cols": 1,
+     "name": "outcome_loss",
+     "outcome_likelihood": "interventional",
+     "reduction": "sum_over_batch_size",
+     "treatment_loss": {
+      "class_name": "BinaryCrossentropy",
+      "config": {
+       "axis": -1,
+       "from_logits": false,
+       "label_smoothing": 0.0,
+       "name": "binary_crossentropy",
+       "reduction": "none"
+      },
+      "module": "keras.losses",
+      "registered_name": null
+     }
+    },
+    "module": "pypsps.keras.losses",
+    "registered_name": "pypsps>OutcomeLoss"
+   },
+   "outcome_loss_weight": 1.0,
+   "treatment_loss": {
+    "class_name": "TreatmentLoss",
+    "config": {
+     "loss": {
+      "class_name": "BinaryCrossentropy",
+      "config": {
+       "axis": -1,
+       "from_logits": false,
+       "label_smoothing": 0.0,
+       "name": "binary_crossentropy",
+       "reduction": "none"
+      },
+      "module": "keras.losses",
+      "registered_name": null
+     },
+     "n_outcome_pred_cols": 2,
+     "n_outcome_true_cols": 1,
+     "n_treatment_pred_cols": 1,
+     "name": "treatment_loss",
+     "reduction": "sum_over_batch_size"
+    },
+    "module": "pypsps.keras.losses",
+    "registered_name": "pypsps>TreatmentLoss"
+   }
+  },
+  "module": "pypsps.keras.metrics",
+  "registered_name": "pypsps>CausalLossMetric"
+ }
+]
