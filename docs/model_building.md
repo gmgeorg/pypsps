@@ -38,7 +38,8 @@ epoch `e`. It starts exactly at `alpha_start` with zero slope and has no clamp. 
 its range from `alpha_end`. Pass it to `EligibleBestCheckpoint` and `WarmupReduceLROnPlateau`
 as `start_from_epoch` so that model selection and learning-rate reduction only compare
 epochs at which the loss weight has settled. `EligibleBestCheckpoint` also treats NaN or
-infinite epochs as ineligible and raises if no epoch was eligible.
+infinite epochs as ineligible and raises if no epoch was eligible. See the
+[Training Guide](training_guide.md#2-alpha-schedules).
 
 ```python
 from pypsps.keras import callbacks
@@ -59,13 +60,15 @@ cbs = [
 `metrics.outcome_nll_metric_gen(outcome_loss)` reports the outcome negative
 log-likelihood alone, with penalties stripped and no alpha. Monitoring
 `val_outcome_nll_metric` therefore selects every model by the same rule, whatever
-alpha schedule it was trained with.
+alpha schedule it was trained with. See the
+[Training Guide](training_guide.md#3-selecting-on-the-outcome-term).
 
 ## Per-State Column Selection
 
 `layers.StateColumnGate(i)` returns column `i` of a 2D tensor, such as one state's
 probability column. Use it instead of a `Lambda` built inside a per-state loop.
-Unlike the `Lambda`, it serializes with `model.save()`.
+Unlike the `Lambda`, it serializes with `model.save()`. See the
+[Training Guide](training_guide.md#1-per-state-layers-in-a-loop) for why.
 
 ## Outcome Likelihood
 
@@ -85,7 +88,8 @@ loss evaluates, through the state weights that mix the per-state outcome likelih
   v0.1.10.
 
 Metrics built from the loss (`causal_loss_metric_gen`, `outcome_nll_metric_gen`) use the
-same likelihood.
+same likelihood. See the
+[Training Guide](training_guide.md#4-interventional-and-observational-outcome-likelihood).
 
 To make `causal_loss_metric_gen` follow an alpha schedule, pass it the training loss's
 variable, `alpha=causal_loss._alpha`. A float alpha stays fixed.
@@ -116,4 +120,6 @@ The outcome parameters are soft-clipped (`layers.SoftClip`) to `log_scale_bounds
 for Weibull, `log_shape_bounds`. Both are required, because sensible values depend on the
 time unit. With `max_time`, the builder raises if
 `exp(log_shape_max) * (log(max_time) - log_scale_min)` exceeds 50, well below where the
-Weibull negative log-likelihood overflows float32 (near 88.7).
+Weibull negative log-likelihood overflows float32 (near 88.7). See the
+[Training Guide](training_guide.md#5-time-to-event-parameter-bounds) for choosing the
+bounds.

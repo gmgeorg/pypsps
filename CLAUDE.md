@@ -35,6 +35,9 @@ across various treatment and outcome types.
   testing rules, formatting workflows, and git standards.
 * **[Model Architecture](docs/model_building.md)**: Keras API builders, custom
   layers, loss functions, metrics, and training callbacks.
+* **[Training Guide](docs/training_guide.md)**: Per-state layers, alpha schedules,
+  model selection, the outcome likelihood option, and time-to-event bounds, with an
+  example.
 * **[Datasets API](docs/datasets.md)**: `CausalDataset` base class, data
   formatting methods, and benchmark datasets (Kang-Schafer, LaLonde, etc.).
 * **[Inference & Post-Processing](docs/inference.md)**: ATE estimation routines,
