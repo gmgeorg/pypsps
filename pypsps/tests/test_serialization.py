@@ -1,6 +1,7 @@
 """Saving and loading compiled pypsps models, and the loss configs behind it."""
 
 import json
+import pathlib
 import subprocess
 import sys
 import textwrap
@@ -11,7 +12,7 @@ import pytest
 import tensorflow as tf
 
 from .. import datasets, utils
-from ..keras import losses, models, neglogliks
+from ..keras import families, losses, mixture, models, neglogliks
 from .test_models import _continuous_model, _synthetic_continuous_survival
 
 
@@ -145,6 +146,9 @@ def test_causal_loss_config_round_trips(regularizer):
     rebuilt = tf.keras.utils.deserialize_keras_object(config)
 
     assert type(rebuilt) is losses.CausalLoss
+    assert config["config"]["outcome_loss"]["config"]["mixture"]["registered_name"] == (
+        "pypsps>StateMixture"
+    )
     assert rebuilt._outcome_loss_weight == 0.5
     assert rebuilt._outcome_loss._outcome_likelihood is losses.OutcomeLikelihood.OBSERVATIONAL
     assert (rebuilt._predictive_states_regularizer is None) == (regularizer is None)
@@ -216,3 +220,78 @@ def test_load_in_a_fresh_process_after_import_pypsps_keras(tmp_path):
     )
     assert result.returncode == 0, result.stderr[-2000:]
     assert result.stdout.strip().endswith("ok")
+
+
+_FIXTURES = pathlib.Path(__file__).parent / "fixtures" / "three_int"
+_FIXTURE_BUILDERS = {
+    "toy": _BUILDERS[0][1],
+    "binary_normal": _BUILDERS[1][1],
+    "binary_exponential": _BUILDERS[2][1],
+    "continuous_exponential": _BUILDERS[3][1],
+    "continuous_weibull": _BUILDERS[4][1],
+}
+
+
+@pytest.mark.parametrize("name", list(_FIXTURE_BUILDERS))
+def test_three_int_configs_still_load(name):
+    """A loss config saved by v0.3.0 (three ints, nested NLLs) loads and gives today's value.
+
+    The fixtures were written by v0.3.0's builders with alpha = 2.5. Delete in v0.5.0 with
+    the legacy from_config branch.
+    """
+    config = json.loads((_FIXTURES / f"{name}_loss.json").read_text())
+    assert "n_outcome_pred_cols" in config["config"]["outcome_loss"]["config"]
+    loaded = tf.keras.utils.deserialize_keras_object(config)
+    assert isinstance(loaded, losses.CausalLoss)
+    assert float(loaded.alpha) == 2.5
+    assert loaded._treatment_loss.mixture is loaded.mixture
+
+    model, inputs, outputs = _FIXTURE_BUILDERS[name]()
+    model.loss.alpha = 2.5
+    y_pred = tf.constant(model.predict(inputs, verbose=0))
+    y_true = tf.constant(outputs, tf.float32)
+    np.testing.assert_allclose(
+        float(loaded(y_true, y_pred)), float(model.loss(y_true, y_pred)), rtol=1e-6
+    )
+    # Saving again writes the mixture schema, which loads to the same value.
+    again = tf.keras.utils.deserialize_keras_object(tf.keras.utils.serialize_keras_object(loaded))
+    assert "mixture" in again._outcome_loss.get_config()
+    np.testing.assert_allclose(
+        float(again(y_true, y_pred)), float(loaded(y_true, y_pred)), rtol=1e-6
+    )
+
+
+class _PenalizedOutcomeLoss(losses.OutcomeLoss):
+    """An OutcomeLoss subclass that adds a penalty (the pattern penalty_free strips)."""
+
+    def __init__(self, *args, penalty: float = 0.0, **kwargs):
+        """Stores the penalty."""
+        super().__init__(*args, **kwargs)
+        self.penalty = penalty
+
+    def get_config(self):
+        """Adds the penalty."""
+        return {**super().get_config(), "penalty": self.penalty}
+
+    def call(self, y_true, y_pred):
+        """The outcome loss plus the penalty."""
+        return super().call(y_true, y_pred) + self.penalty
+
+
+def test_penalty_free_keeps_the_mixture():
+    """penalty_free() drops the penalty and keeps an equal mixture."""
+    mix = mixture.StateMixture(families.Weibull((-2.0, 5.0), (-1.0, 1.0)), families.Normal(), 2)
+    original = _PenalizedOutcomeLoss(mix, "observational", penalty=3.0)
+    clean = original.penalty_free()
+    assert type(clean) is _PenalizedOutcomeLoss and clean.penalty == 0.0
+    assert clean.mixture == original.mixture
+    assert clean.outcome_likelihood is losses.OutcomeLikelihood.OBSERVATIONAL
+
+
+def test_causal_loss_from_config_shares_one_mixture():
+    """After a round trip both losses hold the same mixture object, as when built."""
+    mix = mixture.StateMixture(families.Normal(), families.Bernoulli(), n_states=2)
+    loss = losses.CausalLoss.from_mixture(mix, alpha=2.0)
+    rebuilt = tf.keras.utils.deserialize_keras_object(tf.keras.utils.serialize_keras_object(loss))
+    assert rebuilt.mixture == mix
+    assert rebuilt._outcome_loss.mixture is rebuilt._treatment_loss.mixture

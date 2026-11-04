@@ -5,6 +5,30 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.3.2 - Nov 4, 2026
+
+### Added
+
+* `pypsps.keras.mixture.StateMixture`: the per-state NLLs, the state posterior, the outcome
+  and treatment mixture NLLs, `causal_nll`, and the outcome and treatment means, from one
+  outcome family, one treatment family and the column layout.
+* `OutcomeLoss(mixture, outcome_likelihood=...)`, `TreatmentLoss(mixture)` and
+  `CausalLoss.from_mixture(mixture, ...)`. `CausalLoss.mixture` and `CausalLoss.layout`.
+
+### Changed
+
+* The losses compute through `StateMixture`. Values and gradients equal the previous
+  ones to float32 rounding. The three-int constructors still work: they map their
+  elementwise NLLs onto families.
+* Loss configs store a `"mixture"` instead of the nested NLLs and the three ints. Configs
+  saved by v0.3.0 and v0.3.1 still load.
+* `CausalLoss` raises a `ValueError` if losses built from a mixture don't share the same
+  mixture. With the three-int constructors, a treatment NLL or column-count mismatch between
+  the outcome and the treatment loss gives a `FutureWarning`; it will raise from v0.5.0.
+* `OutcomeLikelihood` now lives in `pypsps.keras.mixture`; `losses.OutcomeLikelihood` is
+  the same object.
+* An unknown loss `reduction` raises `ValueError` instead of `NotImplementedError`.
+
 ## pypsps v0.3.1 - Nov 4, 2026
 
 ### Added

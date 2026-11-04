@@ -19,6 +19,12 @@ All components are fully compatible with the standard `tf.keras` API.
   (`[outcome params | state weights | treatment params]`, each block one column per state)
   and `y_true` (`[outcome | treatment | ignored]`). `decode_pred` splits a prediction into
   named `[N, K]` blocks and `encode` puts them back together.
+* **`mixture`**: `StateMixture(outcome_family, treatment_family, n_states)` holds the two
+  families and the layout, and computes everything that mixes over predictive states: the
+  per-state NLLs, the state posterior P(s | x, a), the outcome and treatment mixture NLLs,
+  and the outcome and treatment means (mixing each state's family mean). `OutcomeLoss` and
+  `TreatmentLoss` evaluate it; `CausalLoss.from_mixture(mixture, alpha=...)` builds a causal
+  loss whose two parts share one mixture. The three-int loss constructors still work.
 * **`families`**: one class per within-state distribution: `Normal`, `Bernoulli`,
   `Exponential(parameterization="log_scale" | "log_rate" | "rate")` and `Weibull`. Each
   family knows its parameter names, its head activations, its per-state NLL
