@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
+from ..keras import families
 from ..keras.layout import ColumnLayout
 
 _OUTCOME_PARAMS = [("loc", "scale"), ("log_scale",), ("log_scale", "log_shape")]
@@ -137,6 +138,23 @@ def test_names_are_validated():
         ColumnLayout(("loc", "loc"), ("prob",), 1)
     with pytest.raises(ValueError, match="empty"):
         ColumnLayout((), ("prob",), 1)
+
+
+def test_layout_from_counts_matches_from_families():
+    """from_counts and from_families slice identically; only the names differ."""
+    by_family = ColumnLayout.from_families(3, families.Weibull(), families.Normal())
+    by_counts = ColumnLayout.from_counts(2, 2, 2, n_states=3)
+    assert by_family.outcome_params == ("log_scale", "log_shape")
+    assert by_family.treatment_params == ("loc", "scale")
+    assert by_counts.outcome_params == ("outcome_param_0", "outcome_param_1")
+    assert (by_family.n_outcome_true_cols, by_family.n_states) == (2, 3)
+    y = _y_pred(by_family)
+    a, b = by_family.decode_pred(y), by_counts.decode_pred(y)
+    for x, z in zip(
+        [*a.outcome.values(), a.state_weights, *a.treatment.values()],
+        [*b.outcome.values(), b.state_weights, *b.treatment.values()],
+    ):
+        np.testing.assert_array_equal(x, z)
 
 
 @pytest.mark.parametrize("n_states", [None, 4])

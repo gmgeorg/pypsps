@@ -15,6 +15,25 @@ All components are fully compatible with the standard `tf.keras` API.
 * **`metrics`**: Custom evaluation metrics for causal estimation.
 * **`callbacks`**: Training helpers (e.g., `get_default_callbacks()`).
 * **`neglogliks`**: Negative log-likelihood functions.
+* **`layout`**: `ColumnLayout`, the one place that knows the column order of `y_pred`
+  (`[outcome params | state weights | treatment params]`, each block one column per state)
+  and `y_true` (`[outcome | treatment | ignored]`). `decode_pred` splits a prediction into
+  named `[N, K]` blocks and `encode` puts them back together.
+* **`families`**: one class per within-state distribution: `Normal`, `Bernoulli`,
+  `Exponential(parameterization="log_scale" | "log_rate" | "rate")` and `Weibull`. Each
+  family knows its parameter names, its head activations, its per-state NLL
+  (`nll(y_true, params) -> [N, K]`) and its mean. `families.get("weibull", ...)` looks one
+  up by name.
+
+```python
+from pypsps.keras import families
+from pypsps.keras.layout import ColumnLayout
+
+layout = ColumnLayout.from_families(n_states=3, outcome_family=families.Normal(),
+                                    treatment_family=families.Bernoulli())
+parts = layout.decode_pred(y_pred)          # parts.outcome["loc"] is [N, 3]
+means = families.Normal().mean(parts.outcome)   # E[Y | state k], [N, 3]
+```
 
 ## Recommended Training Pattern
 

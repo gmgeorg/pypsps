@@ -8,7 +8,7 @@ import pypress.keras.layers
 import pypress.keras.regularizers
 import tensorflow as tf
 
-from . import layers, losses, metrics, neglogliks
+from . import families, layers, losses, metrics, neglogliks
 
 tfk = tf.keras
 
@@ -554,40 +554,6 @@ def build_model_binary_exponential(
 
 _SURVIVAL_DISTRIBUTIONS = ("exponential", "weibull")
 
-# float32 exp() overflows near 88.7; keep the largest exponent of the survival NLL below this,
-# with a wide margin.
-_MAX_SURVIVAL_EXPONENT = 50.0
-
-
-def _check_bounds(name: str, bounds: Tuple[float, float]) -> Tuple[float, float]:
-    """Validates a ``(min, max)`` pair of finite floats with ``min < max``."""
-    if bounds is None or len(bounds) != 2:
-        raise ValueError(f"{name} must be a (min, max) pair, got {bounds!r}")
-    low, high = float(bounds[0]), float(bounds[1])
-    if not (np.isfinite(low) and np.isfinite(high) and low < high):
-        raise ValueError(f"{name} must be finite with min < max, got {bounds!r}")
-    return low, high
-
-
-def _check_survival_exponent(
-    max_time: float, log_scale_min: float, log_shape_max: Optional[float]
-) -> None:
-    """Raises if the outcome NLL can overflow float32 for times up to ``max_time``.
-
-    The exponent of ``(t / scale) ** shape`` is at most
-    ``shape_max * (log(max_time) - log_scale_min)``, with ``shape_max = 1`` for exponential.
-    """
-    if not max_time > 0:
-        raise ValueError(f"max_time must be positive, got {max_time!r}")
-    shape_max = 1.0 if log_shape_max is None else float(np.exp(log_shape_max))
-    exponent = shape_max * (np.log(max_time) - log_scale_min)
-    if exponent > _MAX_SURVIVAL_EXPONENT:
-        raise ValueError(
-            f"shape_max * (log(max_time) - log_scale_min) = {exponent:.1f} exceeds "
-            f"{_MAX_SURVIVAL_EXPONENT}: the loss would overflow float32. Raise the lower "
-            "log-scale bound, lower the upper log-shape bound, or rescale time."
-        )
-
 
 def _dense_stack(
     x: tf.Tensor,
@@ -723,13 +689,17 @@ def build_model_continuous_survival(
     assert n_states >= 1, f"Got n_states={n_states}"
     assert n_features >= 1, f"Got n_features={n_features}"
     is_weibull = distribution == "weibull"
-    log_scale_min, log_scale_max = _check_bounds("log_scale_bounds", log_scale_bounds)
+    # The builder requires bounds; the families alone allow unbounded parameters.
+    log_scale_min, log_scale_max = families._check_bounds("log_scale_bounds", log_scale_bounds)
     if is_weibull:
-        log_shape_min, log_shape_max = _check_bounds("log_shape_bounds", log_shape_bounds)
+        log_shape_min, log_shape_max = families._check_bounds("log_shape_bounds", log_shape_bounds)
+        outcome_family = families.Weibull(log_scale_bounds, log_shape_bounds)
     elif log_shape_bounds is not None:
         raise ValueError("log_shape_bounds applies to distribution='weibull' only")
+    else:
+        outcome_family = families.Exponential("log_scale", bounds=log_scale_bounds)
     if max_time is not None:
-        _check_survival_exponent(max_time, log_scale_min, log_shape_max if is_weibull else None)
+        outcome_family.check_max_time(max_time)
 
     features = tfk.layers.Input(shape=(n_features,), name="features")
     treat = tfk.layers.Input(shape=(1,), name="treatment")

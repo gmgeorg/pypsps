@@ -18,50 +18,28 @@ import tensorflow as tf
 import tqdm
 
 from . import utils
-from .keras import neglogliks
+from .keras import families
 
 
 def _state_conditional_outcome_mean(
     model: tf.keras.Model, outcome_params_pred: np.ndarray, layout: utils.ColumnLayout
 ) -> np.ndarray:
-    """Extracts each state's conditional outcome mean E[Y | a, x, s_k] from raw outcome params.
+    """Each state's conditional outcome mean E[Y | a, x, s_k] from raw outcome params.
 
-    `outcome_params_pred` holds each state's *raw* outcome-distribution parameters (e.g. Normal's
-    (loc, scale), or Exponential's log_rate) -- not the mean itself in general, so which column(s)
-    give the mean depends on the model's outcome distribution. Dispatches on the elementwise NLL
-    loss the model was compiled with (`model.loss._outcome_loss._loss`); add a case here for any
-    other outcome distribution used by a `build_*` function.
+    `outcome_params_pred` holds each state's *raw* outcome-distribution parameters (e.g.
+    Normal's (loc, scale), or Exponential's log_rate), not the mean itself. The outcome family
+    of the loss the model was compiled with (`model.loss._outcome_loss._loss`) maps them to the
+    mean; a loss without a built-in family raises `NotImplementedError`.
     """
-    param_blocks = utils.split_outcome_pred(
+    family = families.from_negloglik(
+        model.loss._outcome_loss._loss,
+        n_params=layout.n_outcome_pred_cols,
+        n_true_cols=layout.n_outcome_true_cols,
+    )
+    blocks = utils.split_outcome_pred(
         outcome_params_pred, n_outcome_pred_cols=layout.n_outcome_pred_cols
     )
-    outcome_nll = model.loss._outcome_loss._loss
-
-    if isinstance(outcome_nll, neglogliks.NegloglikNormal):
-        return param_blocks[0]  # loc
-
-    if isinstance(outcome_nll, neglogliks.NegloglikExponential):
-        # mean of Exponential(rate) = 1 / rate = exp(-log_rate).
-        log_rate = param_blocks[0] if outcome_nll._log_rate else np.log(param_blocks[0])
-        return np.exp(-log_rate)
-
-    if isinstance(outcome_nll, neglogliks.NegloglikExponentialScale):
-        # mean of Exponential(scale=mu) = mu = exp(log_scale).
-        log_scale = param_blocks[0]
-        return np.exp(log_scale)
-
-    if isinstance(outcome_nll, neglogliks.NegloglikWeibull):
-        # mean of Weibull(scale=lambda, shape=k) = lambda * Gamma(1 + 1/k).
-        log_scale, log_shape = param_blocks
-        k = np.exp(log_shape)
-        gamma_term = np.exp(tf.math.lgamma(1.0 + 1.0 / k).numpy())
-        return np.exp(log_scale) * gamma_term
-
-    raise NotImplementedError(
-        f"Don't know how to compute the outcome mean for loss type "
-        f"{type(outcome_nll).__name__}; add a case to "
-        "inference._state_conditional_outcome_mean."
-    )
+    return np.asarray(family.mean(dict(zip(family.param_names, blocks))))
 
 
 def predict_counterfactual(
