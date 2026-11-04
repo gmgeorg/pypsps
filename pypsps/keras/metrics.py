@@ -1,5 +1,7 @@
 """Module for metrics from pypsps predictions."""
 
+from typing import Union
+
 import pypress.utils
 import tensorflow as tf
 
@@ -203,7 +205,7 @@ def _penalty_free_copy(loss_obj):
 def causal_loss_metric_gen(
     outcome_loss: losses.OutcomeLoss,
     treatment_loss: losses.TreatmentLoss,
-    alpha: float = 1.0,
+    alpha: Union[float, tf.Variable] = 1.0,
     outcome_loss_weight: float = 1.0,
 ):
     """
@@ -228,8 +230,9 @@ def causal_loss_metric_gen(
         Instance of an outcome loss (e.g. Normal log-likelihood loss).
     treatment_loss : TreatmentLoss
         Instance of a treatment loss (e.g. binary cross-entropy for treatment prediction).
-    alpha : float, default=1.0
-        Penalty parameter for treatment loss.
+    alpha : float or tf.Variable, default=1.0
+        Penalty parameter for treatment loss. Pass the training loss's ``_alpha`` variable
+        so the metric follows an alpha schedule; a float is fixed.
     outcome_loss_weight : float, default=1.0
         Weight for the outcome loss.
 

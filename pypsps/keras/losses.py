@@ -1,7 +1,8 @@
 """Module for pypsps losses."""
 
+import enum
 import warnings
-from typing import Optional
+from typing import Optional, Union
 
 import tensorflow as tf
 
@@ -66,6 +67,21 @@ def prob_state_given_treatment_features(
     return gamma
 
 
+class OutcomeLikelihood(str, enum.Enum):
+    """Which outcome likelihood `OutcomeLoss` evaluates.
+
+    ``INTERVENTIONAL`` (the default in `OutcomeLoss`): -log p(Y | do(A), X), mixing the
+    per-state outcome likelihoods with the prior state weights P(S | X) = P(S | X, do(A)),
+    since the states precede treatment; these are the same weights the ATE estimates use.
+    ``OBSERVATIONAL``: -log p(Y | A, X), mixing the per-state outcome likelihoods with the
+    posterior state weights P(S | X, A); together with `TreatmentLoss` this is the exact
+    joint likelihood of (Y, A | X).
+    """
+
+    OBSERVATIONAL = "observational"
+    INTERVENTIONAL = "interventional"
+
+
 @tf.keras.utils.register_keras_serializable(package="pypsps")
 class OutcomeLoss(tf.keras.losses.Loss):
     """Computes outcome loss for a pypsps model with multi-output predictions.
@@ -73,13 +89,17 @@ class OutcomeLoss(tf.keras.losses.Loss):
     The outcome loss for pypsps model is evaluated as the negative marginal log-likelihood
     of a mixture of experts over states
 
-        -log p(y | a, x) = -log sum_k gamma_k(a, x) * p(y | s_k, a, x)
+        -log sum_k gamma_k * p(y | s_k, a, x)
 
-    where gamma_k(a, x) = P(s_k | x, a) is the *posterior* state probability, ie the prior
-    predictive state weights P(s_k | x) updated with the evidence from the observed
-    treatment `a` via Bayes' rule (see `prob_state_given_treatment_features`). This is what
-    makes -log p(a, y | x) telescope exactly into TreatmentLoss (-log p(a | x), using the
-    prior) plus OutcomeLoss (-log p(y | a, x), using the posterior).
+    By default (``outcome_likelihood="interventional"``) gamma_k = P(s_k | x), the prior
+    predictive state weights, which equal P(s_k | x, do(a)) since the states precede
+    treatment. The loss is then the interventional likelihood -log p(y | do(a), x).
+
+    With ``outcome_likelihood="observational"``, gamma_k = P(s_k | x, a) is the *posterior*
+    state probability, ie the prior weights updated with the evidence from the observed
+    treatment `a` via Bayes' rule (see `prob_state_given_treatment_features`). The loss is
+    then -log p(y | a, x), and -log p(a, y | x) telescopes exactly into TreatmentLoss
+    (-log p(a | x), using the prior) plus OutcomeLoss. See `OutcomeLikelihood`.
     """
 
     def __init__(
@@ -89,6 +109,7 @@ class OutcomeLoss(tf.keras.losses.Loss):
         n_outcome_true_cols: int,
         n_outcome_pred_cols: int,
         n_treatment_pred_cols: int,
+        outcome_likelihood: Union[OutcomeLikelihood, str] = OutcomeLikelihood.INTERVENTIONAL,
         **kwargs,
     ):
         """Initializes the outcome loss.
@@ -102,9 +123,12 @@ class OutcomeLoss(tf.keras.losses.Loss):
           n_outcome_true_cols: number of outcome columns in y_true. Used to split outcome_true and treatment_true.
           n_outcome_pred_cols: number of outcome prediction params per state in y_pred.
           n_treatment_pred_cols: number of treatment prediction params per state in y_pred.
+          outcome_likelihood: `OutcomeLikelihood` member or its string value
+            ("interventional", the default, or "observational").
           **kwargs: additional arguments passed to keras Loss class.
         """
         super().__init__(**kwargs)
+        self._outcome_likelihood = OutcomeLikelihood(outcome_likelihood)
         assert isinstance(loss, tf.keras.losses.Loss)
         assert loss.reduction == tf.keras.losses.Reduction.NONE
         assert isinstance(treatment_loss, tf.keras.losses.Loss)
@@ -133,6 +157,7 @@ class OutcomeLoss(tf.keras.losses.Loss):
             n_outcome_true_cols=self._n_outcome_true_cols,
             n_outcome_pred_cols=self._n_outcome_pred_cols,
             n_treatment_pred_cols=self._n_treatment_pred_cols,
+            outcome_likelihood=self._outcome_likelihood,
             reduction=self.reduction,
             name=self.name,
         )
@@ -154,14 +179,18 @@ class OutcomeLoss(tf.keras.losses.Loss):
 
         outcome_true, treatment_true = utils.split_y_true(y_true, self._n_outcome_true_cols)
 
-        # Posterior state weights: gamma_k(a, x) = P(s_k | x, a), replacing the prior weights
-        # so that the outcome mixture conditions on the observed treatment.
-        gamma = prob_state_given_treatment_features(
-            weights=weights,
-            treatment_true=treatment_true,
-            treatment_pred=treatment_pred,
-            treatment_nll_loss=self._treatment_loss,
-        )
+        if self._outcome_likelihood == OutcomeLikelihood.INTERVENTIONAL:
+            # Prior state weights P(s_k | x) = P(s_k | x, do(a)): -log p(y | do(a), x).
+            gamma = weights
+        else:
+            # Posterior state weights: gamma_k(a, x) = P(s_k | x, a), replacing the prior
+            # weights so that the outcome mixture conditions on the observed treatment.
+            gamma = prob_state_given_treatment_features(
+                weights=weights,
+                treatment_true=treatment_true,
+                treatment_pred=treatment_pred,
+                treatment_nll_loss=self._treatment_loss,
+            )
 
         log_weights = utils.safe_log(gamma)
         log_components = []
@@ -334,7 +363,7 @@ class CausalLoss(tf.keras.losses.Loss):
         self,
         outcome_loss: OutcomeLoss,
         treatment_loss: TreatmentLoss,
-        alpha: float = 1.0,
+        alpha: Union[float, tf.Variable] = 1.0,
         outcome_loss_weight: float = 1.0,
         predictive_states_regularizer: Optional[tf.keras.regularizers.Regularizer] = None,
         **kwargs,
@@ -346,7 +375,8 @@ class CausalLoss(tf.keras.losses.Loss):
             treatment_loss: instance of a treatment loss; defaults to binary treatment loss
               (ie binary cross entropy).
             alpha: penalty parameter for the treatment loss. Defaults to 1.0 so
-              that total causal loss equals the joint log-likelihood.
+              that total causal loss equals the joint log-likelihood. A float32
+              `tf.Variable` is used as is (shared, not copied).
             outcome_loss_weight: weight of outcome loss; defaults to 1.0.
             predictive_states_regularizer: optional; user can define a predictive
               state regularizer.
@@ -364,7 +394,12 @@ class CausalLoss(tf.keras.losses.Loss):
         # traced graph never reads again. A tf.Variable's value is re-read via ReadVariableOp on
         # every graph execution, so `loss._alpha.assign(...)` between epochs actually reaches the
         # optimizer. Callers must use `.assign(...)`, not `=`, to update it after construction.
-        self._alpha = tf.Variable(float(alpha), trainable=False, dtype=tf.float32, name="alpha")
+        if isinstance(alpha, tf.Variable):
+            if alpha.dtype != tf.float32:
+                raise ValueError(f"alpha variable must be float32, got {alpha.dtype}")
+            self._alpha = alpha
+        else:
+            self._alpha = tf.Variable(float(alpha), trainable=False, dtype=tf.float32, name="alpha")
         self._outcome_loss_weight = outcome_loss_weight
         self._predictive_states_regularizer = predictive_states_regularizer
         self._update_loss_reduction()

@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 import tensorflow as tf
 
 from pypsps.keras import losses, metrics, neglogliks
@@ -432,3 +433,41 @@ def test_outcome_nll_metric_does_not_move_with_alpha():
     loss_10, nll_10 = evaluate()
     assert loss_10 > loss_1
     np.testing.assert_allclose(nll_10, nll_1, rtol=1e-6)
+
+
+def test_causal_loss_metric_follows_a_shared_alpha_variable():
+    """Given the training loss's alpha variable, the metric moves when it is assigned."""
+    outcome = _normal_outcome_loss()
+    treatment = losses.TreatmentLoss(
+        loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
+        n_outcome_true_cols=1,
+        n_outcome_pred_cols=2,
+        n_treatment_pred_cols=1,
+        reduction="sum_over_batch_size",
+    )
+    y_true, y_pred = _normal_fixture()
+    alpha = tf.Variable(1.0, trainable=False, dtype=tf.float32)
+    shared = metrics.causal_loss_metric_gen(outcome, treatment, alpha=alpha)
+    fixed = metrics.causal_loss_metric_gen(outcome, treatment, alpha=1.0)
+
+    at_one = float(shared(y_true, y_pred))
+    np.testing.assert_allclose(at_one, float(fixed(y_true, y_pred)), rtol=1e-7)
+    alpha.assign(3.0)
+    at_three = float(shared(y_true, y_pred))
+    np.testing.assert_allclose(
+        at_three,
+        float(metrics.causal_loss_metric_gen(outcome, treatment, alpha=3.0)(y_true, y_pred)),
+        rtol=1e-6,
+    )
+    np.testing.assert_allclose(float(fixed(y_true, y_pred)), at_one, rtol=1e-7)
+
+
+def test_outcome_nll_metric_keeps_outcome_likelihood():
+    """The outcome metric uses the training loss's outcome_likelihood."""
+    y_true, y_pred = _normal_fixture()
+    interventional = _normal_outcome_loss(outcome_likelihood="interventional")
+    observational = _normal_outcome_loss(outcome_likelihood="observational")
+    for chosen, other in ((interventional, observational), (observational, interventional)):
+        got = float(metrics.outcome_nll_metric_gen(chosen)(y_true, y_pred))
+        np.testing.assert_allclose(got, float(chosen(y_true, y_pred)), rtol=1e-7)
+        assert got != pytest.approx(float(other(y_true, y_pred)))
