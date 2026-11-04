@@ -8,7 +8,8 @@ All components are fully compatible with the standard `tf.keras` API.
 
 * **`models`**: Provides model builders like `build_toy_model(n_states,
   n_features, compile=True, alpha=10.)` for binary treatment and continuous
-  outcome.
+  outcome, and `build_model_continuous_survival` for a continuous treatment and an
+  exponential or Weibull time-to-event outcome.
 * **`layers`**: Custom PSPS layer implementations.
 * **`losses`**: Causal loss functions optimized for predictive state learning.
 * **`metrics`**: Custom evaluation metrics for causal estimation.
@@ -88,3 +89,31 @@ same likelihood.
 
 To make `causal_loss_metric_gen` follow an alpha schedule, pass it the training loss's
 variable, `alpha=causal_loss._alpha`. A float alpha stays fixed.
+
+## Continuous Treatment, Time-to-Event Outcome
+
+`models.build_model_continuous_survival(distribution, ...)`, with the wrappers
+`build_model_continuous_exponential` and `build_model_continuous_weibull`, models a Normal
+treatment density per state and an exponential or Weibull outcome. `y_true` is
+`[time, event indicator, treatment]`, and `inference.predict_ate_continuous` reads the
+fitted model directly.
+
+```python
+from pypsps.keras import models
+
+model = models.build_model_continuous_weibull(
+    n_states=3,
+    n_features=10,
+    predictive_state_hidden_layers=[(16, "relu")],
+    outcome_hidden_layers=[(16, "relu")],
+    log_scale_bounds=(-3.0, 6.0),  # log time units
+    log_shape_bounds=(-2.0, 2.0),
+    max_time=y_true[:, 0].max(),
+)
+```
+
+The outcome parameters are soft-clipped (`layers.SoftClip`) to `log_scale_bounds` and,
+for Weibull, `log_shape_bounds`. Both are required, because sensible values depend on the
+time unit. With `max_time`, the builder raises if
+`exp(log_shape_max) * (log(max_time) - log_scale_min)` exceeds 50, well below where the
+Weibull negative log-likelihood overflows float32 (near 88.7).

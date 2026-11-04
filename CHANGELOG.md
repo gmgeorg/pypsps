@@ -5,6 +5,24 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.2.1 - Nov 4, 2026
+
+### Added
+
+* `pypsps.keras.models.build_model_continuous_survival` for a continuous (Normal)
+  treatment and an exponential or Weibull outcome, with the wrappers
+  `build_model_continuous_exponential` and `build_model_continuous_weibull`. Each state's
+  outcome head sees the shared feature trunk and the treatment embedding gated by that
+  state's probability; Weibull scale and shape have separate hidden layers. The outcome
+  parameters are soft-clipped to required `log_scale_bounds` (and `log_shape_bounds`); an
+  optional `max_time` rejects bounds that would overflow the loss in float32.
+* `pypsps.keras.layers.SoftClip`: a serializable sigmoid squash into `(min, max)`.
+
+### Fixed
+
+* `inference.predict_ate_continuous` raised `AttributeError` for array features; it now
+  returns an ndarray as documented, and a Series named `"ate"` for a DataFrame.
+
 ## pypsps v0.2.0 - Nov 4, 2026
 
 Breaking: `OutcomeLoss` now defaults to the interventional outcome likelihood, so the

@@ -3,6 +3,7 @@
 import types
 
 import numpy as np
+import pandas as pd
 import pytest
 import tensorflow as tf
 
@@ -139,3 +140,27 @@ def test_end_to_end_dataset_model_fit_and_inference():
     ate = inference.predict_ate_binary(model, inputs[0])
     print(ate)
     assert ate == pytest.approx(10.0, 2.0)
+
+
+def test_predict_ate_continuous_weibull_end_to_end():
+    """A continuous Weibull model's ATE curve has the true signs and returns an ndarray for
+    array features and a Series named "ate" for a DataFrame."""
+    from .test_models import _continuous_model, _synthetic_continuous_survival
+
+    tf.random.set_seed(0)
+    inputs, y_true, true_ate = _synthetic_continuous_survival(n_samples=1024)
+    model = _continuous_model("weibull")
+    model.fit(inputs, y_true, epochs=20, batch_size=64, verbose=0)
+
+    grid = [-1.0, 0.0, 1.0]
+    ate = inference.predict_ate_continuous(model, inputs[0], treatment_grid=grid)
+    assert isinstance(ate, np.ndarray) and ate.shape == (3,)
+    want = np.array([true_ate(a, 0.0) for a in grid])
+    assert ate[1] == 0.0
+    assert np.all(np.sign(ate[[0, 2]]) == np.sign(want[[0, 2]]))
+    np.testing.assert_allclose(ate[[0, 2]], want[[0, 2]], rtol=0.5)
+
+    frame = pd.DataFrame(inputs[0], columns=["x0", "x1", "x2"])
+    ate_series = inference.predict_ate_continuous(model, frame, treatment_grid=grid)
+    assert isinstance(ate_series, pd.Series) and ate_series.name == "ate"
+    np.testing.assert_allclose(ate_series.values, ate, rtol=1e-5)

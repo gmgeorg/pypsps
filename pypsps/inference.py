@@ -230,5 +230,6 @@ def predict_ate_continuous(
     """
     ute_cont = predict_ute_continuous(model, features, treatment_grid, baseline_treatment)
     ate_cont = ute_cont.mean(axis=0)
-    ate_cont.name = "ate"
+    if isinstance(ate_cont, pd.Series):
+        ate_cont.name = "ate"
     return ate_cont

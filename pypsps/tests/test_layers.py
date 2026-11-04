@@ -76,3 +76,30 @@ def test_state_column_gate_config_and_validation():
     for bad in (-1, 1.5, True):
         with pytest.raises(ValueError, match="index"):
             layers.StateColumnGate(bad)
+
+
+def test_soft_clip_stays_inside_bounds_with_nonzero_gradient():
+    """Outputs lie in (min, max) and the gradient stays positive well beyond the bounds."""
+    clip = layers.SoftClip(-2.0, 3.0)
+    x = tf.constant([[-10.0], [-5.0], [0.0], [5.0], [10.0]])
+    with tf.GradientTape() as tape:
+        tape.watch(x)
+        y = clip(x)
+    grad = tape.gradient(y, x).numpy()
+    assert np.all(y.numpy() >= -2.0) and np.all(y.numpy() <= 3.0)
+    np.testing.assert_allclose(y.numpy()[2], 0.5, rtol=1e-6)
+    assert np.all(grad > 0.0)
+
+
+def test_soft_clip_inverse_and_config():
+    """inverse() maps back through the layer; the bounds round-trip through the config."""
+    clip = layers.SoftClip(-2.0, 3.0)
+    for value in (-1.9, 0.0, 2.5):
+        np.testing.assert_allclose(clip(tf.constant([[clip.inverse(value)]])), [[value]], atol=1e-5)
+    with pytest.raises(ValueError, match="lie in"):
+        clip.inverse(3.0)
+    clone = layers.SoftClip.from_config(clip.get_config())
+    assert (clone.min_value, clone.max_value) == (-2.0, 3.0)
+    for bad in ((1.0, 1.0), (2.0, 1.0), (0.0, np.inf)):
+        with pytest.raises(ValueError, match="min_value < max_value"):
+            layers.SoftClip(*bad)
