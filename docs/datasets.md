@@ -12,6 +12,13 @@ All datasets in `pypsps.datasets` inherit from `CausalDataset` defined in
 * `naive_ate()`: Computes the unadjusted observational ATE for baseline
   evaluation.
 
+## Utilities
+
+* `datasets.utils.identify_binary_features(X, threshold=0.95)`: returns the names of
+  strictly binary columns (at most 2 distinct non-null values) and quasi-binary
+  columns (numeric or categorical, whose two most frequent values cover at least
+  `threshold` of the non-null rows).
+
 ## Available Implementations
 
 * **`kang_schafer.py`**: Kang-Schafer simulation benchmark.

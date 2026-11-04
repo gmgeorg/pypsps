@@ -1,6 +1,7 @@
 """Test module for pypsps keras layers."""
 
 import numpy as np
+import pytest
 import tensorflow as tf
 
 from ..keras import layers
@@ -44,3 +45,34 @@ def test_bias_only_get_config_roundtrip_no_regularizer():
     restored = layers.BiasOnly.from_config(config)
     assert restored._units == 1
     assert restored._bias_regularizer is None
+
+
+def test_state_column_gate_selects_its_own_column_in_a_loop():
+    """Gates built in a loop each select their own column."""
+    n_states = 3
+    inp = tf.keras.Input(shape=(n_states,))
+    outs = [layers.StateColumnGate(i)(inp) for i in range(n_states)]
+    model = tf.keras.Model(inp, tf.keras.layers.Concatenate()(outs[::-1]))
+    probe = np.array([[10.0, 20.0, 30.0], [1.0, 2.0, 3.0]], dtype=np.float32)
+    np.testing.assert_array_equal(model.predict(probe, verbose=0), probe[:, ::-1])
+
+
+def test_state_column_gate_survives_save_and_load(tmp_path):
+    """A model of gates round-trips through model.save / load_model."""
+    inp = tf.keras.Input(shape=(3,))
+    outs = [layers.StateColumnGate(i)(inp) for i in (2, 0)]
+    model = tf.keras.Model(inp, tf.keras.layers.Concatenate()(outs))
+    path = str(tmp_path / "gates.keras")
+    model.save(path)
+    reloaded = tf.keras.models.load_model(path)
+    probe = np.array([[10.0, 20.0, 30.0]], dtype=np.float32)
+    np.testing.assert_array_equal(reloaded.predict(probe, verbose=0), [[30.0, 10.0]])
+    assert [g.index for g in reloaded.layers if isinstance(g, layers.StateColumnGate)] == [2, 0]
+
+
+def test_state_column_gate_config_and_validation():
+    """get_config carries the index; invalid indices raise ValueError."""
+    assert layers.StateColumnGate(4).get_config()["index"] == 4
+    for bad in (-1, 1.5, True):
+        with pytest.raises(ValueError, match="index"):
+            layers.StateColumnGate(bad)

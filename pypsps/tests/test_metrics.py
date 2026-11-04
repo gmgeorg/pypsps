@@ -346,3 +346,89 @@ def test_causal_loss_metric_gen_strips_embedded_treatment_loss_penalty():
     assert not np.isclose(metric_value, expected_penalized, rtol=1e-5)
     # The original, live training-time loss must be unmodified.
     assert penalized_treatment_loss._lambda_balance == 1000.0
+
+
+def _normal_outcome_loss(cls=losses.OutcomeLoss, **extra):
+    """An OutcomeLoss for a normal outcome (2 params per state) and binary treatment."""
+    return cls(
+        loss=neglogliks.NegloglikNormal(reduction="none"),
+        treatment_loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
+        n_outcome_true_cols=1,
+        n_outcome_pred_cols=2,
+        n_treatment_pred_cols=1,
+        reduction="sum_over_batch_size",
+        **extra,
+    )
+
+
+def _normal_fixture():
+    """y_true = [outcome | treatment] and y_pred for 2 states, normal outcome."""
+    weights = [[0.5, 0.5], [0.3, 0.7], [0.9, 0.1]]
+    y_pred = _make_y_pred(
+        outcome_blocks=[[[0.0, 1.0], [2.0, -1.0], [0.5, 0.5]], [[1.0, 2.0]] * 3],
+        weights=weights,
+        treatment_blocks=[[[0.8, 0.3], [0.4, 0.6], [0.5, 0.2]]],
+    )
+    y_true = tf.constant([[0.2, 1.0], [1.5, 0.0], [-0.3, 1.0]], dtype=tf.float32)
+    return y_true, y_pred
+
+
+class _PenalizedOutcomeLoss(losses.OutcomeLoss):
+    """Test double: an OutcomeLoss whose call() adds a constant penalty."""
+
+    def __init__(self, *args, lambda_penalty: float = 0.0, **kwargs):
+        """Stores the penalty weight."""
+        super().__init__(*args, **kwargs)
+        self._lambda_penalty = lambda_penalty
+
+    def call(self, y_true, y_pred):
+        """Adds the penalty to the outcome negative log-likelihood."""
+        return super().call(y_true, y_pred) + self._lambda_penalty
+
+
+def test_outcome_nll_metric_equals_the_outcome_loss():
+    """The metric is the outcome loss itself, logged as outcome_nll_metric."""
+    outcome = _normal_outcome_loss()
+    y_true, y_pred = _normal_fixture()
+    metric = metrics.outcome_nll_metric_gen(outcome)
+    assert metric.__name__ == "outcome_nll_metric"
+    np.testing.assert_allclose(
+        float(metric(y_true, y_pred)), float(outcome(y_true, y_pred)), rtol=1e-7
+    )
+
+
+def test_outcome_nll_metric_is_penalty_free_and_leaves_the_loss_untouched():
+    """A penalty in the training loss does not reach the metric, nor is it removed from the loss."""
+    y_true, y_pred = _normal_fixture()
+    penalized = _normal_outcome_loss(_PenalizedOutcomeLoss, lambda_penalty=5.0)
+    clean = float(metrics.outcome_nll_metric_gen(_normal_outcome_loss())(y_true, y_pred))
+    np.testing.assert_allclose(
+        float(metrics.outcome_nll_metric_gen(penalized)(y_true, y_pred)), clean, rtol=1e-7
+    )
+    assert penalized._lambda_penalty == 5.0
+    np.testing.assert_allclose(float(penalized(y_true, y_pred)), clean + 5.0, rtol=1e-6)
+
+
+def test_outcome_nll_metric_does_not_move_with_alpha():
+    """Changing the training loss's alpha leaves the metric unchanged."""
+    from pypsps import datasets
+    from pypsps.keras import models
+
+    np.random.seed(3)
+    ks_data = datasets.KangSchafer(true_ate=10).sample(n_samples=128)
+    inputs, outputs = ks_data.to_keras_inputs_outputs()
+    tf.random.set_seed(3)
+    model = models.build_toy_model(n_states=2, n_features=ks_data.n_features, alpha=1.0)
+    metric = metrics.outcome_nll_metric_gen(model.loss._outcome_loss)
+    model.compile(loss=model.loss, optimizer="adam", metrics=[metric])
+
+    def evaluate():
+        """Return (loss, outcome_nll_metric) on the sample."""
+        res = model.evaluate(inputs, outputs, verbose=0, return_dict=True)
+        return res["loss"], res["outcome_nll_metric"]
+
+    loss_1, nll_1 = evaluate()
+    model.loss._alpha.assign(10.0)
+    loss_10, nll_10 = evaluate()
+    assert loss_10 > loss_1
+    np.testing.assert_allclose(nll_10, nll_1, rtol=1e-6)

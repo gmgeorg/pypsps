@@ -52,3 +52,16 @@ cbs = [
     ),
 ]
 ```
+
+## Selecting on the Outcome Likelihood
+
+`metrics.outcome_nll_metric_gen(outcome_loss)` reports the outcome negative
+log-likelihood alone, with penalties stripped and no alpha. Monitoring
+`val_outcome_nll_metric` therefore selects every model by the same rule, whatever
+alpha schedule it was trained with.
+
+## Per-State Column Selection
+
+`layers.StateColumnGate(i)` returns column `i` of a 2D tensor, such as one state's
+probability column. Use it instead of a `Lambda` built inside a per-state loop.
+Unlike the `Lambda`, it serializes with `model.save()`.

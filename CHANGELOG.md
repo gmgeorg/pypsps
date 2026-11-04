@@ -5,6 +5,17 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.1.10 - Nov 4, 2026
+
+### Added
+
+* `pypsps.keras.layers.StateColumnGate`: a serializable layer that selects one column of a
+  2D tensor, for per-state loops where a `Lambda` closure would bind late.
+* `pypsps.keras.metrics.outcome_nll_metric_gen`: a metric of the outcome negative
+  log-likelihood alone, without penalties or alpha, for use as a selection criterion.
+* `pypsps.datasets.utils.identify_binary_features`: finds strictly binary and quasi-binary
+  columns of a DataFrame.
+
 ## pypsps v0.1.9 - Nov 4, 2026
 
 ### Added
