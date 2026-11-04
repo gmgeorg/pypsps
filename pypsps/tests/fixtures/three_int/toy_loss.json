@@ -1,0 +1,79 @@
+{
+ "class_name": "CausalLoss",
+ "config": {
+  "alpha": 2.5,
+  "name": "causal_loss",
+  "outcome_loss": {
+   "class_name": "OutcomeLoss",
+   "config": {
+    "loss": {
+     "class_name": "NegloglikNormal",
+     "config": {
+      "name": "negloglik_normal",
+      "reduction": "none"
+     },
+     "module": "pypsps.keras.neglogliks",
+     "registered_name": "pypsps>NegloglikNormal"
+    },
+    "n_outcome_pred_cols": 2,
+    "n_outcome_true_cols": 1,
+    "n_treatment_pred_cols": 1,
+    "name": "outcome_loss",
+    "outcome_likelihood": "interventional",
+    "reduction": "sum_over_batch_size",
+    "treatment_loss": {
+     "class_name": "BinaryCrossentropy",
+     "config": {
+      "axis": -1,
+      "from_logits": false,
+      "label_smoothing": 0.0,
+      "name": "binary_crossentropy",
+      "reduction": "none"
+     },
+     "module": "keras.losses",
+     "registered_name": null
+    }
+   },
+   "module": "pypsps.keras.losses",
+   "registered_name": "pypsps>OutcomeLoss"
+  },
+  "outcome_loss_weight": 1.0,
+  "predictive_states_regularizer": {
+   "class_name": "DegreesOfFreedom",
+   "config": {
+    "df": null,
+    "l2": 1.0,
+    "target": 1.0
+   },
+   "module": "pypress.keras.regularizers",
+   "registered_name": "pypress>DegreesOfFreedom"
+  },
+  "reduction": "sum_over_batch_size",
+  "treatment_loss": {
+   "class_name": "TreatmentLoss",
+   "config": {
+    "loss": {
+     "class_name": "BinaryCrossentropy",
+     "config": {
+      "axis": -1,
+      "from_logits": false,
+      "label_smoothing": 0.0,
+      "name": "binary_crossentropy",
+      "reduction": "none"
+     },
+     "module": "keras.losses",
+     "registered_name": null
+    },
+    "n_outcome_pred_cols": 2,
+    "n_outcome_true_cols": 1,
+    "n_treatment_pred_cols": 1,
+    "name": "treatment_loss",
+    "reduction": "sum_over_batch_size"
+   },
+   "module": "pypsps.keras.losses",
+   "registered_name": "pypsps>TreatmentLoss"
+  }
+ },
+ "module": "pypsps.keras.losses",
+ "registered_name": "pypsps>CausalLoss"
+}

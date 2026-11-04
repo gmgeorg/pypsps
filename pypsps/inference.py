@@ -18,7 +18,6 @@ import tensorflow as tf
 import tqdm
 
 from . import utils
-from .keras import families
 
 
 def _state_conditional_outcome_mean(
@@ -28,14 +27,10 @@ def _state_conditional_outcome_mean(
 
     `outcome_params_pred` holds each state's *raw* outcome-distribution parameters (e.g.
     Normal's (loc, scale), or Exponential's log_rate), not the mean itself. The outcome family
-    of the loss the model was compiled with (`model.loss._outcome_loss._loss`) maps them to the
-    mean; a loss without a built-in family raises `NotImplementedError`.
+    of the loss the model was compiled with (`model.loss.mixture`) maps them to the mean; a
+    loss without a built-in family raises `NotImplementedError`.
     """
-    family = families.from_negloglik(
-        model.loss._outcome_loss._loss,
-        n_params=layout.n_outcome_pred_cols,
-        n_true_cols=layout.n_outcome_true_cols,
-    )
+    family = model.loss.mixture.outcome_family
     blocks = utils.split_outcome_pred(
         outcome_params_pred, n_outcome_pred_cols=layout.n_outcome_pred_cols
     )

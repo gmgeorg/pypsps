@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
-from ..keras import families, mixture, neglogliks
+from ..keras import families, losses, mixture, neglogliks
 from . import _reference_v0_2 as ref
 
 _N = 12
@@ -114,6 +114,46 @@ def test_mixture_matches_reference(case, likelihood, reduction, n_states):
     )
     _assert_close(
         _value_and_grad(lambda y: mixture.reduce(mix.treatment_nll(y_true, y), reduction), y_pred),
+        _value_and_grad(
+            lambda y: ref.treatment_nll(treatment_loss, y_true, y, reduction=reduction, **ints),
+            y_pred,
+        ),
+    )
+
+
+@pytest.mark.parametrize("n_states", [1, 3])
+@pytest.mark.parametrize("reduction", ["none", "sum", "sum_over_batch_size"])
+@pytest.mark.parametrize("likelihood", ["interventional", "observational"])
+@pytest.mark.parametrize("path", ["mixture", "legacy"])
+@pytest.mark.parametrize("case", list(_CASES))
+def test_losses_match_reference(case, path, likelihood, reduction, n_states):
+    """OutcomeLoss / TreatmentLoss, built either way, equal today's loss math."""
+    outcome_family, treatment_family, loss, treatment_loss = _CASES[case]
+    mix, y_true, y_pred = _data(outcome_family, treatment_family, n_states)
+    ints = dict(
+        n_outcome_true_cols=outcome_family.n_true_cols,
+        n_outcome_pred_cols=len(outcome_family.params),
+        n_treatment_pred_cols=len(treatment_family.params),
+    )
+    if path == "mixture":
+        outcome = losses.OutcomeLoss(mix, likelihood, reduction=reduction)
+        treatment = losses.TreatmentLoss(mix, reduction=reduction)
+    else:
+        outcome = losses.OutcomeLoss(
+            loss, treatment_loss, outcome_likelihood=likelihood, reduction=reduction, **ints
+        )
+        treatment = losses.TreatmentLoss(treatment_loss, reduction=reduction, **ints)
+    _assert_close(
+        _value_and_grad(lambda y: outcome(y_true, y), y_pred),
+        _value_and_grad(
+            lambda y: ref.outcome_nll(
+                loss, treatment_loss, y_true, y, likelihood=likelihood, reduction=reduction, **ints
+            ),
+            y_pred,
+        ),
+    )
+    _assert_close(
+        _value_and_grad(lambda y: treatment(y_true, y), y_pred),
         _value_and_grad(
             lambda y: ref.treatment_nll(treatment_loss, y_true, y, reduction=reduction, **ints),
             y_pred,
