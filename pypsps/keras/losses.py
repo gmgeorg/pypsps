@@ -1,6 +1,5 @@
 """Module for pypsps losses."""
 
-import enum
 import warnings
 from typing import Optional, Union
 
@@ -8,6 +7,7 @@ import tensorflow as tf
 
 from .. import utils
 from . import neglogliks
+from .mixture import OutcomeLikelihood  # re-exported; defined in mixture
 
 _ser = tf.keras.utils.serialize_keras_object
 _deser = tf.keras.utils.deserialize_keras_object
@@ -74,21 +74,6 @@ _ALPHA_DEPRECATION = (
     "CausalLoss._alpha is deprecated since v0.3.0 and will be removed in v0.4.0; "
     "use CausalLoss.alpha"
 )
-
-
-class OutcomeLikelihood(str, enum.Enum):
-    """Which outcome likelihood `OutcomeLoss` evaluates.
-
-    ``INTERVENTIONAL`` (the default in `OutcomeLoss`): -log p(Y | do(A), X), mixing the
-    per-state outcome likelihoods with the prior state weights P(S | X) = P(S | X, do(A)),
-    since the states precede treatment; these are the same weights the ATE estimates use.
-    ``OBSERVATIONAL``: -log p(Y | A, X), mixing the per-state outcome likelihoods with the
-    posterior state weights P(S | X, A); together with `TreatmentLoss` this is the exact
-    joint likelihood of (Y, A | X).
-    """
-
-    OBSERVATIONAL = "observational"
-    INTERVENTIONAL = "interventional"
 
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")
