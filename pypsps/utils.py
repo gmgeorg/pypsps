@@ -17,15 +17,22 @@ def get_n_cols(y: _Y_PRED_DTYPE) -> int:
     return n_cols
 
 
+def _layout_module():
+    """`pypsps.keras.layout`, imported lazily: `pypsps.keras` imports this module."""
+    from .keras import layout
+
+    return layout
+
+
 def get_state_column_indices(state_idx: int, n_states: int, n_params_per_state: int) -> List[int]:
     """Returns column indices for `state_idx` in an interleaved per-state prediction block.
 
     Prediction blocks (outcome params, treatment params) are laid out interleaved across
     states, ie [state_0_param_0, state_1_param_0, ..., state_0_param_1, state_1_param_1, ...].
     This returns the column indices belonging to `state_idx` across all `n_params_per_state`
-    parameters.
+    parameters. A wrapper over `pypsps.keras.layout`.
     """
-    return [state_idx + i * n_states for i in range(n_params_per_state)]
+    return _layout_module()._state_column_indices(state_idx, n_states, n_params_per_state)
 
 
 def get_n_states(
@@ -40,6 +47,8 @@ def get_n_states(
 
         n_cols = n_states * (n_outcome_pred_cols + 1 + n_treatment_pred_cols)
 
+    A wrapper over `pypsps.keras.layout.ColumnLayout.resolve_n_states`.
+
     Args:
       y_pred: Tensor with all predictions.
       n_outcome_pred_cols: number of outcome prediction params per state.
@@ -47,10 +56,14 @@ def get_n_states(
 
     Returns:
         Number of states.
+
+    Raises:
+      ValueError: if the width of `y_pred` is not a multiple of the columns per state.
     """
-    n_cols = get_n_cols(y_pred)
-    n_states = int(n_cols / (n_outcome_pred_cols + n_treatment_pred_cols + 1))
-    return n_states
+    layout = _layout_module().ColumnLayout.from_counts(
+        n_outcome_pred_cols, n_treatment_pred_cols, n_outcome_true_cols=1
+    )
+    return layout.resolve_n_states(y_pred)
 
 
 def split_y_pred(
@@ -62,35 +75,46 @@ def split_y_pred(
 
     Both outcome preds and treatment preds are per-state interleaved blocks (state-conditional
     predictions, not marginalized), of width (n_states * n_outcome_pred_cols) and
-    (n_states * n_treatment_pred_cols) respectively.
+    (n_states * n_treatment_pred_cols) respectively. A wrapper over
+    `pypsps.keras.layout.ColumnLayout`.
     """
-
-    n_states = get_n_states(y_pred, n_outcome_pred_cols, n_treatment_pred_cols)
-
-    outcome_params_pred = y_pred[:, : (n_outcome_pred_cols * n_states)]
-    weights = y_pred[:, (n_outcome_pred_cols * n_states) : ((n_outcome_pred_cols + 1) * n_states)]
-    treatment_pred = y_pred[:, ((n_outcome_pred_cols + 1) * n_states) :]
-
-    return outcome_params_pred, weights, treatment_pred
+    layout = _layout_module().ColumnLayout.from_counts(
+        n_outcome_pred_cols, n_treatment_pred_cols, n_outcome_true_cols=1
+    )
+    return layout._split_blocks(y_pred)
 
 
 def split_outcome_pred(
     outcome_pred: _Y_PRED_DTYPE, n_outcome_pred_cols: int
 ) -> List[_Y_PRED_DTYPE]:
-    """Splits the outcome parameter predictions per state into separate params per state tensors."""
-    if isinstance(outcome_pred, np.ndarray):
-        return np.split(outcome_pred, n_outcome_pred_cols, axis=1)
-    else:
-        return tf.split(outcome_pred, n_outcome_pred_cols, axis=1)
+    """Splits the outcome parameter predictions per state into separate params per state tensors.
+
+    A wrapper over `pypsps.keras.layout`.
+    """
+    width = get_n_cols(outcome_pred)
+    if width % n_outcome_pred_cols != 0:
+        raise ValueError(
+            f"outcome_pred has {width} columns, not a multiple of n_outcome_pred_cols="
+            f"{n_outcome_pred_cols}"
+        )
+    names = tuple(range(n_outcome_pred_cols))
+    blocks = _layout_module()._split_params(
+        outcome_pred, names, n_states=width // n_outcome_pred_cols
+    )
+    return [blocks[n] for n in names]
 
 
 def split_y_true(
     y_true: _Y_PRED_DTYPE, n_outcome_true_cols: int
 ) -> Tuple[_Y_PRED_DTYPE, _Y_PRED_DTYPE]:
-    """Splits y_true = (outcome, treatment) into separate tensors."""
-    outcome_true = y_true[:, :n_outcome_true_cols]
-    treatment_true = y_true[:, n_outcome_true_cols : n_outcome_true_cols + 1]
-    return outcome_true, treatment_true
+    """Splits y_true = (outcome, treatment) into separate tensors.
+
+    Columns after the one treatment column are ignored. A wrapper over
+    `pypsps.keras.layout.ColumnLayout.decode_true`.
+    """
+    layout = _layout_module().ColumnLayout.from_counts(1, 1, n_outcome_true_cols)
+    parts = layout.decode_true(y_true)
+    return parts.outcome, parts.treatment
 
 
 def _weighted_state_average(

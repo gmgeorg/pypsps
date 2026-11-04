@@ -5,6 +5,30 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.3.1 - Nov 4, 2026
+
+### Added
+
+* `pypsps.keras.layout.ColumnLayout`: decodes `y_pred` into named per-state parameter
+  blocks and the state weights, decodes `y_true` into outcome and treatment, and encodes
+  blocks back into `y_pred`. It checks widths and serializes with Keras.
+* `pypsps.keras.families`: `Normal`, `Bernoulli`, `Exponential` and `Weibull`, each with
+  its parameters, head activations, per-state NLL and mean. `LossFamily` wraps any
+  elementwise Keras loss. `families.get(name, ...)` looks a family up by name, and
+  `families.from_negloglik(loss, n_params, n_true_cols)` maps the `neglogliks` losses
+  onto families.
+
+### Changed
+
+* `utils.split_y_pred`, `split_y_true`, `split_outcome_pred`, `get_n_states` and
+  `get_state_column_indices` now delegate to `ColumnLayout`. `get_n_states` raises a
+  `ValueError` when the `y_pred` width is not a multiple of the columns per state;
+  previously it silently truncated.
+* `inference` reads each state's outcome mean from the family of the model's outcome
+  loss. Values are unchanged up to float32 rounding.
+* The continuous survival builders' bound and `max_time` checks now live in the
+  `Exponential` and `Weibull` families. The overflow error message is reworded.
+
 ## pypsps v0.3.0 - Nov 4, 2026
 
 Breaking: pypsps requires Keras 3 (`tensorflow>=2.16`). Keras 2 (`TF_USE_LEGACY_KERAS=1`)
