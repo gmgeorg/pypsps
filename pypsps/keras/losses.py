@@ -374,8 +374,11 @@ class CausalLoss(tf.keras.losses.Loss):
             outcome_loss: instance of an outcome loss; defaults to a Normal log-likelihood.
             treatment_loss: instance of a treatment loss; defaults to binary treatment loss
               (ie binary cross entropy).
-            alpha: penalty parameter for the treatment loss. Defaults to 1.0 so
-              that total causal loss equals the joint log-likelihood. A float32
+            alpha: weight of the treatment log-likelihood in the causal loss (λ in Eq. 10
+              of the paper). Defaults to 1.0 so that total causal loss equals the joint
+              log-likelihood. Values above 1 act as a penalty that prioritizes fitting
+              treatment over fitting outcome: training then learns the propensity and the
+              predictive states first, and refines the outcome models afterwards. A float32
               `tf.Variable` is used as is (shared, not copied).
             outcome_loss_weight: weight of outcome loss; defaults to 1.0.
             predictive_states_regularizer: optional; user can define a predictive

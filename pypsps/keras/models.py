@@ -106,7 +106,11 @@ def build_toy_model(
       n_states: number of predictive states to use in the pypsps model.
       n_features: number of (numeric) features to use as input.
       compile: if True, compiles pypsps model with the appropriate pypsps causal loss functions.
-      alpha: propensity score penalty (by default alpha = 1., which corresponds to equal weight)
+      alpha: weight of the treatment (propensity) log-likelihood relative to the outcome
+        log-likelihood in the causal loss (λ in Eq. 10 of the paper). The default 1.0 gives
+        the joint log-likelihood. Values above 1 act as a penalty that prioritizes fitting
+        treatment over fitting outcome: training then learns the propensity and the
+        predictive states first, and refines the outcome models afterwards.
       df_penalty_l2: l2 parameter for the DF regularization
       learning_rate: learning rate of the optimizer.
 
@@ -234,7 +238,11 @@ def build_model_binary_normal(
       n_states: number of predictive states to use in the pypsps model.
       n_features: number of (numeric) features to use as input.
       compile: if True, compiles pypsps model with the appropriate pypsps causal loss functions.
-      alpha: propensity score penalty (by default alpha = 1., which corresponds to equal weight)
+      alpha: weight of the treatment (propensity) log-likelihood relative to the outcome
+        log-likelihood in the causal loss (λ in Eq. 10 of the paper). The default 1.0 gives
+        the joint log-likelihood. Values above 1 act as a penalty that prioritizes fitting
+        treatment over fitting outcome: training then learns the propensity and the
+        predictive states first, and refines the outcome models afterwards.
       df_penalty_l2: l2 parameter for the DF regularization
       learning_rate: learning rate of the optimizer.
 
@@ -391,7 +399,11 @@ def build_model_binary_exponential(
       n_states: number of predictive states to use in the pypsps model.
       n_features: number of (numeric) features to use as input.
       compile: if True, compiles pypsps model with the appropriate pypsps causal loss functions.
-      alpha: propensity score penalty (by default alpha = 1., which corresponds to equal weight)
+      alpha: weight of the treatment (propensity) log-likelihood relative to the outcome
+        log-likelihood in the causal loss (λ in Eq. 10 of the paper). The default 1.0 gives
+        the joint log-likelihood. Values above 1 act as a penalty that prioritizes fitting
+        treatment over fitting outcome: training then learns the propensity and the
+        predictive states first, and refines the outcome models afterwards.
       df_penalty_l2: l2 parameter for the DF regularization
       learning_rate: learning rate of the optimizer.
 

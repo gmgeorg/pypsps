@@ -29,6 +29,8 @@ across various treatment and outcome types.
 
 ## Module Documentation Index
 
+* **[Domain Glossary](docs/CONTEXT.md)**: Canonical terms (unit, predictive state,
+  stratum, state weights, propensity, alpha, UTE/ATE) and which synonyms to avoid.
 * **[Architecture & Theory](docs/architecture.md)**: Mathematical principles,
   predictive state representations, and joint distribution modeling.
 * **[Development & Setup](docs/development.md)**: Dependency specs, `pytest`
