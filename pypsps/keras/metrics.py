@@ -312,9 +312,9 @@ def uniform_entropy_gen(n_outcome_pred_cols: int, n_treatment_pred_cols: int):
             n_outcome_pred_cols=n_outcome_pred_cols,
             n_treatment_pred_cols=n_treatment_pred_cols,
         )
-        # Shannon entropy per row: -sum(p_i * log(p_i)). Uses safe_xlogx instead of an
-        # epsilon floor (log(p_i + eps)) so sharp/near-degenerate state weights aren't
-        # distorted -- see dev-docs item 2 for why the floor is the wrong fix here.
+        # Shannon entropy per row: -sum(p_i * log(p_i)), with 0 * log(0) taken as 0.
+        # safe_xlogx computes that exactly; an epsilon floor (log(p_i + eps)) would distort
+        # the entropy of sharp, near-degenerate state weights.
         entropy_per_row = -1 * tf.math.reduce_sum(pypress.utils.safe_xlogx(weights), axis=1)
         # Return mean entropy across all samples
         # Higher values indicate more uniform distributions
