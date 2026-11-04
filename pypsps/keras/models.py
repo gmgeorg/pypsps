@@ -214,9 +214,10 @@ def build_toy_model(
                 metrics.OutcomeMeanSquaredError(
                     n_outcome_pred_cols=2, n_treatment_pred_cols=1, n_outcome_true_cols=1
                 ),
-                metrics.causal_loss_metric_gen(
-                    outcome_loss=psps_causal_loss._outcome_loss,
-                    treatment_loss=psps_causal_loss._treatment_loss,
+                metrics.CausalLossMetric(
+                    psps_causal_loss._outcome_loss,
+                    psps_causal_loss._treatment_loss,
+                    outcome_loss_weight=psps_causal_loss._outcome_loss_weight,
                 ),
             ],
         )
@@ -384,9 +385,10 @@ def build_model_binary_normal(
                 metrics.OutcomeMeanSquaredError(
                     n_outcome_pred_cols=2, n_treatment_pred_cols=1, n_outcome_true_cols=1
                 ),
-                metrics.causal_loss_metric_gen(
-                    outcome_loss=psps_causal_loss._outcome_loss,
-                    treatment_loss=psps_causal_loss._treatment_loss,
+                metrics.CausalLossMetric(
+                    psps_causal_loss._outcome_loss,
+                    psps_causal_loss._treatment_loss,
+                    outcome_loss_weight=psps_causal_loss._outcome_loss_weight,
                 ),
             ],
         )
@@ -539,9 +541,10 @@ def build_model_binary_exponential(
                     n_treatment_pred_cols=_n_treatment_pred_cols,
                     n_outcome_pred_cols=_n_outcome_pred_cols,
                 ),
-                metrics.causal_loss_metric_gen(
-                    outcome_loss=psps_causal_loss._outcome_loss,
-                    treatment_loss=psps_causal_loss._treatment_loss,
+                metrics.CausalLossMetric(
+                    psps_causal_loss._outcome_loss,
+                    psps_causal_loss._treatment_loss,
+                    outcome_loss_weight=psps_causal_loss._outcome_loss_weight,
                 ),
             ],
         )
@@ -806,11 +809,10 @@ def build_model_continuous_survival(
             optimizer=tfk.optimizers.Nadam(learning_rate=learning_rate, clipnorm=clipnorm),
             metrics=[
                 metrics.outcome_nll_metric_gen(causal_loss._outcome_loss),
-                metrics.causal_loss_metric_gen(
-                    outcome_loss=causal_loss._outcome_loss,
-                    treatment_loss=causal_loss._treatment_loss,
-                    alpha=causal_loss._alpha,
-                    outcome_loss_weight=outcome_loss_weight,
+                metrics.CausalLossMetric(
+                    causal_loss._outcome_loss,
+                    causal_loss._treatment_loss,
+                    outcome_loss_weight=causal_loss._outcome_loss_weight,
                 ),
                 metrics.predictive_state_df_gen(
                     n_outcome_pred_cols=n_outcome_pred_cols, n_treatment_pred_cols=2

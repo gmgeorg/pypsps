@@ -180,7 +180,9 @@ def get_column_layout(model: tf.keras.Model) -> ColumnLayout:
         raise RuntimeError(
             "Model must be compiled with a `pypsps.keras.losses.CausalLoss` to read its column "
             f"layout, but model.loss is {type(getattr(model, 'loss', None)).__name__}. "
-            "Compile the model first (e.g. build with `compile=True`)."
+            "Compile the model first (e.g. build with `compile=True`). A model loaded with "
+            "`load_model(path, compile=False)` has no loss; load it with `compile=True` (the "
+            "default, after `import pypsps.keras`)."
         )
     outcome_loss = model.loss._outcome_loss
     treatment_loss = model.loss._treatment_loss

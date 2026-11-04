@@ -1,6 +1,6 @@
 """Module for metrics from pypsps predictions."""
 
-from typing import Union
+import warnings
 
 import pypress.utils
 import tensorflow as tf
@@ -212,124 +212,163 @@ class OutcomeMeanAbsoluteError(_ColumnArgsMixin, tf.keras.metrics.MeanAbsoluteEr
         super().update_state(y_true=outcome_true, y_pred=avg_outcome, sample_weight=sample_weight)
 
 
-def predictive_state_df_gen(n_outcome_pred_cols: int, n_treatment_pred_cols: int):
-    """Metric for degrees of freedom of predictive states."""
-
-    def predictive_state_df(y_true, y_pred) -> tf.Tensor:
-        """Computes degrees of freedom of predictive state weights."""
-        del y_true
-        _, weights, _ = utils.split_y_pred(
-            y_pred,
-            n_outcome_pred_cols=n_outcome_pred_cols,
-            n_treatment_pred_cols=n_treatment_pred_cols,
-        )
-        return pypress.utils.tr_kernel(weights)
-
-    return predictive_state_df
+@tf.keras.utils.register_keras_serializable(package="pypsps")
+def predictive_state_df(
+    y_true, y_pred, n_outcome_pred_cols: int, n_treatment_pred_cols: int
+) -> tf.Tensor:
+    """Degrees of freedom of the predictive state weights (`pypress.utils.tr_kernel`)."""
+    del y_true
+    _, weights, _ = utils.split_y_pred(
+        y_pred,
+        n_outcome_pred_cols=n_outcome_pred_cols,
+        n_treatment_pred_cols=n_treatment_pred_cols,
+    )
+    return pypress.utils.tr_kernel(weights)
 
 
-def _penalty_free_copy(loss_obj):
-    """Returns a penalty-free instance of `loss_obj`, without mutating `loss_obj` itself
-    (which may still be the live training-time loss).
+def predictive_state_df_gen(
+    n_outcome_pred_cols: int, n_treatment_pred_cols: int
+) -> tf.keras.metrics.MeanMetricWrapper:
+    """Metric for the degrees of freedom of the predictive states, logged as
+    ``predictive_state_df``. Serializable: it wraps the registered `predictive_state_df`."""
+    return tf.keras.metrics.MeanMetricWrapper(
+        fn=predictive_state_df,
+        name="predictive_state_df",
+        n_outcome_pred_cols=n_outcome_pred_cols,
+        n_treatment_pred_cols=n_treatment_pred_cols,
+    )
 
-    Delegates to `loss_obj.penalty_free()` (see `losses.OutcomeLoss.penalty_free` /
-    `losses.TreatmentLoss.penalty_free`), which rebuilds the object from an explicit,
-    class-declared list of constructor arguments -- never by scanning attribute names for a
-    naming convention like `_lambda_*`. That keeps this correct even for a penalty that isn't
-    named with a `lambda`-style prefix: the loss class itself, not this function, decides
-    what counts as a penalty.
+
+@tf.keras.utils.register_keras_serializable(package="pypsps")
+class CausalLossMetric(tf.keras.metrics.Mean):
+    """The joint NLL: ``outcome_loss_weight * outcome NLL + 1 * treatment NLL``.
+
+    Unlike the training `losses.CausalLoss`, it has no predictive-state regularizer, no
+    penalty embedded in the outcome or treatment loss (it holds their `penalty_free()`
+    copies), and alpha fixed at 1, whatever alpha the training loss uses. Its values are
+    therefore comparable across epochs and alpha schedules, which makes it a sound
+    early-stopping and checkpoint criterion. ``outcome_loss_weight=0`` is allowed (unusual,
+    not recommended): the metric is then the treatment NLL alone.
+
+    There is deliberately no ``alpha`` argument; passing one raises `TypeError`.
     """
-    return loss_obj.penalty_free()
+
+    def __init__(
+        self,
+        outcome_loss: losses.OutcomeLoss,
+        treatment_loss: losses.TreatmentLoss,
+        outcome_loss_weight: float = 1.0,
+        name="causal_loss_metric",
+        **kwargs,
+    ):
+        super().__init__(name=name, **kwargs)
+        if not isinstance(outcome_loss, losses.OutcomeLoss):
+            raise TypeError(f"outcome_loss must be an OutcomeLoss; got {type(outcome_loss)}")
+        if not isinstance(treatment_loss, losses.TreatmentLoss):
+            raise TypeError(f"treatment_loss must be a TreatmentLoss; got {type(treatment_loss)}")
+        self._outcome = outcome_loss.penalty_free()
+        self._treatment = treatment_loss.penalty_free()
+        # No range check and no `or 1.0`: 0 is a legal weight.
+        self._outcome_loss_weight = float(outcome_loss_weight)
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        """Accumulates the per-batch joint NLL."""
+        value = self._outcome_loss_weight * self._outcome(y_true, y_pred) + self._treatment(
+            y_true, y_pred
+        )
+        return super().update_state(value, sample_weight=sample_weight)
+
+    def get_config(self) -> dict:
+        """Returns the config; the two losses are serialized Keras objects."""
+        return {
+            **super().get_config(),
+            "outcome_loss": tf.keras.utils.serialize_keras_object(self._outcome),
+            "treatment_loss": tf.keras.utils.serialize_keras_object(self._treatment),
+            "outcome_loss_weight": self._outcome_loss_weight,
+        }
+
+    @classmethod
+    def from_config(cls, config: dict) -> "CausalLossMetric":
+        """Rebuilds the metric, deserializing the two losses."""
+        config = dict(config)
+        config["outcome_loss"] = tf.keras.utils.deserialize_keras_object(config["outcome_loss"])
+        config["treatment_loss"] = tf.keras.utils.deserialize_keras_object(config["treatment_loss"])
+        return cls(**config)
+
+
+_UNSET = object()
 
 
 def causal_loss_metric_gen(
     outcome_loss: losses.OutcomeLoss,
     treatment_loss: losses.TreatmentLoss,
-    alpha: Union[float, tf.Variable] = 1.0,
+    alpha=_UNSET,
     outcome_loss_weight: float = 1.0,
-):
-    """
-    Function wrapper that returns a metric function computing the causal loss.
-
-    The returned function takes (y_true, y_pred) as inputs and computes:
-
-        causal_loss = outcome_loss_weight * outcome_loss(y_true, y_pred)
-                      + alpha * treatment_loss(y_true, y_pred)
-
-    with `outcome_loss` and `treatment_loss` stripped of any embedded penalty terms (see
-    `_penalty_free_copy`) and wrapped in a `CausalLoss` with `predictive_states_regularizer=
-    None`, so this metric always reports the exact joint likelihood, never a penalized/
-    regularized proxy for it -- regardless of what alpha, outcome_loss_weight, or predictive
-    state / balance penalties the model was actually trained with.
-
-    This metric function can be passed to model.compile(metrics=[...]).
+) -> CausalLossMetric:
+    """Returns a `CausalLossMetric`, logged as ``causal_loss_metric``.
 
     Parameters
     ----------
     outcome_loss : OutcomeLoss
-        Instance of an outcome loss (e.g. Normal log-likelihood loss).
+        The outcome loss; the metric uses its penalty-free copy.
     treatment_loss : TreatmentLoss
-        Instance of a treatment loss (e.g. binary cross-entropy for treatment prediction).
-    alpha : float or tf.Variable, default=1.0
-        Penalty parameter for treatment loss. Pass the training loss's ``_alpha`` variable
-        so the metric follows an alpha schedule; a float is fixed.
+        The treatment loss; the metric uses its penalty-free copy.
+    alpha : deprecated
+        Ignored, with a `FutureWarning`: the metric always uses alpha = 1. Removed in v0.5.0.
     outcome_loss_weight : float, default=1.0
-        Weight for the outcome loss.
-
-    Returns
-    -------
-    function
-        A function metric that takes (y_true, y_pred) and returns the causal loss as a float value (can be passed as metric).
+        Weight of the outcome NLL. Pass the training loss's weight; 0 is allowed.
     """
-    # Construct an instance of CausalLoss with the given parameters, using penalty-free
-    # copies of outcome_loss/treatment_loss so this metric can never inherit a penalty term
-    # baked into either of them.
-    causal_loss_obj = losses.CausalLoss(
-        outcome_loss=_penalty_free_copy(outcome_loss),
-        treatment_loss=_penalty_free_copy(treatment_loss),
-        alpha=alpha,
-        outcome_loss_weight=outcome_loss_weight,
-    )
-
-    def causal_loss_metric(y_true, y_pred) -> tf.Tensor:
-        """Metric function computing the causal loss."""
-        # Call the causal loss object to compute the loss per example.
-        # Here we assume causal_loss_obj returns per-example loss.
-        return causal_loss_obj(y_true, y_pred)
-
-    causal_loss_metric.__name__ = "causal_loss_metric"
-    return causal_loss_metric
+    if alpha is not _UNSET:
+        warnings.warn(
+            "causal_loss_metric_gen: alpha is ignored; causal_loss_metric uses alpha = 1. "
+            "The argument is removed in v0.5.0",
+            FutureWarning,
+            stacklevel=2,
+        )
+    return CausalLossMetric(outcome_loss, treatment_loss, outcome_loss_weight=outcome_loss_weight)
 
 
-def outcome_nll_metric_gen(outcome_loss: losses.OutcomeLoss):
+def outcome_nll_metric_gen(outcome_loss: losses.OutcomeLoss) -> tf.keras.metrics.MeanMetricWrapper:
     """Metric of the outcome negative log-likelihood alone, without penalties or alpha.
 
     Suitable as an early-stopping and checkpoint criterion that does not depend on the alpha
     schedule. Pass to ``model.compile(metrics=[...])``; it is logged as ``outcome_nll_metric``.
     """
-    penalty_free = _penalty_free_copy(outcome_loss)
-
-    def outcome_nll_metric(y_true, y_pred) -> tf.Tensor:
-        """Metric function computing the penalty-free outcome loss."""
-        return penalty_free(y_true, y_pred)
-
-    outcome_nll_metric.__name__ = "outcome_nll_metric"
-    return outcome_nll_metric
+    return tf.keras.metrics.MeanMetricWrapper(
+        fn=outcome_loss.penalty_free(), name="outcome_nll_metric"
+    )
 
 
-def uniform_entropy_gen(n_outcome_pred_cols: int, n_treatment_pred_cols: int):
+@tf.keras.utils.register_keras_serializable(package="pypsps")
+def uniform_entropy(
+    y_true, y_pred, n_outcome_pred_cols: int, n_treatment_pred_cols: int
+) -> tf.Tensor:
+    """Mean Shannon entropy of the predictive state weights (higher = more uniform)."""
+    del y_true
+    _, weights, _ = utils.split_y_pred(
+        y_pred,
+        n_outcome_pred_cols=n_outcome_pred_cols,
+        n_treatment_pred_cols=n_treatment_pred_cols,
+    )
+    # Shannon entropy per row: -sum(p_i * log(p_i)), with 0 * log(0) taken as 0.
+    # safe_xlogx computes that exactly; an epsilon floor (log(p_i + eps)) would distort
+    # the entropy of sharp, near-degenerate state weights.
+    entropy_per_row = -1 * tf.math.reduce_sum(pypress.utils.safe_xlogx(weights), axis=1)
+    return tf.math.reduce_mean(entropy_per_row)
+
+
+def uniform_entropy_gen(
+    n_outcome_pred_cols: int, n_treatment_pred_cols: int
+) -> tf.keras.metrics.MeanMetricWrapper:
     """
-    Function wrapper that returns a metric function computing the Shannon entropy.
-
-    The returned function computes the average Shannon entropy of predictive state distributions
-    across all samples. Higher entropy indicates more uniform state distributions.
+    Metric of the average Shannon entropy of the predictive state weights, logged as
+    ``uniform_entropy``.
 
     The entropy is computed as:
         mean_entropy = mean(-sum(p_i * log(p_i)))
 
-    where p_i are the predictive state weights for each state.
-
-    This metric function can be passed to model.compile(metrics=[...]).
+    where p_i are the predictive state weights for each state. Higher entropy indicates more
+    uniform state distributions.
 
     Parameters
     ----------
@@ -340,25 +379,12 @@ def uniform_entropy_gen(n_outcome_pred_cols: int, n_treatment_pred_cols: int):
 
     Returns
     -------
-    function
-        A function metric that takes (y_true, y_pred) and returns the mean entropy as a float value.
+    tf.keras.metrics.MeanMetricWrapper
+        A serializable metric wrapping the registered `uniform_entropy`.
     """
-
-    def uniform_entropy(y_true, y_pred) -> tf.Tensor:
-        """Computes Shannon entropy of predictive state weights."""
-        del y_true
-        _, weights, _ = utils.split_y_pred(
-            y_pred,
-            n_outcome_pred_cols=n_outcome_pred_cols,
-            n_treatment_pred_cols=n_treatment_pred_cols,
-        )
-        # Shannon entropy per row: -sum(p_i * log(p_i)), with 0 * log(0) taken as 0.
-        # safe_xlogx computes that exactly; an epsilon floor (log(p_i + eps)) would distort
-        # the entropy of sharp, near-degenerate state weights.
-        entropy_per_row = -1 * tf.math.reduce_sum(pypress.utils.safe_xlogx(weights), axis=1)
-        # Return mean entropy across all samples
-        # Higher values indicate more uniform distributions
-        return tf.math.reduce_mean(entropy_per_row)
-
-    uniform_entropy.__name__ = "uniform_entropy"
-    return uniform_entropy
+    return tf.keras.metrics.MeanMetricWrapper(
+        fn=uniform_entropy,
+        name="uniform_entropy",
+        n_outcome_pred_cols=n_outcome_pred_cols,
+        n_treatment_pred_cols=n_treatment_pred_cols,
+    )
