@@ -5,6 +5,23 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.2.0 - Nov 4, 2026
+
+Breaking: `OutcomeLoss` now defaults to the interventional outcome likelihood, so the
+default loss values, gradients and trained models differ from v0.1.10. Pass
+`outcome_likelihood="observational"` to keep the previous behavior exactly.
+
+### Added
+
+* `OutcomeLoss(outcome_likelihood=...)` with `pypsps.keras.losses.OutcomeLikelihood`:
+  `"interventional"` (default, -log p(Y | do(A), X) with prior weights
+  P(S | X) = P(S | X, do(A))) or `"observational"` (-log p(Y | A, X) with posterior
+  weights P(S | X, A), the v0.1.10 behavior, bit-identical).
+  Strings convert to the enum. `penalty_free()` keeps the setting.
+* `CausalLoss(alpha=...)` and `causal_loss_metric_gen(alpha=...)` accept a float32
+  `tf.Variable`, which is shared rather than copied, so a metric can follow an alpha
+  schedule.
+
 ## pypsps v0.1.10 - Nov 4, 2026
 
 ### Added
