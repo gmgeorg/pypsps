@@ -258,6 +258,22 @@ def causal_loss_metric_gen(
     return causal_loss_metric
 
 
+def outcome_nll_metric_gen(outcome_loss: losses.OutcomeLoss):
+    """Metric of the outcome negative log-likelihood alone, without penalties or alpha.
+
+    Suitable as an early-stopping and checkpoint criterion that does not depend on the alpha
+    schedule. Pass to ``model.compile(metrics=[...])``; it is logged as ``outcome_nll_metric``.
+    """
+    penalty_free = _penalty_free_copy(outcome_loss)
+
+    def outcome_nll_metric(y_true, y_pred) -> tf.Tensor:
+        """Metric function computing the penalty-free outcome loss."""
+        return penalty_free(y_true, y_pred)
+
+    outcome_nll_metric.__name__ = "outcome_nll_metric"
+    return outcome_nll_metric
+
+
 def uniform_entropy_gen(n_outcome_pred_cols: int, n_treatment_pred_cols: int):
     """
     Function wrapper that returns a metric function computing the Shannon entropy.

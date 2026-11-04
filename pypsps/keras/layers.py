@@ -59,3 +59,28 @@ class BiasOnly(tf.keras.layers.Layer):
         config = config.copy()
         config["bias_regularizer"] = tf.keras.regularizers.deserialize(config["bias_regularizer"])
         return cls(**config)
+
+
+@tf.keras.utils.register_keras_serializable(package="pypsps")
+class StateColumnGate(tf.keras.layers.Layer):
+    """Selects column ``index`` of a 2D tensor as a ``(batch, 1)`` tensor.
+
+    A serializable replacement for ``Lambda(lambda x: x[:, i : i + 1])`` in a per-state loop.
+    """
+
+    def __init__(self, index: int, **kwargs):
+        """Stores the column ``index`` to select."""
+        super().__init__(**kwargs)
+        if isinstance(index, bool) or int(index) != index or index < 0:
+            raise ValueError(f"index must be a non-negative integer, got {index!r}")
+        self.index = int(index)
+
+    def call(self, inputs):
+        """Returns ``inputs[:, index : index + 1]``."""
+        return inputs[:, self.index : self.index + 1]
+
+    def get_config(self):
+        """Returns the layer config, including ``index``."""
+        config = super().get_config()
+        config.update({"index": self.index})
+        return config
