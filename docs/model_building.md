@@ -158,6 +158,15 @@ penalties are included, so it doesn't follow the alpha schedule. The builders pa
 training loss's `outcome_loss_weight`. The training loss's alpha is `causal_loss.alpha`, a
 `tf.Variable`; `causal_loss.alpha = x` assigns it.
 
+### Sample Weights
+
+`OutcomeLoss`, `TreatmentLoss` and `CausalLoss` compute one loss per unit, and Keras
+weights each unit by its `sample_weight` before applying `reduction`. An integer weight
+counts a unit that many times. `CausalLoss` adds the `predictive_states_regularizer` once,
+after the reduction: it penalizes the batch's state weights, so `sample_weight` does not
+scale it. `causal_loss_metric` and `outcome_nll_metric` report the weighted mean over units,
+sum(w × loss) / sum(w), across all batches.
+
 ## Continuous Treatment, Time-to-Event Outcome
 
 `models.build_model_continuous_survival(distribution, ...)`, with the wrappers

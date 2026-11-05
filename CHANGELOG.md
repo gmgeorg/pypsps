@@ -5,6 +5,29 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.3.5 - Nov 4, 2026
+
+### Fixed
+
+* `OutcomeLoss`, `TreatmentLoss` and `CausalLoss` weight each unit by its `sample_weight`.
+  They used to reduce the batch first, so a weight vector `w` only scaled the batch loss by
+  `mean(w)`. Each `call` now returns the per-unit loss `[N]`, and Keras weights and reduces
+  it. This also makes `reduction="mean_with_sample_weight"` work.
+* `causal_loss_metric` and `outcome_nll_metric` average over units, weighted by
+  `sample_weight`, instead of averaging the batch means.
+
+### Changed
+
+* Loss and metric values change on weighted data. Without `sample_weight` the losses are
+  unchanged. The two metrics change slightly when the last batch is smaller, because they
+  now count units, as Keras's own `loss` does.
+* `CausalLoss` adds the `predictive_states_regularizer` once, after the reduction, and
+  `sample_weight` does not scale it. Without `sample_weight` this is the previous value
+  under every reduction.
+* An `OutcomeLoss` or `TreatmentLoss` subclass that adds a penalty in `call` now adds it per
+  unit, before the reduction. Under `"sum_over_batch_size"` the value is unchanged; under
+  `"sum"` the penalty is counted once per unit.
+
 ## pypsps v0.3.4 - Nov 4, 2026
 
 ### Added

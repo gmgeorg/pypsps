@@ -430,6 +430,12 @@ def predictive_state_df_gen(
     )
 
 
+def _per_unit(loss: tf.keras.losses.Loss) -> tf.keras.losses.Loss:
+    """Sets ``reduction="none"``, so a `Mean` metric weights units, not batches."""
+    loss.reduction = "none"
+    return loss
+
+
 @tf.keras.utils.register_keras_serializable(package="pypsps")
 class CausalLossMetric(tf.keras.metrics.Mean):
     """The joint NLL: ``outcome_loss_weight * outcome NLL + 1 * treatment NLL``.
@@ -457,13 +463,13 @@ class CausalLossMetric(tf.keras.metrics.Mean):
             raise TypeError(f"outcome_loss must be an OutcomeLoss; got {type(outcome_loss)}")
         if not isinstance(treatment_loss, losses.TreatmentLoss):
             raise TypeError(f"treatment_loss must be a TreatmentLoss; got {type(treatment_loss)}")
-        self._outcome = outcome_loss.penalty_free()
-        self._treatment = treatment_loss.penalty_free()
+        self._outcome = _per_unit(outcome_loss.penalty_free())
+        self._treatment = _per_unit(treatment_loss.penalty_free())
         # No range check and no `or 1.0`: 0 is a legal weight.
         self._outcome_loss_weight = float(outcome_loss_weight)
 
     def update_state(self, y_true: Array, y_pred: Array, sample_weight: Optional[Array] = None):
-        """Accumulates the per-batch joint NLL."""
+        """Accumulates the joint NLL of each unit, weighted by ``sample_weight``."""
         value = self._outcome_loss_weight * self._outcome(y_true, y_pred) + self._treatment(
             y_true, y_pred
         )
@@ -526,7 +532,7 @@ def outcome_nll_metric_gen(outcome_loss: losses.OutcomeLoss) -> tf.keras.metrics
     schedule. Pass to ``model.compile(metrics=[...])``; it is logged as ``outcome_nll_metric``.
     """
     return tf.keras.metrics.MeanMetricWrapper(
-        fn=outcome_loss.penalty_free(), name="outcome_nll_metric"
+        fn=_per_unit(outcome_loss.penalty_free()), name="outcome_nll_metric"
     )
 
 
