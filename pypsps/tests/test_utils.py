@@ -62,7 +62,7 @@ def test_toy_model_fits_in_eager_and_graph_mode():
 
 
 def test_column_layout_from_model_normal_outcome():
-    """get_column_layout reads (2, 1, 1) off a compiled Normal-outcome (loc+scale) model"""
+    """ColumnLayout.from_model reads (2, 1, 1) off a compiled Normal-outcome (loc+scale) model"""
     tf.random.set_seed(10)
     model = models.build_model(**presets.toy(n_states=3, n_features=4, compile=True))
     layout = ColumnLayout.from_model(model)
@@ -88,7 +88,7 @@ def test_column_layout_from_model_plain_keras_model_raises():
 
 
 def test_column_layout_from_model_exponential_outcome():
-    """get_column_layout reads (1, 1, 2) off a compiled exponential/survival (log_rate) model"""
+    """ColumnLayout.from_model reads (1, 1, 2) off a compiled exponential (log_rate) model"""
     tf.random.set_seed(10)
     model = models.build_model(
         **presets.binary_exponential(

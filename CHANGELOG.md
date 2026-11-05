@@ -5,6 +5,46 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.5.0 - Nov 4, 2026
+
+Breaking: removes everything deprecated in v0.3.4 to v0.4.0. `docs/model_building.md`
+("Removed in v0.5.0") has a replacement for each removed name and the migration for old
+model files.
+
+Model files: `.keras` files saved by v0.3.4 to v0.4.x load as before. Files saved by
+v0.3.0 to v0.3.3 (and earlier) load only with `compile=False`: their loss and metric configs
+use column counts, and loading them with `compile=True` raises `ValueError`, naming the
+migration. Rebuild such a model from its preset and copy the weights. Continuous models can
+use `new.set_weights(old.get_weights())`. Binary models must be migrated with
+`models.copy_legacy_weights` of pypsps v0.4.x, because v0.5.0 removes it.
+
+### Removed
+
+* The `build_*` functions: `build_toy_model`, `build_model_binary_normal`,
+  `build_model_binary_exponential`, `build_model_continuous_survival`,
+  `build_model_continuous_exponential` and `build_model_continuous_weibull`. Use
+  `models.build_model(**presets.<name>(...))`.
+* `models.copy_legacy_weights`.
+* The column-count constructors of `OutcomeLoss`, `TreatmentLoss` and the metric classes,
+  and the count form of `predictive_state_df_gen` and `uniform_entropy_gen`. They take a
+  `StateMixture` (or a `ColumnLayout`) and raise `TypeError` for anything else.
+* `metrics.causal_loss_metric_gen(alpha=...)`; `outcome_loss_weight` is now keyword-only.
+* `utils.split_y_pred`, `split_outcome_pred`, `split_y_true`, `get_n_states`,
+  `get_state_column_indices`, `agg_outcome_pred`, `agg_treatment_pred`, `get_column_layout`
+  and `utils.ColumnLayout`.
+* `neglogliks.negloglik_per_state`, `neglogliks.posterior_from_negloglik_per_state` and
+  `losses.prob_state_given_treatment_features`.
+* `families.from_negloglik` and `ColumnLayout.from_counts`.
+
+### Changed
+
+* `StateMixture` and `ColumnLayout` require `n_states`; K is no longer inferred from the
+  `y_pred` width. A saved mixture without `n_states` raises `ValueError`.
+* `CausalLoss` raises `ValueError` when its outcome and treatment losses hold different
+  mixtures (in v0.4.x the column-count constructors only warned).
+* The notebooks use `ColumnLayout` and `StateMixture` instead of the removed `utils`
+  helpers, and are re-run.
+
 ## pypsps v0.4.0 - Nov 4, 2026
 
 Breaking: every model now uses one treatment head, `treatment_params` (a

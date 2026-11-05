@@ -81,15 +81,6 @@ def _mixture_nll(gamma: tf.Tensor, nll_per_state: tf.Tensor) -> tf.Tensor:
     return -tf.math.reduce_logsumexp(utils.safe_log(gamma) - nll_per_state, axis=1)
 
 
-def _compatible(a: "StateMixture", b: "StateMixture") -> bool:
-    """Equal families, and equal K unless one of them infers K (legacy loss configs)."""
-    return (
-        a.outcome_family == b.outcome_family
-        and a.treatment_family == b.treatment_family
-        and (a.n_states is None or b.n_states is None or a.n_states == b.n_states)
-    )
-
-
 @tf.keras.utils.register_keras_serializable(package="pypsps")
 class StateMixture:
     """The outcome and treatment families of a pypsps model, mixed over predictive states.
@@ -98,14 +89,14 @@ class StateMixture:
       outcome_family: distribution of the outcome within a state.
       treatment_family: distribution of the treatment within a state; must read exactly one
         ``y_true`` column.
-      n_states: K. ``None`` infers it from the ``y_pred`` width (legacy adapters only).
+      n_states: K, the number of predictive states.
     """
 
     def __init__(
         self,
         outcome_family: families_lib.Family,
         treatment_family: families_lib.Family,
-        n_states: Optional[int] = None,
+        n_states: int,
     ):
         """Validates the families and derives the column layout."""
         for name, family in (
@@ -134,8 +125,8 @@ class StateMixture:
         return self._treatment_family
 
     @property
-    def n_states(self) -> Optional[int]:
-        """K, or None if inferred from the ``y_pred`` width."""
+    def n_states(self) -> int:
+        """K, the number of predictive states."""
         return self._layout.n_states
 
     @property
@@ -265,7 +256,7 @@ class StateMixture:
                     "0.3.4 and copy the weights with `new.set_weights(old.get_weights())`."
                 )
             return loss_mixture
-        if loss_mixture is not None and not _compatible(layer_mixture, loss_mixture):
+        if loss_mixture is not None and layer_mixture != loss_mixture:
             raise ValueError(
                 f"The model's CausalOutput layer holds {layer_mixture!r}, but its loss holds "
                 f"{loss_mixture!r}"
@@ -284,11 +275,22 @@ class StateMixture:
 
     @classmethod
     def from_config(cls, config: dict) -> "StateMixture":
-        """Rebuilds the mixture and its families."""
+        """Rebuilds the mixture and its families.
+
+        Raises:
+          ValueError: if ``n_states`` is missing; only the column-count loss and metric
+            constructors removed in v0.5.0 saved such a mixture.
+        """
+        if config.get("n_states") is None:
+            raise ValueError(
+                "StateMixture config has no n_states: it was saved by a loss or metric built "
+                "with the column-count constructor, which v0.5.0 removed. Load the model with "
+                "compile=False and compile it with pypsps.keras.models.compile_model."
+            )
         return cls(
             outcome_family=_deser(config["outcome_family"]),
             treatment_family=_deser(config["treatment_family"]),
-            n_states=config.get("n_states"),
+            n_states=config["n_states"],
         )
 
     def __eq__(self, other: object) -> bool:

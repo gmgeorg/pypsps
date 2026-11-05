@@ -22,7 +22,7 @@ a layout is safe to capture in a traced function.
 
 import dataclasses
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Mapping, NamedTuple, Optional, Union
+from typing import TYPE_CHECKING, Mapping, NamedTuple, Union
 
 import numpy as np
 import tensorflow as tf
@@ -92,14 +92,13 @@ class ColumnLayout:
       outcome_params: outcome parameter names per state, e.g. ``("loc", "scale")``.
       treatment_params: treatment parameter names per state, e.g. ``("prob",)``.
       n_outcome_true_cols: C, the number of outcome columns in ``y_true``.
-      n_states: K. ``None`` infers it from the ``y_pred`` width; only the legacy three-int
-        helpers use that.
+      n_states: K, the number of predictive states.
     """
 
     outcome_params: tuple[str, ...]
     treatment_params: tuple[str, ...]
     n_outcome_true_cols: int
-    n_states: Optional[int] = None
+    n_states: int
 
     def __post_init__(self):
         """Normalizes the names to tuples and validates every field."""
@@ -112,10 +111,9 @@ class ColumnLayout:
         if int(self.n_outcome_true_cols) < 1:
             raise ValueError(f"n_outcome_true_cols must be >= 1, got {self.n_outcome_true_cols}")
         object.__setattr__(self, "n_outcome_true_cols", int(self.n_outcome_true_cols))
-        if self.n_states is not None:
-            if int(self.n_states) < 1:
-                raise ValueError(f"n_states must be >= 1, got {self.n_states}")
-            object.__setattr__(self, "n_states", int(self.n_states))
+        if self.n_states is None or int(self.n_states) < 1:
+            raise ValueError(f"n_states must be an int >= 1, got {self.n_states}")
+        object.__setattr__(self, "n_states", int(self.n_states))
 
     # --- construction ---
 
@@ -128,27 +126,6 @@ class ColumnLayout:
             outcome_params=outcome_family.param_names,
             treatment_params=treatment_family.param_names,
             n_outcome_true_cols=outcome_family.n_true_cols,
-            n_states=n_states,
-        )
-
-    @classmethod
-    def from_counts(
-        cls,
-        n_outcome_pred_cols: int,
-        n_treatment_pred_cols: int,
-        n_outcome_true_cols: int,
-        n_states: Optional[int] = None,
-    ) -> "ColumnLayout":
-        """A layout from parameter counts alone (legacy adapter).
-
-        Parameters are named ``outcome_param_0, ...`` and ``treatment_param_0, ...``.
-        """
-        return cls(
-            outcome_params=tuple(f"outcome_param_{i}" for i in range(int(n_outcome_pred_cols))),
-            treatment_params=tuple(
-                f"treatment_param_{i}" for i in range(int(n_treatment_pred_cols))
-            ),
-            n_outcome_true_cols=n_outcome_true_cols,
             n_states=n_states,
         )
 
@@ -169,31 +146,20 @@ class ColumnLayout:
         """Columns per state across all blocks: ``P_o + 1 + P_t``."""
         return self.n_outcome_pred_cols + 1 + self.n_treatment_pred_cols
 
-    def y_pred_width(self, n_states: Optional[int] = None) -> int:
-        """``K * (P_o + 1 + P_t)``; ``n_states`` defaults to the layout's own."""
-        k = self.n_states if n_states is None else int(n_states)
-        if k is None:
-            raise ValueError("n_states is unknown; pass it or set it on the layout")
-        return k * self._cols_per_state
+    def y_pred_width(self) -> int:
+        """``K * (P_o + 1 + P_t)``."""
+        return self.n_states * self._cols_per_state
 
     def resolve_n_states(self, y_pred: Array) -> int:
-        """Returns K for ``y_pred``, checking its width against the layout."""
+        """Returns K, checking the ``y_pred`` width against the layout."""
         width = _static_width(y_pred, "y_pred")
-        if self.n_states is not None:
-            if width != self.y_pred_width():
-                raise ValueError(
-                    f"y_pred has {width} columns; layout ({', '.join(self.outcome_params)} | "
-                    f"K={self.n_states} | {', '.join(self.treatment_params)}) expects "
-                    f"{self.y_pred_width()}"
-                )
-            return self.n_states
-        if width % self._cols_per_state != 0:
+        if width != self.y_pred_width():
             raise ValueError(
-                f"y_pred has {width} columns, which is not a multiple of "
-                f"{self._cols_per_state} (= {self.n_outcome_pred_cols} outcome + 1 weight + "
-                f"{self.n_treatment_pred_cols} treatment columns per state)"
+                f"y_pred has {width} columns; layout ({', '.join(self.outcome_params)} | "
+                f"K={self.n_states} | {', '.join(self.treatment_params)}) expects "
+                f"{self.y_pred_width()}"
             )
-        return width // self._cols_per_state
+        return self.n_states
 
     # --- decode / encode ---
 

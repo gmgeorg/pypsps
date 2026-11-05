@@ -79,12 +79,14 @@ def test_decode_works_for_numpy_eager_graph_and_keras_tensors():
 def test_decode_true_reads_exactly_one_treatment_column_and_ignores_trailing():
     """The treatment is the one column right after the outcome columns (1a80698)."""
     y_true = np.array([[5.0, 1.0, 0.0, 99.0, 98.0]])
-    parts = ColumnLayout(("log_scale",), ("prob",), n_outcome_true_cols=2).decode_true(y_true)
+    parts = ColumnLayout(("log_scale",), ("prob",), n_outcome_true_cols=2, n_states=1).decode_true(
+        y_true
+    )
     np.testing.assert_array_equal(parts.outcome, [[5.0, 1.0]])
     np.testing.assert_array_equal(parts.treatment, [[0.0]])
 
     with pytest.raises(ValueError, match="at least 3"):
-        ColumnLayout(("log_scale",), ("prob",), 2).decode_true(y_true[:, :2])
+        ColumnLayout(("log_scale",), ("prob",), 2, 1).decode_true(y_true[:, :2])
 
 
 def test_width_mismatch_raises():
@@ -94,17 +96,18 @@ def test_width_mismatch_raises():
         layout.decode_pred(np.zeros((2, 8)))
 
 
-def test_non_divisible_width_raises_when_n_states_unknown():
-    """Without K, the width must be a multiple of the columns per state."""
-    layout = ColumnLayout(("loc", "scale"), ("prob",), 1)
+def test_n_states_is_required():
+    """K is part of the layout: None or < 1 raises (no inference from the width since v0.5.0)."""
+    for n_states in (None, 0):
+        with pytest.raises(ValueError, match="n_states must be an int >= 1"):
+            ColumnLayout(("loc", "scale"), ("prob",), 1, n_states)
+    layout = ColumnLayout(("loc", "scale"), ("prob",), 1, n_states=3)
     assert layout.resolve_n_states(np.zeros((2, 12))) == 3
-    with pytest.raises(ValueError, match="not a multiple of 4"):
-        layout.resolve_n_states(np.zeros((2, 13)))
 
 
 def test_unknown_static_width_raises():
     """The width is read statically, so an unknown last dimension raises."""
-    layout = ColumnLayout(("loc",), ("prob",), 1)
+    layout = ColumnLayout(("loc",), ("prob",), 1, n_states=2)
 
     @tf.function(input_signature=[tf.TensorSpec([None, None], tf.float32)])
     def graph(t):
@@ -135,29 +138,20 @@ def test_encode_rejects_missing_or_misshaped_param():
 def test_names_are_validated():
     """Parameter names must be non-empty and unique."""
     with pytest.raises(ValueError, match="unique"):
-        ColumnLayout(("loc", "loc"), ("prob",), 1)
+        ColumnLayout(("loc", "loc"), ("prob",), 1, 2)
     with pytest.raises(ValueError, match="empty"):
-        ColumnLayout((), ("prob",), 1)
+        ColumnLayout((), ("prob",), 1, 2)
 
 
-def test_layout_from_counts_matches_from_families():
-    """from_counts and from_families slice identically; only the names differ."""
-    by_family = ColumnLayout.from_families(3, families.Weibull(), families.Normal())
-    by_counts = ColumnLayout.from_counts(2, 2, 2, n_states=3)
-    assert by_family.outcome_params == ("log_scale", "log_shape")
-    assert by_family.treatment_params == ("loc", "scale")
-    assert by_counts.outcome_params == ("outcome_param_0", "outcome_param_1")
-    assert (by_family.n_outcome_true_cols, by_family.n_states) == (2, 3)
-    y = _y_pred(by_family)
-    a, b = by_family.decode_pred(y), by_counts.decode_pred(y)
-    for x, z in zip(
-        [*a.outcome.values(), a.state_weights, *a.treatment.values()],
-        [*b.outcome.values(), b.state_weights, *b.treatment.values()],
-    ):
-        np.testing.assert_array_equal(x, z)
+def test_layout_from_families():
+    """from_families takes the parameter names and y_true width from the families."""
+    layout = ColumnLayout.from_families(3, families.Weibull(), families.Normal())
+    assert layout.outcome_params == ("log_scale", "log_shape")
+    assert layout.treatment_params == ("loc", "scale")
+    assert (layout.n_outcome_true_cols, layout.n_states) == (2, 3)
 
 
-@pytest.mark.parametrize("n_states", [None, 4])
+@pytest.mark.parametrize("n_states", [1, 4])
 def test_config_round_trip(n_states):
     """The layout serializes to plain lists and rebuilds equal."""
     layout = ColumnLayout(("log_scale", "log_shape"), ("loc", "scale"), 2, n_states)

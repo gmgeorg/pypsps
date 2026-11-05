@@ -89,7 +89,7 @@ def binary_normal(
 
     Warning: a binary model's ``.weights.h5`` file saved before v0.4.0 does not load into this
     model. ``load_weights`` raises ``ValueError``, but only after it has overwritten part of the
-    model; discard that model and use `models.copy_legacy_weights` on the old ``.keras`` file.
+    model; discard that model. Migrate with ``models.copy_legacy_weights`` of pypsps v0.4.x.
 
     Args:
       n_states: number of predictive states.
@@ -151,7 +151,7 @@ def binary_exponential(
 
     Warning: a binary model's ``.weights.h5`` file saved before v0.4.0 does not load into this
     model. ``load_weights`` raises ``ValueError``, but only after it has overwritten part of the
-    model; discard that model and use `models.copy_legacy_weights` on the old ``.keras`` file.
+    model; discard that model. Migrate with ``models.copy_legacy_weights`` of pypsps v0.4.x.
 
     Args:
       n_states: number of predictive states.

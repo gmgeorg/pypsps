@@ -5,116 +5,43 @@ from typing import Any, Optional, Union
 
 import tensorflow as tf
 
-from .. import _deprecation, utils
-from . import families
-from . import layout as layout_lib
 from . import mixture as mixture_lib
-from . import neglogliks
 from .layout import ColumnLayout
 from .mixture import OutcomeLikelihood  # re-exported; defined in mixture
 
 _ser = tf.keras.utils.serialize_keras_object
 _deser = tf.keras.utils.deserialize_keras_object
 
-
-def _gen_col_selectors(x: int, n: int, k: int) -> list:
-    return layout_lib._state_column_indices(x, n, k)
-
-
-def prob_state_given_treatment_features(
-    weights: tf.Tensor,  # [N,K] = P(S|X)
-    treatment_true: tf.Tensor,  # [N,1] (or [N])
-    treatment_pred: tf.Tensor,  # [N,K*P] interleaved per-state treatment params
-    treatment_nll_loss: tf.keras.losses.Loss,
-) -> tf.Tensor:
-    """Computes gamma = P(S | X, A) using any proper elementwise NLL treatment loss.
-
-    Applies Bayes' rule: gamma_k(a, x) ∝ P(s_k | x) * p(a | s_k, x), where the prior
-    P(s_k | x) is `weights` and p(a | s_k, x) is derived from `treatment_nll_loss` evaluated
-    on the state-conditional treatment predictions.
-
-    Requirements:
-      - treatment_pred has shape [N, K*P] interleaved per-state and matches what
-        treatment_nll_loss expects as y_pred (P params per state).
-      - treatment_nll_loss.reduction == NONE and returns elementwise NLL.
-
-    Args:
-        weights: Prior state probabilities [N,K]
-        treatment_true: True treatment values [N,1] or [N]
-        treatment_pred: Predicted treatment parameters [N, K*P] in interleaved format
-        treatment_nll_loss: NLL loss function with reduction=NONE
-
-    Returns:
-      gamma: [N,K]
-
-    Deprecated since v0.3.4, removed in v0.5.0: use `StateMixture.state_posterior`.
-    """
-    _deprecation.warn(
-        "prob_state_given_treatment_features", "pypsps.keras.mixture.StateMixture.state_posterior"
-    )
-    with _deprecation.silenced():
-        return _prob_state_given_treatment_features(
-            weights, treatment_true, treatment_pred, treatment_nll_loss
-        )
+_LEGACY_CONFIG = (
+    "{cls} config has no 'mixture': it was saved by pypsps v0.3.0-v0.3.3 with the column-count "
+    "constructor, which v0.5.0 removed. Load the model with compile=False, rebuild it with "
+    "pypsps.keras.models.build_model and copy the weights (binary and toy models need "
+    "models.copy_legacy_weights of pypsps v0.4.x); see 'Models saved before v0.5.0' in "
+    "docs/model_building.md."
+)
 
 
-def _prob_state_given_treatment_features(
-    weights: tf.Tensor,
-    treatment_true: tf.Tensor,
-    treatment_pred: tf.Tensor,
-    treatment_nll_loss: tf.keras.losses.Loss,
-) -> tf.Tensor:
-    """`prob_state_given_treatment_features` without the deprecation warning."""
-    weights = tf.convert_to_tensor(weights)
-    treatment_true = tf.convert_to_tensor(treatment_true)
-    treatment_pred = tf.convert_to_tensor(treatment_pred)
-
-    if not isinstance(treatment_nll_loss, tf.keras.losses.Loss):
-        raise TypeError("treatment_nll_loss must be a tf.keras.losses.Loss instance.")
-    if treatment_nll_loss.reduction != tf.keras.losses.Reduction.NONE:
-        raise ValueError("treatment_nll_loss must have reduction=NONE.")
-
-    # Ensure treatment_true is [N,1]
-    if treatment_true.shape.rank == 1:
-        treatment_true = treatment_true[:, None]
-
-    n_states = utils.get_n_cols(weights)
-
-    # Per-state NLL: [N,K]
-    nll = neglogliks.negloglik_per_state(
-        negloglik=treatment_nll_loss,
-        y_true=treatment_true,
-        y_pred=treatment_pred,
-        n_states=n_states,
-    )
-
-    gamma = neglogliks.posterior_from_negloglik_per_state(weights, nll)
-    return gamma
-
-
-def _check_elementwise(loss: Any, what: str) -> None:
-    """Raises unless ``loss`` is a Keras loss with ``reduction="none"``."""
-    if not isinstance(loss, tf.keras.losses.Loss):
-        raise TypeError(f"{what} must be a tf.keras.losses.Loss, got {type(loss).__name__}")
-    if loss.reduction != tf.keras.losses.Reduction.NONE:
-        raise ValueError(f"{what} must have reduction='none', got {loss.reduction!r}")
-
-
-def _require_counts(**counts: Optional[int]) -> None:
-    """Raises if any of the legacy three-int arguments is missing."""
-    missing = [name for name, value in counts.items() if value is None]
-    if missing:
+def _require_mixture(mixture: Any, cls: str) -> mixture_lib.StateMixture:
+    """Returns ``mixture``, or raises TypeError unless it is a `StateMixture`."""
+    if not isinstance(mixture, mixture_lib.StateMixture):
         raise TypeError(
-            f"the legacy loss constructor needs {', '.join(missing)}; or pass a StateMixture"
+            f"{cls} takes a StateMixture, got {type(mixture).__name__}; the column-count "
+            "constructor was removed in v0.5.0"
         )
+    return mixture
+
+
+def _mixture_from_config(config: dict, cls: str) -> dict:
+    """A copy of ``config`` with the mixture deserialized; ValueError for a legacy config."""
+    if "mixture" not in config:
+        raise ValueError(_LEGACY_CONFIG.format(cls=cls))
+    config = dict(config)
+    config["mixture"] = _deser(config["mixture"])
+    return config
 
 
 class _MixtureLossMixin:
-    """Shared state of `OutcomeLoss` and `TreatmentLoss`: the mixture, and the legacy view.
-
-    ``_legacy`` is True for a loss built with the three-int constructor. Such a loss also
-    keeps the elementwise NLLs it was given as ``_loss`` (and ``_treatment_loss``).
-    """
+    """Shared state of `OutcomeLoss` and `TreatmentLoss`: the mixture and its layout."""
 
     @property
     def mixture(self) -> mixture_lib.StateMixture:
@@ -125,22 +52,6 @@ class _MixtureLossMixin:
     def layout(self) -> ColumnLayout:
         """The column layout of ``y_pred`` and ``y_true``."""
         return self._mixture.layout
-
-    # Legacy three-int view, read by metrics and utils until they take the mixture.
-    @property
-    def _n_outcome_true_cols(self) -> int:
-        """C."""
-        return self._mixture.layout.n_outcome_true_cols
-
-    @property
-    def _n_outcome_pred_cols(self) -> int:
-        """Outcome parameters per state."""
-        return self._mixture.layout.n_outcome_pred_cols
-
-    @property
-    def _n_treatment_pred_cols(self) -> int:
-        """Treatment parameters per state."""
-        return self._mixture.layout.n_treatment_pred_cols
 
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")
@@ -158,75 +69,28 @@ class OutcomeLoss(_MixtureLossMixin, tf.keras.losses.Loss):
     treatment `a` via Bayes' rule. The loss is then -log p(y | a, x), and -log p(a, y | x)
     telescopes exactly into TreatmentLoss (-log p(a | x), using the prior) plus OutcomeLoss.
     See `OutcomeLikelihood` and `pypsps.keras.mixture.StateMixture.outcome_nll`.
-
-    Construct it from a mixture, ``OutcomeLoss(mixture, outcome_likelihood=...)``. The legacy
-    form ``OutcomeLoss(loss, treatment_loss, n_outcome_true_cols, n_outcome_pred_cols,
-    n_treatment_pred_cols)`` is deprecated (a `FutureWarning`; removed in v0.5.0). It maps the
-    elementwise NLLs onto families with `families.from_negloglik`. Loading a saved config of
-    that form does not warn.
     """
 
     def __init__(
         self,
-        mixture: Optional[mixture_lib.StateMixture] = None,
-        treatment_loss: Optional[tf.keras.losses.Loss] = None,
-        n_outcome_true_cols: Optional[int] = None,
-        n_outcome_pred_cols: Optional[int] = None,
-        n_treatment_pred_cols: Optional[int] = None,
+        mixture: mixture_lib.StateMixture,
         outcome_likelihood: Union[OutcomeLikelihood, str] = OutcomeLikelihood.INTERVENTIONAL,
-        *,
-        loss: Optional[tf.keras.losses.Loss] = None,
         **kwargs: Any,
     ):
         """Initializes the outcome loss.
 
         Args:
-          mixture: the `StateMixture` to evaluate. In the legacy form, the elementwise outcome
-            NLL instead (or pass it as ``loss=``).
-          treatment_loss: legacy form only: the elementwise treatment NLL (``reduction="none"``),
-            used for the state posterior.
-          n_outcome_true_cols: legacy form only: outcome columns in y_true.
-          n_outcome_pred_cols: legacy form only: outcome parameters per state.
-          n_treatment_pred_cols: legacy form only: treatment parameters per state.
+          mixture: the `StateMixture` to evaluate.
           outcome_likelihood: `OutcomeLikelihood` member or its string value
             ("interventional", the default, or "observational").
-          loss: legacy form only: the elementwise outcome NLL (``reduction="none"``).
           **kwargs: passed to the Keras Loss (``name``, ``reduction``).
+
+        Raises:
+          TypeError: if ``mixture`` is not a `StateMixture`.
         """
-        if isinstance(mixture, mixture_lib.StateMixture) and isinstance(
-            treatment_loss, (str, OutcomeLikelihood)
-        ):  # OutcomeLoss(mixture, "observational")
-            outcome_likelihood, treatment_loss = treatment_loss, None
         super().__init__(**kwargs)
+        self._mixture = _require_mixture(mixture, "OutcomeLoss")
         self._outcome_likelihood = OutcomeLikelihood(outcome_likelihood)
-        legacy = (loss, treatment_loss, n_outcome_true_cols, n_outcome_pred_cols,
-                  n_treatment_pred_cols)  # fmt: skip
-        if isinstance(mixture, mixture_lib.StateMixture):
-            if any(v is not None for v in legacy):
-                raise TypeError("pass either a StateMixture or the legacy loss arguments, not both")
-            self._mixture = mixture
-            self._legacy = False
-            return
-        _deprecation.warn(
-            "OutcomeLoss(loss, treatment_loss, <three column counts>)", "OutcomeLoss(mixture)"
-        )
-        loss = mixture if loss is None else loss
-        _require_counts(
-            loss=loss,
-            treatment_loss=treatment_loss,
-            n_outcome_true_cols=n_outcome_true_cols,
-            n_outcome_pred_cols=n_outcome_pred_cols,
-            n_treatment_pred_cols=n_treatment_pred_cols,
-        )
-        _check_elementwise(loss, "loss")
-        _check_elementwise(treatment_loss, "treatment_loss")
-        self._mixture = mixture_lib.StateMixture(
-            families.from_negloglik(loss, n_outcome_pred_cols, n_outcome_true_cols),
-            families.from_negloglik(treatment_loss, n_treatment_pred_cols, 1),
-        )
-        self._legacy = True
-        self._loss = loss
-        self._treatment_loss = treatment_loss
 
     @property
     def outcome_likelihood(self) -> OutcomeLikelihood:
@@ -243,15 +107,12 @@ class OutcomeLoss(_MixtureLossMixin, tf.keras.losses.Loss):
 
     @classmethod
     def from_config(cls, config: dict) -> "OutcomeLoss":
-        """Rebuilds the loss; a v0.3.0 three-int config goes through the legacy constructor."""
-        config = dict(config)
-        if "mixture" in config:
-            config["mixture"] = _deser(config["mixture"])
-        else:
-            config["loss"] = _deser(config["loss"])
-            config["treatment_loss"] = _deser(config["treatment_loss"])
-        with _deprecation.silenced():
-            return cls(**config)
+        """Rebuilds the loss.
+
+        Raises:
+          ValueError: for a config without a mixture (saved by v0.3.0-v0.3.3).
+        """
+        return cls(**_mixture_from_config(config, cls.__name__))
 
     def penalty_free(self) -> "OutcomeLoss":
         """Returns a fresh instance of this exact class with no penalty terms applied.
@@ -286,57 +147,20 @@ class TreatmentLoss(_MixtureLossMixin, tf.keras.losses.Loss):
 
     This is the term that telescopes with OutcomeLoss's posterior-weighted mixture into the
     exact joint -log p(a, y | x).
-
-    Construct it from a mixture, ``TreatmentLoss(mixture)``. The legacy form
-    ``TreatmentLoss(loss, n_outcome_true_cols, n_outcome_pred_cols, n_treatment_pred_cols)``
-    is deprecated (a `FutureWarning`; removed in v0.5.0). Its outcome family is a placeholder
-    that is never evaluated.
     """
 
-    def __init__(
-        self,
-        mixture: Optional[mixture_lib.StateMixture] = None,
-        n_outcome_true_cols: Optional[int] = None,
-        n_outcome_pred_cols: Optional[int] = None,
-        n_treatment_pred_cols: Optional[int] = None,
-        *,
-        loss: Optional[tf.keras.losses.Loss] = None,
-        **kwargs: Any,
-    ):
+    def __init__(self, mixture: mixture_lib.StateMixture, **kwargs: Any):
         """Initializes the treatment loss.
 
         Args:
-          mixture: the `StateMixture` to evaluate. In the legacy form, the elementwise
-            treatment NLL instead (or pass it as ``loss=``).
-          n_outcome_true_cols: legacy form only: outcome columns in y_true.
-          n_outcome_pred_cols: legacy form only: outcome parameters per state.
-          n_treatment_pred_cols: legacy form only: treatment parameters per state.
-          loss: legacy form only: the elementwise treatment NLL (``reduction="none"``).
+          mixture: the `StateMixture` to evaluate.
           **kwargs: passed to the Keras Loss (``name``, ``reduction``).
+
+        Raises:
+          TypeError: if ``mixture`` is not a `StateMixture`.
         """
         super().__init__(**kwargs)
-        legacy = (loss, n_outcome_true_cols, n_outcome_pred_cols, n_treatment_pred_cols)
-        if isinstance(mixture, mixture_lib.StateMixture):
-            if any(v is not None for v in legacy):
-                raise TypeError("pass either a StateMixture or the legacy loss arguments, not both")
-            self._mixture = mixture
-            self._legacy = False
-            return
-        _deprecation.warn("TreatmentLoss(loss, <three column counts>)", "TreatmentLoss(mixture)")
-        loss = mixture if loss is None else loss
-        _require_counts(
-            loss=loss,
-            n_outcome_true_cols=n_outcome_true_cols,
-            n_outcome_pred_cols=n_outcome_pred_cols,
-            n_treatment_pred_cols=n_treatment_pred_cols,
-        )
-        _check_elementwise(loss, "loss")
-        self._mixture = mixture_lib.StateMixture(
-            families.LossFamily(None, n_outcome_pred_cols, n_outcome_true_cols),  # placeholder
-            families.from_negloglik(loss, n_treatment_pred_cols, 1),
-        )
-        self._legacy = True
-        self._loss = loss
+        self._mixture = _require_mixture(mixture, "TreatmentLoss")
 
     def get_config(self) -> dict:
         """Returns the config: the serialized mixture."""
@@ -344,14 +168,12 @@ class TreatmentLoss(_MixtureLossMixin, tf.keras.losses.Loss):
 
     @classmethod
     def from_config(cls, config: dict) -> "TreatmentLoss":
-        """Rebuilds the loss; a v0.3.0 three-int config goes through the legacy constructor."""
-        config = dict(config)
-        if "mixture" in config:
-            config["mixture"] = _deser(config["mixture"])
-        else:
-            config["loss"] = _deser(config["loss"])
-        with _deprecation.silenced():
-            return cls(**config)
+        """Rebuilds the loss.
+
+        Raises:
+          ValueError: for a config without a mixture (saved by v0.3.0-v0.3.3).
+        """
+        return cls(**_mixture_from_config(config, cls.__name__))
 
     def penalty_free(self) -> "TreatmentLoss":
         """Returns a fresh instance of this exact class with no penalty terms applied.
@@ -369,44 +191,20 @@ class TreatmentLoss(_MixtureLossMixin, tf.keras.losses.Loss):
         return self._mixture.treatment_nll(y_true, y_pred)
 
 
-_MISMATCH_WARNING = (
-    "CausalLoss: the outcome and treatment losses disagree on the treatment model or the "
-    "column counts ({detail}). The outcome loss's state posterior then uses a different "
-    "treatment likelihood than the treatment loss. This warns for the legacy three-int "
-    "constructors and will raise from v0.5.0; build both from one StateMixture "
-    "(CausalLoss.from_mixture)."
-)
-
-
 def _link_mixtures(outcome_loss: "OutcomeLoss", treatment_loss: "TreatmentLoss") -> None:
-    """Checks the two losses agree, then makes the treatment loss share the outcome mixture.
+    """Checks the two losses have equal mixtures, then makes them share the outcome one.
 
-    Losses built from a mixture must have equal mixtures (else ValueError). Legacy three-int
-    losses only need the same treatment family and column counts; a mismatch warns
-    (decision A6) and leaves each loss with its own mixture, as before.
+    Raises:
+      ValueError: if the mixtures differ: the outcome loss's state posterior would then use a
+        different treatment likelihood than the treatment loss.
     """
     o_mix, t_mix = outcome_loss.mixture, treatment_loss.mixture
-    if not (outcome_loss._legacy or treatment_loss._legacy):
-        if o_mix != t_mix:
-            raise ValueError(
-                f"outcome_loss and treatment_loss must share one StateMixture; got {o_mix!r} "
-                f"and {t_mix!r}"
-            )
-        treatment_loss._mixture = o_mix
-        return
-    counts = lambda m: (  # noqa: E731
-        m.layout.n_outcome_pred_cols,
-        m.layout.n_treatment_pred_cols,
-        m.layout.n_outcome_true_cols,
-    )
-    if o_mix.treatment_family != t_mix.treatment_family:
-        detail = f"{o_mix.treatment_family!r} vs {t_mix.treatment_family!r}"
-    elif counts(o_mix) != counts(t_mix):
-        detail = f"counts {counts(o_mix)} vs {counts(t_mix)}"
-    else:
-        treatment_loss._mixture = o_mix
-        return
-    warnings.warn(_MISMATCH_WARNING.format(detail=detail), FutureWarning, stacklevel=3)
+    if o_mix != t_mix:
+        raise ValueError(
+            f"outcome_loss and treatment_loss must share one StateMixture; got {o_mix!r} "
+            f"and {t_mix!r}. Build both from one mixture (CausalLoss.from_mixture)."
+        )
+    treatment_loss._mixture = o_mix
 
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")
@@ -429,7 +227,7 @@ class CausalLoss(tf.keras.losses.Loss):
     Note on alpha=0: this zeroes only the explicit `loglik(T; X)` term (`treatment_loss`).
     It is "dose-likelihood-off", not "dose-head-off": `outcome_loss` mixes per-state outcome
     predictions with the posterior gamma = P(state | X, T) (see `OutcomeLoss`,
-    `prob_state_given_treatment_features`), which is a differentiable function of the
+    `StateMixture.state_posterior`), which is a differentiable function of the
     treatment/dose head's own predictions. So even at alpha=0, gradients from the outcome loss
     still reach the dose head through gamma -- setting alpha=0 does not isolate the outcome model
     from the dose head. Do not describe alpha=0 as an "outcome-only" ablation.
@@ -559,14 +357,6 @@ class CausalLoss(tf.keras.losses.Loss):
         for key in ("outcome_loss", "treatment_loss", "predictive_states_regularizer"):
             if config.get(key) is not None:
                 config[key] = _deser(config[key])
-        outcome_loss, treatment_loss = config["outcome_loss"], config["treatment_loss"]
-        if (
-            isinstance(outcome_loss, OutcomeLoss)
-            and isinstance(treatment_loss, TreatmentLoss)
-            and outcome_loss.mixture != treatment_loss.mixture
-        ):
-            # Only a legacy-path loss saves two different mixtures; load it the same way.
-            treatment_loss._legacy = True
         return cls(**config)
 
     def _update_loss_reduction(self):

@@ -4,23 +4,13 @@ The propensity, treatment and outcome metrics take the model's `StateMixture`
 (``metric(mixture)``): they mix each state's family mean with the state weights, and read
 ``y_true`` through the mixture's column layout. The state-weight metrics
 (`predictive_state_df_gen`, `uniform_entropy_gen`) only need the `ColumnLayout`.
-
-The legacy three-int constructors (``n_outcome_pred_cols``, ``n_treatment_pred_cols``,
-``n_outcome_true_cols``) are deprecated: they warn (`FutureWarning`) and are removed in
-v0.5.0; loading a saved config of that form does not warn. They map the counts onto families
-with a shape rule: 2
-parameters and 1 ``y_true`` column is `Normal`, 1 parameter is its own mean (identity), and
-anything else raises, asking for a mixture.
 """
 
-import dataclasses
-import warnings
-from typing import Any, Mapping, Optional
+from typing import Any, Optional
 
 import pypress.utils
 import tensorflow as tf
 
-from .. import _deprecation
 from . import families, losses
 from . import mixture as mixture_lib
 from .layout import Array, ColumnLayout
@@ -29,83 +19,20 @@ _ser = tf.keras.utils.serialize_keras_object
 _deser = tf.keras.utils.deserialize_keras_object
 
 
-@dataclasses.dataclass(frozen=True)
-class _Identity(families.Family):
-    """Legacy shape rule only: one parameter per state that is its own mean.
-
-    Not registered: metrics built from ints serialize the ints, never this family.
-    """
-
-    n_true_cols: int = 1
-
-    @property
-    def params(self) -> tuple[families.ParamSpec, ...]:
-        """One linear parameter."""
-        return (families.ParamSpec("value"),)
-
-    def nll(self, y_true: tf.Tensor, params: Mapping[str, tf.Tensor]):
-        """Raises: the identity has no likelihood."""
-        raise NotImplementedError("the legacy identity family has no likelihood")
-
-    def mean(self, params: Mapping[str, tf.Tensor]):
-        """The parameter itself."""
-        return tf.cast(params["value"], tf.float32)
-
-
-def _shape_rule(n_params: int, n_true_cols: int, role: str) -> families.Family:
-    """Maps legacy counts onto a family: (2, 1) is Normal, 1 parameter is the identity."""
-    n_params, n_true_cols = int(n_params), int(n_true_cols)
-    if n_params == 2 and n_true_cols == 1:
-        return families.Normal()
-    if n_params == 1:
-        return _Identity(n_true_cols=n_true_cols)
-    raise ValueError(
-        f"the {role} mean is ambiguous for {n_params} parameters per state and {n_true_cols} "
-        f"y_true columns; pass the model's StateMixture as mixture= (e.g. model.loss.mixture)"
-    )
-
-
-def _placeholder(n_params: int, n_true_cols: int = 1) -> families.LossFamily:
-    """A family the metric never evaluates; it only fixes the column count."""
-    return families.LossFamily(None, int(n_params), int(n_true_cols))
-
-
 class _MixtureMetricMixin:
-    """Stores the mixture and serializes it; the legacy three-int form is kept as is.
-
-    ``_LEGACY_COUNTS`` names the three-int arguments a subclass accepts. A metric built from
-    ints keeps them in ``_legacy_counts`` and writes them (not the mixture) to its config,
-    so it reloads through the same shape rule.
-    """
+    """Stores the mixture and serializes it."""
 
     _DEFAULT_NAME: str
-    _LEGACY_COUNTS: tuple[str, ...]
 
-    def _set_mixture(
-        self, mixture: Optional[mixture_lib.StateMixture], **counts: Optional[int]
-    ) -> None:
-        """Takes the mixture, or builds one from the legacy counts."""
-        if isinstance(mixture, mixture_lib.StateMixture):
-            if any(v is not None for v in counts.values()):
-                raise TypeError("pass either a StateMixture or the legacy column counts, not both")
-            self._mixture = mixture
-            self._legacy_counts = None
-            self._check_mixture(mixture)
-            return
-        if mixture is not None:  # legacy positional: the first count
-            if counts["n_outcome_pred_cols"] is not None:
-                raise TypeError("n_outcome_pred_cols given twice")
-            counts["n_outcome_pred_cols"] = mixture
-        missing = [k for k in self._LEGACY_COUNTS if counts.get(k) is None]
-        if missing:
+    def _set_mixture(self, mixture: mixture_lib.StateMixture) -> None:
+        """Takes the mixture; TypeError unless it is a `StateMixture`."""
+        if not isinstance(mixture, mixture_lib.StateMixture):
             raise TypeError(
-                f"{type(self).__name__} needs a StateMixture (or the legacy "
-                f"{', '.join(self._LEGACY_COUNTS)}); missing {', '.join(missing)}"
+                f"{type(self).__name__} takes a StateMixture (e.g. model.loss.mixture), got "
+                f"{type(mixture).__name__}; the column-count constructor was removed in v0.5.0"
             )
-        name = type(self).__name__
-        _deprecation.warn(f"{name}(<column counts>)", f"{name}(mixture)", stacklevel=4)
-        self._legacy_counts = {k: int(counts[k]) for k in self._LEGACY_COUNTS}
-        self._mixture = self._legacy_mixture(**self._legacy_counts)
+        self._check_mixture(mixture)
+        self._mixture = mixture
 
     def _check_mixture(self, mixture: mixture_lib.StateMixture) -> None:
         """Subclasses may reject a mixture they can't score."""
@@ -116,62 +43,38 @@ class _MixtureMetricMixin:
         return self._mixture
 
     def get_config(self) -> dict:
-        """The base metric's config plus the serialized mixture (or the legacy counts)."""
-        config = super().get_config()
-        if self._legacy_counts is not None:
-            config.update(self._legacy_counts)
-        else:
-            config["mixture"] = _ser(self._mixture)
-        return config
+        """The base metric's config plus the serialized mixture."""
+        return {**super().get_config(), "mixture": _ser(self._mixture)}
 
     @classmethod
     def from_config(cls, config: dict):
-        """Rebuilds the metric; a config without ``"mixture"`` goes through the shape rule."""
+        """Rebuilds the metric.
+
+        Raises:
+          ValueError: for a config without a mixture (saved by v0.3.0-v0.3.3).
+        """
+        if "mixture" not in config:
+            raise ValueError(losses._LEGACY_CONFIG.format(cls=cls.__name__))
         config = dict(config)
-        if "mixture" in config:
-            config["mixture"] = _deser(config["mixture"])
-        with _deprecation.silenced():
-            return cls(**config)
+        config["mixture"] = _deser(config["mixture"])
+        return cls(**config)
 
 
 class _PropensityMetric(_MixtureMetricMixin):
     """Scores the marginal propensity ``sum_k P(s_k | x) * p_k`` against the treatment."""
 
-    _LEGACY_COUNTS = ("n_outcome_pred_cols", "n_treatment_pred_cols")
-
     def __init__(
-        self,
-        mixture: Optional[mixture_lib.StateMixture] = None,
-        n_treatment_pred_cols: Optional[int] = None,
-        name: Optional[str] = None,
-        *,
-        n_outcome_pred_cols: Optional[int] = None,
-        **kwargs: Any,
+        self, mixture: mixture_lib.StateMixture, name: Optional[str] = None, **kwargs: Any
     ):
         """Initializes the metric.
 
         Args:
           mixture: the model's `StateMixture`; its treatment family must be binary.
-          n_treatment_pred_cols: legacy form only: treatment parameters per state.
           name: the metric name; defaults to the class's name.
-          n_outcome_pred_cols: legacy form only: outcome parameters per state (or pass it as
-            the first argument).
           **kwargs: passed to the Keras base metric (``dtype``, ``curve``, ...).
         """
         super().__init__(name=name or self._DEFAULT_NAME, **kwargs)
-        self._set_mixture(
-            mixture,
-            n_outcome_pred_cols=n_outcome_pred_cols,
-            n_treatment_pred_cols=n_treatment_pred_cols,
-        )
-
-    @staticmethod
-    def _legacy_mixture(n_outcome_pred_cols: int, n_treatment_pred_cols: int):
-        """Placeholder outcome; the treatment family from the shape rule."""
-        return mixture_lib.StateMixture(
-            _placeholder(n_outcome_pred_cols),
-            _shape_rule(n_treatment_pred_cols, 1, "treatment"),
-        )
+        self._set_mixture(mixture)
 
     def _check_mixture(self, mixture: mixture_lib.StateMixture):
         """Raises unless the treatment is binary."""
@@ -183,12 +86,8 @@ class _PropensityMetric(_MixtureMetricMixin):
 
     def update_state(self, y_true: Array, y_pred: Array, sample_weight: Optional[Array] = None):
         """Updates the base metric with (treatment, marginal propensity)."""
-        if self._legacy_counts is not None:
-            treatment = y_true[:, -1:]  # the legacy form doesn't know the outcome columns
-        else:
-            treatment = self._mixture.layout.decode_true(y_true).treatment
         return super().update_state(
-            y_true=treatment,
+            y_true=self._mixture.layout.decode_true(y_true).treatment,
             y_pred=self._mixture.treatment_mean(y_pred),
             sample_weight=sample_weight,
         )
@@ -214,50 +113,22 @@ class PropensityScoreAUC(_PropensityMetric, tf.keras.metrics.AUC):
 class _ErrorMetric(_MixtureMetricMixin):
     """Shared constructor of the treatment and outcome MSE/MAE."""
 
-    _LEGACY_COUNTS = ("n_outcome_pred_cols", "n_treatment_pred_cols", "n_outcome_true_cols")
-
     def __init__(
-        self,
-        mixture: Optional[mixture_lib.StateMixture] = None,
-        n_treatment_pred_cols: Optional[int] = None,
-        n_outcome_true_cols: Optional[int] = None,
-        name: Optional[str] = None,
-        *,
-        n_outcome_pred_cols: Optional[int] = None,
-        **kwargs: Any,
+        self, mixture: mixture_lib.StateMixture, name: Optional[str] = None, **kwargs: Any
     ):
         """Initializes the metric.
 
         Args:
           mixture: the model's `StateMixture`.
-          n_treatment_pred_cols: legacy form only: treatment parameters per state.
-          n_outcome_true_cols: legacy form only: outcome columns in y_true.
           name: the metric name; defaults to the class's name.
-          n_outcome_pred_cols: legacy form only: outcome parameters per state (or pass it as
-            the first argument).
           **kwargs: passed to the Keras base metric (``dtype``).
         """
         super().__init__(name=name or self._DEFAULT_NAME, **kwargs)
-        self._set_mixture(
-            mixture,
-            n_outcome_pred_cols=n_outcome_pred_cols,
-            n_treatment_pred_cols=n_treatment_pred_cols,
-            n_outcome_true_cols=n_outcome_true_cols,
-        )
+        self._set_mixture(mixture)
 
 
 class _TreatmentErrorMetric(_ErrorMetric):
     """Scores the mixed treatment mean ``sum_k P(s_k | x) * E[A | s_k]``."""
-
-    @staticmethod
-    def _legacy_mixture(
-        n_outcome_pred_cols: int, n_treatment_pred_cols: int, n_outcome_true_cols: int
-    ):
-        """Placeholder outcome; the treatment family from the shape rule."""
-        return mixture_lib.StateMixture(
-            _placeholder(n_outcome_pred_cols, n_outcome_true_cols),
-            _shape_rule(n_treatment_pred_cols, 1, "treatment"),
-        )
 
     def update_state(self, y_true: Array, y_pred: Array, sample_weight: Optional[Array] = None):
         """Updates the base metric with (treatment, mixed treatment mean)."""
@@ -296,22 +167,10 @@ class _OutcomeErrorMetric(_ErrorMetric):
     `result` is NaN (not 0) while no event has been seen since the last reset.
     """
 
-    def _set_mixture(
-        self, mixture: Optional[mixture_lib.StateMixture], **counts: Optional[int]
-    ) -> None:
+    def _set_mixture(self, mixture: mixture_lib.StateMixture) -> None:
         """Also fixes whether the outcome family is censored."""
-        super()._set_mixture(mixture, **counts)
+        super()._set_mixture(mixture)
         self._censored = _has_censoring(self._mixture.outcome_family)
-
-    @staticmethod
-    def _legacy_mixture(
-        n_outcome_pred_cols: int, n_treatment_pred_cols: int, n_outcome_true_cols: int
-    ):
-        """The outcome family from the shape rule; placeholder treatment."""
-        return mixture_lib.StateMixture(
-            _shape_rule(n_outcome_pred_cols, n_outcome_true_cols, "outcome"),
-            _placeholder(n_treatment_pred_cols),
-        )
 
     def update_state(self, y_true: Array, y_pred: Array, sample_weight: Optional[Array] = None):
         """Updates the base metric with (response, mixed outcome mean), masking censored units."""
@@ -355,78 +214,34 @@ class OutcomeMeanAbsoluteError(_OutcomeErrorMetric, tf.keras.metrics.MeanAbsolut
     _DEFAULT_NAME = "outcome_mean_absolute_error"
 
 
-def _state_weights(
-    y_pred: Array,
-    layout: Optional[ColumnLayout],
-    n_outcome_pred_cols: Optional[int],
-    n_treatment_pred_cols: Optional[int],
-) -> tf.Tensor:
-    """The ``[N, K]`` state weights, via ``layout`` or (legacy) the two counts."""
-    if layout is None:
-        layout = ColumnLayout.from_counts(n_outcome_pred_cols, n_treatment_pred_cols, 1)
-    return layout.decode_pred(y_pred).state_weights
-
-
-def _layout_kwargs(
-    name: str,
-    layout: Optional[ColumnLayout],
-    n_outcome_pred_cols: Optional[int],
-    n_treatment_pred_cols: Optional[int],
-) -> dict:
-    """The ``fn`` kwargs of a state-weight metric: ``layout=``, or the legacy two ints."""
-    if isinstance(layout, ColumnLayout):
-        if n_outcome_pred_cols is not None or n_treatment_pred_cols is not None:
-            raise TypeError(f"{name}: pass either a ColumnLayout or the column counts, not both")
-        return {"layout": layout}
-    if layout is not None:  # legacy positional: the first count
-        if n_outcome_pred_cols is not None:
-            raise TypeError(f"{name}: n_outcome_pred_cols given twice")
-        n_outcome_pred_cols = layout
-    if n_outcome_pred_cols is None or n_treatment_pred_cols is None:
-        raise TypeError(f"{name} needs a ColumnLayout (e.g. mixture.layout)")
-    _deprecation.warn(f"{name}(<column counts>)", f"{name}(mixture.layout)", stacklevel=4)
-    return {
-        "n_outcome_pred_cols": int(n_outcome_pred_cols),
-        "n_treatment_pred_cols": int(n_treatment_pred_cols),
-    }
+def _layout_kwargs(name: str, layout: ColumnLayout) -> dict:
+    """The ``fn`` kwargs of a state-weight metric; TypeError unless ``layout`` is a layout."""
+    if not isinstance(layout, ColumnLayout):
+        raise TypeError(
+            f"{name} takes a ColumnLayout (e.g. mixture.layout), got {type(layout).__name__}; "
+            "the column-count form was removed in v0.5.0"
+        )
+    return {"layout": layout}
 
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")
-def predictive_state_df(
-    y_true: Array,
-    y_pred: Array,
-    layout: Optional[ColumnLayout] = None,
-    n_outcome_pred_cols: Optional[int] = None,
-    n_treatment_pred_cols: Optional[int] = None,
-) -> tf.Tensor:
-    """Degrees of freedom of the predictive state weights (`pypress.utils.tr_kernel`).
-
-    Pass ``layout``; the two counts are the legacy form.
-    """
+def predictive_state_df(y_true: Array, y_pred: Array, layout: ColumnLayout) -> tf.Tensor:
+    """Degrees of freedom of the predictive state weights (`pypress.utils.tr_kernel`)."""
     del y_true
-    weights = _state_weights(y_pred, layout, n_outcome_pred_cols, n_treatment_pred_cols)
+    weights = layout.decode_pred(y_pred).state_weights
     return pypress.utils.tr_kernel(weights)
 
 
-def predictive_state_df_gen(
-    layout: Optional[ColumnLayout] = None,
-    n_treatment_pred_cols: Optional[int] = None,
-    *,
-    n_outcome_pred_cols: Optional[int] = None,
-) -> tf.keras.metrics.MeanMetricWrapper:
+def predictive_state_df_gen(layout: ColumnLayout) -> tf.keras.metrics.MeanMetricWrapper:
     """Metric for the degrees of freedom of the predictive states, logged as
     ``predictive_state_df``. Serializable: it wraps the registered `predictive_state_df`.
 
-    Pass the model's `ColumnLayout` (``mixture.layout``). The legacy form
-    ``predictive_state_df_gen(n_outcome_pred_cols, n_treatment_pred_cols)`` is deprecated
-    (`FutureWarning`; removed in v0.5.0).
+    Pass the model's `ColumnLayout` (``mixture.layout``).
     """
     return tf.keras.metrics.MeanMetricWrapper(
         fn=predictive_state_df,
         name="predictive_state_df",
-        **_layout_kwargs(
-            "predictive_state_df_gen", layout, n_outcome_pred_cols, n_treatment_pred_cols
-        ),
+        **_layout_kwargs("predictive_state_df_gen", layout),
     )
 
 
@@ -493,13 +308,10 @@ class CausalLossMetric(tf.keras.metrics.Mean):
         return cls(**config)
 
 
-_UNSET = object()
-
-
 def causal_loss_metric_gen(
     outcome_loss: losses.OutcomeLoss,
     treatment_loss: losses.TreatmentLoss,
-    alpha: Any = _UNSET,
+    *,
     outcome_loss_weight: float = 1.0,
 ) -> CausalLossMetric:
     """Returns a `CausalLossMetric`, logged as ``causal_loss_metric``.
@@ -510,18 +322,10 @@ def causal_loss_metric_gen(
         The outcome loss; the metric uses its penalty-free copy.
     treatment_loss : TreatmentLoss
         The treatment loss; the metric uses its penalty-free copy.
-    alpha : deprecated
-        Ignored, with a `FutureWarning`: the metric always uses alpha = 1. Removed in v0.5.0.
     outcome_loss_weight : float, default=1.0
-        Weight of the outcome NLL. Pass the training loss's weight; 0 is allowed.
+        Weight of the outcome NLL. Pass the training loss's weight; 0 is allowed. The
+        metric always uses alpha = 1.
     """
-    if alpha is not _UNSET:
-        warnings.warn(
-            "causal_loss_metric_gen: alpha is ignored; causal_loss_metric uses alpha = 1. "
-            "The argument is removed in v0.5.0",
-            FutureWarning,
-            stacklevel=2,
-        )
     return CausalLossMetric(outcome_loss, treatment_loss, outcome_loss_weight=outcome_loss_weight)
 
 
@@ -537,19 +341,10 @@ def outcome_nll_metric_gen(outcome_loss: losses.OutcomeLoss) -> tf.keras.metrics
 
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")
-def uniform_entropy(
-    y_true: Array,
-    y_pred: Array,
-    layout: Optional[ColumnLayout] = None,
-    n_outcome_pred_cols: Optional[int] = None,
-    n_treatment_pred_cols: Optional[int] = None,
-) -> tf.Tensor:
-    """Mean Shannon entropy of the predictive state weights (higher = more uniform).
-
-    Pass ``layout``; the two counts are the legacy form.
-    """
+def uniform_entropy(y_true: Array, y_pred: Array, layout: ColumnLayout) -> tf.Tensor:
+    """Mean Shannon entropy of the predictive state weights (higher = more uniform)."""
     del y_true
-    weights = _state_weights(y_pred, layout, n_outcome_pred_cols, n_treatment_pred_cols)
+    weights = layout.decode_pred(y_pred).state_weights
     # Shannon entropy per row: -sum(p_i * log(p_i)), with 0 * log(0) taken as 0.
     # safe_xlogx computes that exactly; an epsilon floor (log(p_i + eps)) would distort
     # the entropy of sharp, near-degenerate state weights.
@@ -557,12 +352,7 @@ def uniform_entropy(
     return tf.math.reduce_mean(entropy_per_row)
 
 
-def uniform_entropy_gen(
-    layout: Optional[ColumnLayout] = None,
-    n_treatment_pred_cols: Optional[int] = None,
-    *,
-    n_outcome_pred_cols: Optional[int] = None,
-) -> tf.keras.metrics.MeanMetricWrapper:
+def uniform_entropy_gen(layout: ColumnLayout) -> tf.keras.metrics.MeanMetricWrapper:
     """
     Metric of the average Shannon entropy of the predictive state weights, logged as
     ``uniform_entropy``.
@@ -576,8 +366,7 @@ def uniform_entropy_gen(
     Parameters
     ----------
     layout : ColumnLayout
-        The model's column layout (``mixture.layout``). The deprecated legacy form passes
-        ``n_outcome_pred_cols`` and ``n_treatment_pred_cols`` instead (removed in v0.5.0).
+        The model's column layout (``mixture.layout``).
 
     Returns
     -------
@@ -587,5 +376,5 @@ def uniform_entropy_gen(
     return tf.keras.metrics.MeanMetricWrapper(
         fn=uniform_entropy,
         name="uniform_entropy",
-        **_layout_kwargs("uniform_entropy_gen", layout, n_outcome_pred_cols, n_treatment_pred_cols),
+        **_layout_kwargs("uniform_entropy_gen", layout),
     )

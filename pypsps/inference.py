@@ -61,8 +61,8 @@ def predict_ute_binary(model: tf.keras.Model, features: Any) -> Union[pd.Series,
     """Predicts unit-level treatment effect for binary treatment.
 
     The outcome family comes from the model (`StateMixture.from_model`), so this also works
-    on a model loaded with ``compile=False``. An outcome family without a mean (a custom loss
-    wrapped by the legacy constructors) raises `NotImplementedError`.
+    on a model loaded with ``compile=False``. An outcome family without a mean (a
+    `families.LossFamily`) raises `NotImplementedError`.
 
     Args:
       model: a trained pypsps model.
@@ -103,8 +103,8 @@ def predict_ute_continuous(
     """Predicts unit-level treatment effect for continuous treatment.
 
     The outcome family comes from the model (`StateMixture.from_model`), so this also works
-    on a model loaded with ``compile=False``. An outcome family without a mean (a custom loss
-    wrapped by the legacy constructors) raises `NotImplementedError`.
+    on a model loaded with ``compile=False``. An outcome family without a mean (a
+    `families.LossFamily`) raises `NotImplementedError`.
 
     Args:
       model: a trained pypsps model.

@@ -32,8 +32,9 @@ All components are fully compatible with the standard `tf.keras` API.
   per-state NLLs, the state posterior P(s | x, a), the outcome and treatment mixture NLLs,
   and the outcome and treatment means (mixing each state's family mean). `OutcomeLoss` and
   `TreatmentLoss` evaluate it; `CausalLoss.from_mixture(mixture, alpha=...)` builds a causal
-  loss whose two parts share one mixture. The three-int loss constructors are deprecated
-  (see [Deprecations](#deprecated-column-count-api)).
+  loss whose two parts share one mixture. The losses and metrics take only a mixture (or a
+  layout); the column-count constructors were removed in v0.5.0 (see
+  [Removed in v0.5.0](#removed-in-v050)).
 * **`families`**: one class per within-state distribution: `Normal`, `Bernoulli`,
   `Exponential(parameterization="log_scale" | "log_rate" | "rate")` and `Weibull`. Each
   family knows its parameter names, its head activations, its per-state NLL
@@ -174,12 +175,12 @@ With `compile=False` a preset leaves out its compile keywords. Merging `{"compil
 into a compiling preset raises a `TypeError` that lists those keywords; pass `compile=False`
 to the preset instead.
 
-## Migrating from `build_*`
+## Removed in v0.5.0
 
-Every `build_*` function is deprecated: it warns with a `FutureWarning` and is removed in
-**v0.5.0**. The migration is one line with the same arguments:
+v0.5.0 removes everything that v0.3.4 to v0.4.0 deprecated. Each removed name has a
+one-line replacement:
 
-| Deprecated | Use instead |
+| Removed | Use instead |
 |---|---|
 | `models.build_toy_model(...)` | `models.build_model(**presets.toy(...))` |
 | `models.build_model_binary_normal(...)` | `models.build_model(**presets.binary_normal(...))` |
@@ -187,44 +188,70 @@ Every `build_*` function is deprecated: it warns with a `FutureWarning` and is r
 | `models.build_model_continuous_survival(...)` | `models.build_model(**presets.continuous_survival(...))` |
 | `models.build_model_continuous_exponential(...)` | `models.build_model(**presets.continuous_exponential(...))` |
 | `models.build_model_continuous_weibull(...)` | `models.build_model(**presets.continuous_weibull(...))` |
+| `losses.OutcomeLoss(loss, treatment_loss, <counts>)`, `losses.TreatmentLoss(loss, <counts>)` | `OutcomeLoss(mixture)`, `TreatmentLoss(mixture)`, or `CausalLoss.from_mixture(mixture, ...)` |
+| Metric classes built from counts, e.g. `OutcomeMeanSquaredError(n_outcome_pred_cols=2, ...)` | `OutcomeMeanSquaredError(mixture)` |
+| `predictive_state_df_gen(2, 1)`, `uniform_entropy_gen(2, 1)` | `predictive_state_df_gen(mixture.layout)` |
+| `metrics.causal_loss_metric_gen(..., alpha=...)` | drop `alpha` (the metric always uses 1); `outcome_loss_weight` is keyword-only |
+| `utils.split_y_pred`, `split_outcome_pred`, `split_y_true`, `get_n_states`, `get_state_column_indices` | `ColumnLayout.decode_pred` / `decode_true` |
+| `utils.agg_outcome_pred` (mixed raw parameters, not means) | `StateMixture.outcome_mean` |
+| `utils.agg_treatment_pred` | `StateMixture.treatment_mean` |
+| `utils.get_column_layout`, `utils.ColumnLayout` | `ColumnLayout.from_model(model)` |
+| `neglogliks.negloglik_per_state`, `posterior_from_negloglik_per_state`, `losses.prob_state_given_treatment_features` | `StateMixture.nll_per_state`, `mixture.posterior`, `StateMixture.state_posterior` |
+| `families.from_negloglik`, `ColumnLayout.from_counts` | a built-in family (or `families.LossFamily`), `ColumnLayout.from_families` |
+| `models.copy_legacy_weights` | migrate with pypsps v0.4.x (below) |
 
-Since v0.4.0 the deprecated functions build exactly the preset's model. What changes for
-models built before v0.4.0:
+Also:
 
-* **`.keras` files** load as before: the graph is stored in the file.
-* **Continuous models**: `.weights.h5` files load into the preset model, and predictions,
-  loss and gradients are identical.
-* **Binary models** (`build_model_binary_normal`, `build_model_binary_exponential`): the
-  per-state `propensity_logit_state_{k}` layers and `propensity_score` are replaced by one
-  `treatment_params` layer, so their `.weights.h5` files don't load. Copy the weights from
-  the old `.keras` file with `models.copy_legacy_weights` instead:
+* `StateMixture` and `ColumnLayout` require `n_states`; K is no longer inferred from the
+  `y_pred` width.
+* `CausalLoss` raises `ValueError` if its outcome and treatment losses hold different
+  mixtures. In v0.4.x the column-count constructors only warned.
+
+### Models saved before v0.5.0
+
+| Saved by | `.keras` file in v0.5.0 | Migration |
+|---|---|---|
+| v0.3.4 to v0.4.x | loads as before | none |
+| v0.3.0 to v0.3.3 (and earlier) | loads only with `compile=False` | rebuild and copy the weights |
+
+A file saved by v0.3.0 to v0.3.3 stores its loss and metrics with column counts, so
+`load_model` raises `ValueError` with the default `compile=True`. It also has no
+`CausalOutput` layer, so `pypsps.inference` and `compile_model` can't find its mixture.
+Build the matching preset model and copy the weights into it:
+
+* **Continuous models**: the weight layout is unchanged, so this works in v0.5.0:
 
   ```python
   import pypsps.keras  # registers the pypsps classes with Keras
   import tensorflow as tf
   from pypsps.keras import models, presets
 
-  old = tf.keras.models.load_model("model.keras", compile=False)  # saved before v0.4.0
-  new = models.build_model(**presets.binary_normal(...))  # the arguments the old model had
-  models.copy_legacy_weights(old, new)
-  new.save("model_v0_4.keras")
+  old = tf.keras.models.load_model("old.keras", compile=False)
+  new = models.build_model(**presets.continuous_weibull(...))  # the old model's arguments
+  new.set_weights(old.get_weights())
+  new.save("new.keras")
   ```
 
-  The new model predicts the same outcome and state weights, and the same propensity up to
-  float32 rounding. If you only have a `.weights.h5` file, load it into the old model with the
-  pypsps release that saved it, save a `.keras` file, and then migrate that file.
-  `copy_legacy_weights` is removed in v0.5.0 with the `build_*` functions.
-* **Toy models**: the state network gains one BatchNormalization layer, so old toy weights
-  neither load nor copy (`copy_legacy_weights` raises `ValueError`). Keep using the loaded
-  `.keras` file, or retrain; the toy model is a demo.
-* **Layer names** follow [Layer Names](#layer-names); code that calls `model.get_layer` with
-  an old name (`loc_pred_state_0`, `inputs_processing`, `propensity_score`, ...) needs the new
-  one.
+* **Binary models**: v0.4.0 replaced the per-state propensity layers with one
+  `treatment_params` layer. Migrate with pypsps v0.4.x, whose `models.copy_legacy_weights`
+  maps the old layers onto the new ones, and save a `.keras` file that v0.5.0 loads:
+
+  ```python
+  # with pypsps==0.4.*
+  old = tf.keras.models.load_model("old.keras", compile=False)
+  new = models.build_model(**presets.binary_normal(...))  # the old model's arguments
+  models.copy_legacy_weights(old, new)
+  new.save("new.keras")
+  ```
+
+  If you only have a `.weights.h5` file, load it into the old model with the pypsps release
+  that saved it, save a `.keras` file, and migrate that file.
+* **Toy models**: v0.4.0 added one BatchNormalization layer, so old toy weights don't copy.
+  Retrain; the toy model is a demo.
 
 > **Warning:** `load_weights` on a binary `.weights.h5` file saved before v0.4.0 raises
-> `ValueError`, but only after it has overwritten part of the model: the old propensity
-> logits land in the constant scale heads. Discard a model whose `load_weights` raised, build
-> a new one, and use `models.copy_legacy_weights`.
+> `ValueError`, but only after it has overwritten part of the model. Discard a model whose
+> `load_weights` raised, and build a new one.
 
 ## Recommended Training Pattern
 
@@ -295,11 +322,6 @@ the last reset, the metric reports `NaN`, not 0. Don't monitor `val_outcome_mean
 on a heavily censored validation set: if the first epoch is `NaN`, `EarlyStopping` keeps it
 as the best value and stops after `patience` epochs. `TerminateOnNaN` reads only the loss,
 so it is not affected.
-
-The deprecated constructors with three column counts (`n_outcome_pred_cols`,
-`n_treatment_pred_cols`, `n_outcome_true_cols`) still work until v0.5.0. They infer the family from the
-counts: 2 parameters and 1 `y_true` column is Normal, and 1 parameter is used as the mean
-directly. Any other count raises a `ValueError`; pass the mixture instead.
 
 ## Per-State Column Selection
 
@@ -397,42 +419,8 @@ model = tf.keras.models.load_model("model.keras")
 * Every model ends in a `layers.CausalOutput` layer (named `output_tensor`), which carries the
   model's `StateMixture`. So a model loaded with `compile=False` still runs `pypsps.inference`,
   and `StateMixture.from_model(model)` and `ColumnLayout.from_model(model)` read it. Models
-  built before v0.3.4 have no such layer; for those, load with `compile=True` (the default),
-  and the mixture comes from the loss.
+  built before v0.3.4 have no such layer and, since v0.5.0, load only with `compile=False`;
+  see [Models saved before v0.5.0](#models-saved-before-v050).
 * A custom elementwise NLL must be registered with
   `tf.keras.utils.register_keras_serializable` to load. `neglogliks.NegloglikLoss`, which
   holds a distribution constructor, isn't serializable.
-* Models saved before v0.3.0 don't load with `compile=True`: their saved loss config is
-  empty. Load them with `load_model(path, compile=False)`, build the matching preset model,
-  and copy the weights with `models.copy_legacy_weights(loaded, built)`. Saving `built`
-  produces a file that reloads. Toy-model weights don't copy (see
-  [Migrating from `build_*`](#migrating-from-build_)).
-
-## Deprecated Column-Count API
-
-Since v0.3.4, everything that describes a model's columns with three integers
-(`n_outcome_pred_cols`, `n_treatment_pred_cols`, `n_outcome_true_cols`) raises a
-`FutureWarning`. It is removed in **v0.5.0**.
-
-| Deprecated | Use instead |
-|---|---|
-| `losses.OutcomeLoss(loss, treatment_loss, <counts>)`, `losses.TreatmentLoss(loss, <counts>)` | `OutcomeLoss(mixture)`, `TreatmentLoss(mixture)`, or `CausalLoss.from_mixture(mixture, ...)` |
-| Metric classes built from counts, e.g. `OutcomeMeanSquaredError(n_outcome_pred_cols=2, ...)` | `OutcomeMeanSquaredError(mixture)` |
-| `predictive_state_df_gen(2, 1)`, `uniform_entropy_gen(2, 1)` | `predictive_state_df_gen(mixture.layout)` |
-| `utils.split_y_pred`, `split_outcome_pred`, `split_y_true`, `get_n_states`, `get_state_column_indices` | `ColumnLayout.decode_pred` / `decode_true` |
-| `utils.agg_outcome_pred` (mixes raw parameters, not means) | `StateMixture.outcome_mean` |
-| `utils.agg_treatment_pred` | `StateMixture.treatment_mean` |
-| `utils.get_column_layout`, `utils.ColumnLayout` | `ColumnLayout.from_model(model)` |
-| `neglogliks.negloglik_per_state`, `posterior_from_negloglik_per_state`, `losses.prob_state_given_treatment_features` | `StateMixture.nll_per_state`, `mixture.posterior`, `StateMixture.state_posterior` |
-
-Loading a model saved by v0.3.0 to v0.3.3 doesn't warn, although its loss and metric configs
-use the column counts. From v0.5.0 such a file only loads with `compile=False`, and it has no
-mixture for `pypsps.inference`. To migrate it, build the matching preset model and copy the
-weights, as in [Migrating from `build_*`](#migrating-from-build_):
-
-```python
-old = tf.keras.models.load_model("old.keras", compile=False)
-new = models.build_model(**presets.binary_normal(...))  # the arguments the old model had
-models.copy_legacy_weights(old, new)
-new.save("new.keras")
-```

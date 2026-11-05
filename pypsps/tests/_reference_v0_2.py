@@ -1,14 +1,29 @@
 """Frozen copies of `OutcomeLoss.call` and `TreatmentLoss.call` as of v0.3.1.
 
-The reference the state-mixture losses are checked against. Only the legacy per-state loop
-(`neglogliks.negloglik_per_state`) and plain slicing are used, so later refactors of the
-losses can't change it. Delete together with the three-int adapters (v0.5.0).
+The reference the state-mixture losses are checked against. It uses only a per-state loop
+over elementwise Keras losses and plain slicing (no `StateMixture`, no `ColumnLayout`), so
+later refactors of the losses can't change it. The per-state loop and the posterior are
+frozen copies of the ``neglogliks`` helpers that v0.5.0 removed.
 """
 
 import tensorflow as tf
 
 from .. import utils
-from ..keras import neglogliks
+
+
+def _negloglik_per_state(loss, y_true, y_pred, n_states):
+    """-log p(y | state) as ``[N, K]``, for parameters interleaved per state."""
+    n_params = int(y_pred.shape[1]) // n_states
+    nll = []
+    for j in range(n_states):
+        cols = [j + i * n_states for i in range(n_params)]
+        nll.append(loss(y_true=y_true, y_pred=tf.gather(y_pred, cols, axis=1)))
+    return tf.stack(nll, axis=1)
+
+
+def _posterior(weights, nll):
+    """P(s_k | x, a) = softmax(log P(s_k | x) - nll_k)."""
+    return tf.nn.softmax(utils.safe_log(weights) - nll, axis=1)
 
 
 def _split(y_true, y_pred, n_outcome_true_cols, n_outcome_pred_cols, n_treatment_pred_cols):
@@ -54,8 +69,8 @@ def outcome_nll(
     if likelihood == "interventional":
         gamma = weights
     else:
-        nll_a = neglogliks.negloglik_per_state(treatment_loss, y_treat, treat_pred, n_states)
-        gamma = neglogliks.posterior_from_negloglik_per_state(weights, nll_a)
+        nll_a = _negloglik_per_state(treatment_loss, y_treat, treat_pred, n_states)
+        gamma = _posterior(weights, nll_a)
     log_weights = utils.safe_log(gamma)
     components = []
     for j in range(n_states):
@@ -79,6 +94,6 @@ def treatment_nll(
     _, weights, treat_pred, _, y_treat, n_states = _split(
         y_true, y_pred, n_outcome_true_cols, n_outcome_pred_cols, n_treatment_pred_cols
     )
-    nll = neglogliks.negloglik_per_state(loss, y_treat, treat_pred, n_states)
+    nll = _negloglik_per_state(loss, y_treat, treat_pred, n_states)
     marginal = -tf.math.reduce_logsumexp(utils.safe_log(weights) - nll, axis=1)
     return _reduce(marginal, reduction, y_true)
