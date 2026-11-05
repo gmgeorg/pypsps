@@ -615,16 +615,30 @@ def build_model_continuous_weibull(
 
 
 def get_propensity_state_conditional_means(model: tf.keras.Model) -> tf.Tensor:
-    """Returns each state's propensity constant (post-sigmoid), for models built by the
-    `build_*` functions in this module.
+    """Each predictive state's mean treatment, shape ``(n_states, 1)``.
 
-    The propensity head is one `BiasOnly` logit per state (layers named
-    "propensity_logit_state_<k>"), not a single mixed `pypress.keras.layers.PredictiveStateMeans`
-    layer, so there's no single layer exposing a `.state_conditional_means` property anymore.
-    This reconstructs the analogous `(n_states, 1)` tensor from each state's bias weight
-    directly. Works both before and after training -- a useful sanity check that per-state
-    propensity estimates are reasonable (e.g., not degenerate) at initialization and after
-    fitting.
+    For a binary treatment this is the propensity score of each state; for a Normal treatment,
+    each state's ``loc``. It works for every pypsps model, before and after training, and
+    for models loaded with ``compile=False``: a useful check that the per-state treatment
+    models are reasonable (e.g. not degenerate).
+
+    The treatment block of ``y_pred`` does not depend on the features (each state has one
+    treatment distribution), so one all-zero input row gives it.
+    """
+    try:
+        mixture = mixture_lib.StateMixture.from_model(model)
+    except RuntimeError:
+        # Saved before v0.3.4 and loaded with compile=False: no mixture to read.
+        return _legacy_propensity_means(model)
+    probe = [tf.zeros((1,) + tuple(x.shape[1:])) for x in model.inputs]
+    params = mixture.layout.decode_pred(model(probe, training=False)).treatment
+    return tf.transpose(mixture.treatment_family.mean(params))
+
+
+def _legacy_propensity_means(model: tf.keras.Model) -> tf.Tensor:
+    """The per-state propensity of a pre-v0.3.4 binary model, from its layer names.
+
+    Removed in v0.5.0, which stops loading those models.
     """
     n_states = model.get_layer("propensity_score").output.shape[-1]
     logits = tf.stack(
