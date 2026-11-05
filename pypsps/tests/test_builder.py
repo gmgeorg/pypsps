@@ -598,3 +598,56 @@ def test_build_is_reproducible_under_set_random_seed():
         weights.append(_build("normal", "weibull", compile=False).get_weights())
     for a, b in zip(*weights):
         np.testing.assert_array_equal(a, b)
+
+
+# --- get_propensity_state_conditional_means ---
+
+
+def test_propensity_means_for_every_model(tmp_path):
+    """Each state's mean treatment, read through the mixture: binary builder and build_model
+    models (0.5 at init, tracking the weights), a Normal treatment (the per-state loc), and a
+    compile=False reload."""
+    get = models.get_propensity_state_conditional_means
+
+    toy = models.build_toy_model(n_states=4, n_features=3, compile=False)
+    np.testing.assert_allclose(get(toy).numpy(), np.full((4, 1), 0.5), rtol=1e-6)
+    toy.get_layer("propensity_logit_state_2").set_weights([np.array([2.0])])
+    np.testing.assert_allclose(
+        get(toy).numpy().ravel(), [0.5, 0.5, tf.sigmoid(2.0).numpy(), 0.5], rtol=1e-5
+    )
+
+    gated = _build("bernoulli", "weibull", "gated", compile=False)
+    np.testing.assert_allclose(get(gated).numpy(), np.full((3, 1), 0.5), rtol=1e-6)
+    logits = np.array([[-1.0], [0.0], [2.0]], dtype="float32")
+    gated.get_layer("treatment_params").set_weights([logits])
+    np.testing.assert_allclose(get(gated).numpy(), tf.sigmoid(logits).numpy(), rtol=1e-5)
+
+    continuous = _build(
+        "normal", "weibull", treatment_init={"loc": [-1.0, 0.5, 2.0], "scale": 1.0}, compile=False
+    )
+    np.testing.assert_allclose(get(continuous).numpy(), [[-1.0], [0.5], [2.0]], rtol=1e-5)
+
+    path = str(tmp_path / "model.keras")
+    continuous.save(path)
+    reloaded = tf.keras.models.load_model(path, compile=False)
+    np.testing.assert_allclose(get(reloaded).numpy(), get(continuous).numpy(), rtol=1e-6)
+
+
+def test_propensity_means_of_a_pre_v0_3_4_model():
+    """A model without CausalOutput or a pypsps loss falls back to its propensity layer names."""
+    features = tf.keras.Input((F,), name="features")
+    logits = [
+        layers.BiasOnly(
+            initializer=tf.keras.initializers.Constant(v), name=f"propensity_logit_state_{k}"
+        )(features)
+        for k, v in enumerate([0.0, 1.0])
+    ]
+    propensity = tf.keras.layers.Concatenate(name="propensity_score")(
+        [tf.keras.layers.Activation("sigmoid")(x) for x in logits]
+    )
+    model = tf.keras.Model(features, propensity)
+    np.testing.assert_allclose(
+        models.get_propensity_state_conditional_means(model).numpy(),
+        [[0.5], [tf.sigmoid(1.0).numpy()]],
+        rtol=1e-6,
+    )

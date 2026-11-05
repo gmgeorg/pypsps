@@ -23,20 +23,6 @@ def test_build_toy_model():
     assert not np.isnan(preds.sum().sum())
 
 
-def test_get_propensity_state_conditional_means():
-    """state-conditional propensity means are 0.5 at zero-init and track weight updates"""
-    model = models.build_toy_model(n_states=4, n_features=3, compile=False)
-    means = models.get_propensity_state_conditional_means(model)
-    assert means.shape == (4, 1)
-    np.testing.assert_allclose(means.numpy().ravel(), 0.5)
-
-    model.get_layer("propensity_logit_state_2").set_weights([np.array([2.0])])
-    means = models.get_propensity_state_conditional_means(model)
-    updated = means.numpy().ravel()
-    np.testing.assert_allclose(updated[[0, 1, 3]], 0.5)
-    np.testing.assert_allclose(updated[2], tf.sigmoid(2.0).numpy(), rtol=1e-5)
-
-
 def test_build_toy_model_compiles_causal_loss_metric():
     """`causal_loss_metric` must be a compiled metric, so get_default_callbacks' recommended
     monitor ("val_causal_loss_metric") actually exists.

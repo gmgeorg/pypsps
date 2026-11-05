@@ -5,6 +5,17 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.3.8 - Nov 4, 2026
+
+### Fixed
+
+* `models.get_propensity_state_conditional_means(model)` works for every pypsps model. It
+  used to look up the binary builders' `propensity_logit_state_<k>` layers, so it raised for
+  continuous and `build_model` models. It now reads the treatment block of `y_pred` through
+  the model's mixture and returns each state's mean treatment, `(n_states, 1)`: the
+  propensity score for a binary treatment, the `loc` for a Normal one. Models saved before
+  v0.3.4 and loaded with `compile=False` still use the layer names (until v0.5.0).
+
 ## pypsps v0.3.7 - Nov 4, 2026
 
 ### Added
