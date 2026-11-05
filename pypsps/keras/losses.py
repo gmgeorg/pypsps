@@ -273,10 +273,12 @@ class OutcomeLoss(_MixtureLossMixin, tf.keras.losses.Loss):
         """
         return type(self).from_config(OutcomeLoss.get_config(self))
 
-    def call(self, y_true: tf.Tensor, y_pred: tf.Tensor):
-        """The reduced outcome mixture NLL; see `StateMixture.outcome_nll`."""
-        nll = self._mixture.outcome_nll(y_true, y_pred, self._outcome_likelihood)
-        return mixture_lib.reduce(nll, self.reduction)
+    def call(self, y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
+        """The outcome mixture NLL per unit, ``[N]``; see `StateMixture.outcome_nll`.
+
+        Keras then weights each unit by its ``sample_weight`` and applies ``reduction``.
+        """
+        return self._mixture.outcome_nll(y_true, y_pred, self._outcome_likelihood)
 
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")
@@ -365,9 +367,12 @@ class TreatmentLoss(_MixtureLossMixin, tf.keras.losses.Loss):
         """
         return type(self).from_config(TreatmentLoss.get_config(self))
 
-    def call(self, y_true: tf.Tensor, y_pred: tf.Tensor):
-        """The reduced treatment mixture NLL; see `StateMixture.treatment_nll`."""
-        return mixture_lib.reduce(self._mixture.treatment_nll(y_true, y_pred), self.reduction)
+    def call(self, y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
+        """The treatment mixture NLL per unit, ``[N]``; see `StateMixture.treatment_nll`.
+
+        Keras then weights each unit by its ``sample_weight`` and applies ``reduction``.
+        """
+        return self._mixture.treatment_nll(y_true, y_pred)
 
 
 _MISMATCH_WARNING = (
@@ -597,14 +602,24 @@ class CausalLoss(tf.keras.losses.Loss):
             )
             self._outcome_loss.reduction = self.reduction
 
-    def call(self, y_true: tf.Tensor, y_pred: tf.Tensor):
-        """Computes the causal loss from y_true and multi-output predictions."""
-        loss_outcome = self._outcome_loss(y_true, y_pred)
-        loss_treatment = self._treatment_loss(y_true, y_pred)
+    def __call__(
+        self, y_true: tf.Tensor, y_pred: tf.Tensor, sample_weight: Optional[tf.Tensor] = None
+    ) -> tf.Tensor:
+        """The reduced causal loss, plus the predictive-state regularizer.
 
-        total_loss = self._outcome_loss_weight * loss_outcome + self._alpha_var * loss_treatment
-        if self._predictive_states_regularizer is not None:
-            weights = self.layout.decode_pred(y_pred).state_weights
-            total_loss += self._predictive_states_regularizer(weights)
+        Keras weights each unit's loss from `call` by ``sample_weight`` and reduces it. The
+        regularizer is a penalty on the batch's state weights, not a per-unit loss, so it is
+        added once, after the reduction, and ``sample_weight`` does not scale it. Under
+        ``reduction="none"`` it is added to every unit.
+        """
+        loss = super().__call__(y_true, y_pred, sample_weight=sample_weight)
+        if self._predictive_states_regularizer is None:
+            return loss
+        weights = self.layout.decode_pred(tf.convert_to_tensor(y_pred, loss.dtype)).state_weights
+        return loss + tf.cast(self._predictive_states_regularizer(weights), loss.dtype)
 
-        return total_loss
+    def call(self, y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
+        """The causal loss per unit, ``[N]``, without the regularizer (see `__call__`)."""
+        loss_outcome = self._outcome_loss.call(y_true, y_pred)
+        loss_treatment = self._treatment_loss.call(y_true, y_pred)
+        return self._outcome_loss_weight * loss_outcome + self._alpha_var * loss_treatment
