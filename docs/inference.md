@@ -13,10 +13,8 @@
 * **`StateMixture.from_model(model)`**: the model's mixture. Its `layout.decode_pred(preds)`
   splits predictions into named per-state blocks (outcome parameters, state weights,
   treatment parameters); `outcome_mean(preds)` and `treatment_mean(preds)` give the mixed
-  outcome mean and the marginal propensity. The column-count helpers in `pypsps.utils`
-  (`split_y_pred`, `split_y_true`, `split_outcome_pred`, `get_n_states`,
-  `get_state_column_indices`, `agg_outcome_pred`, `agg_treatment_pred`,
-  `get_column_layout`) are deprecated and removed in v0.5.0.
+  outcome mean and the marginal propensity. They replace the column-count helpers that
+  `pypsps.utils` had until v0.4.x (`split_y_pred`, `agg_outcome_pred`, ...).
 * **`pypsps.bootstrap`**: Offers non-parametric bootstrap estimation methods for
   measuring uncertainty and generating confidence intervals for ATE estimates.
 

@@ -55,7 +55,7 @@ pypsps/
 ├── utils.py                 # Shared helper functions
 ├── datasets/                # Inherit from datasets.base.CausalDataset
 ├── keras/                   # Custom layers, losses, metrics, models, callbacks
-│   ├── models.py            # build_model, compile_model (and deprecated build_*)
+│   ├── models.py            # build_model, compile_model, default_metrics
 │   └── presets.py           # Named build_model argument sets (toy, binary_*, continuous_*)
 └── tests/                   # Pytest suite
 ```
