@@ -10,8 +10,8 @@ license](https://img.shields.io/badge/License-MIT-blue.svg)](https://lbesson.mit
 Releases](https://img.shields.io/github/downloads/gmgeorg/pypsps/total.svg)
 
 ```python
-from pypsps.keras import models
-model = models.build_toy_model(n_states=4, n_features=6)
+from pypsps.keras import models, presets
+model = models.build_model(**presets.toy(n_states=4, n_features=6))
 
 import tensorflow as tf
 tf.keras.utils.plot_model(model, show_layer_names=True, show_layer_activations=True)
@@ -49,9 +49,11 @@ PSPS is a general framework for causal learning across any treatment type
 (binary, continuous, multi-class) and outcome type (univariate, multivariate,
 binary, continuous, survival).
 
-The `pypsps.keras.models` module provides template builders like
-`build_toy_model()` for binary treatments and continuous outcomes, which can be
-adapted to your specific observational dataset.
+`pypsps.keras.models.build_model` builds a PSPS model for any outcome and
+treatment family (Normal, Bernoulli, exponential, Weibull, or any Keras loss).
+`pypsps.keras.presets` has ready-made argument sets, such as `presets.toy()` for a
+binary treatment and a continuous outcome, which can be adapted to your specific
+observational dataset.
 
 ## Documentation Overview
 
@@ -59,8 +61,10 @@ adapted to your specific observational dataset.
   states, and joint distribution modeling.
 * **[Development Guide](docs/development.md)**: Environment setup, testing,
   formatting, and contribution guidelines.
-* **[Model Building](docs/model_building.md)**: Custom Keras layers, losses,
-  metrics, and training helpers.
+* **[Model Building](docs/model_building.md)**: `build_model`, presets,
+  custom Keras layers, losses, metrics, and training helpers.
+* **[Training Guide](docs/training_guide.md)**: Alpha schedules, model
+  selection, time-to-event bounds, and the predictive-state regularizer.
 * **[Datasets API](docs/datasets.md)**: Using `CausalDataset` and built-in
   benchmark datasets (Kang-Schafer, LaLonde, etc.).
 * **[Inference & Post-Processing](docs/inference.md)**: Computing ATE
@@ -83,16 +87,17 @@ For development setup and requirements, see
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import tensorflow as tf
 
-from pypsps.keras import callbacks, models
+from pypsps.keras import callbacks, models, presets
 from pypsps.keras.mixture import StateMixture
 from pypsps import datasets, inference
 
 np.random.seed(10)
 ks_data = datasets.KangSchafer(true_ate=20).sample(n_samples=1000)
 tf.random.set_seed(10)
-model = models.build_toy_model(
-    n_states=4, n_features=ks_data.n_features, compile=True, alpha=10.
+model = models.build_model(
+    **presets.toy(n_states=4, n_features=ks_data.n_features, alpha=10.)
 )
 inputs, outputs = ks_data.to_keras_inputs_outputs()
 history = model.fit(inputs,

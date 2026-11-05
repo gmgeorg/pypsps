@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
-from ..keras import families, losses, metrics, mixture, models
+from ..keras import families, losses, metrics, mixture, models, presets
 
 N, K = 8, 3
 _MIX = mixture.StateMixture(families.Normal(), families.Bernoulli(), n_states=K)
@@ -136,7 +136,7 @@ def test_evaluate_with_sample_weight_matches_the_loss():
     x = rng.normal(size=(N, 4)).astype("float32")
     t = (np.arange(N) % 2).astype("float32")[:, None]
     y = np.hstack([rng.normal(size=(N, 1)), t]).astype("float32")
-    model = models.build_toy_model(n_states=K, n_features=4)
+    model = models.build_model(**presets.toy(n_states=K, n_features=4))
     evaluated = model.evaluate([x, t], y, sample_weight=_W, batch_size=N, verbose=0)
     if isinstance(evaluated, list):
         evaluated = evaluated[0]

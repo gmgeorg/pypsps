@@ -8,7 +8,7 @@ import pytest
 import tensorflow as tf
 
 from .. import inference
-from ..keras import callbacks, families, layers, losses, mixture, models
+from ..keras import callbacks, families, layers, losses, mixture, models, presets
 from ..keras.layout import ColumnLayout
 
 N, F = 128, 4
@@ -130,7 +130,8 @@ def test_default_metric_keys_by_family(combo):
     expected = {"loss", "causal_loss_metric", "outcome_nll_metric", "predictive_state_df"}
     expected |= {"uniform_entropy", "outcome_mean_squared_error"}
     if combo[0] == "bernoulli":
-        expected |= {"propensity_score_binary_crossentropy", "propensity_score_aupr"}
+        expected |= {"propensity_score_binary_crossentropy", "propensity_score_auroc"}
+        expected |= {"propensity_score_aupr"}
     else:
         expected |= {"treatment_mean_squared_error"}
     assert keys == expected
@@ -604,14 +605,14 @@ def test_build_is_reproducible_under_set_random_seed():
 
 
 def test_propensity_means_for_every_model(tmp_path):
-    """Each state's mean treatment, read through the mixture: binary builder and build_model
+    """Each state's mean treatment, read through the mixture: toy preset and build_model
     models (0.5 at init, tracking the weights), a Normal treatment (the per-state loc), and a
     compile=False reload."""
     get = models.get_propensity_state_conditional_means
 
-    toy = models.build_toy_model(n_states=4, n_features=3, compile=False)
+    toy = models.build_model(**presets.toy(n_states=4, n_features=3, compile=False))
     np.testing.assert_allclose(get(toy).numpy(), np.full((4, 1), 0.5), rtol=1e-6)
-    toy.get_layer("propensity_logit_state_2").set_weights([np.array([2.0])])
+    toy.get_layer("treatment_params").set_weights([np.array([[0.0], [0.0], [2.0], [0.0]])])
     np.testing.assert_allclose(
         get(toy).numpy().ravel(), [0.5, 0.5, tf.sigmoid(2.0).numpy(), 0.5], rtol=1e-5
     )

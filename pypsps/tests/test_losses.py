@@ -8,7 +8,7 @@ import pytest
 import tensorflow as tf
 
 from .. import datasets, utils
-from ..keras import families, losses, mixture, models, neglogliks
+from ..keras import families, losses, mixture, models, neglogliks, presets
 
 # This module also covers the deprecated column-count API on purpose (removed in v0.5.0).
 pytestmark = pytest.mark.filterwarnings("ignore:.*removed in v0.5.0:FutureWarning")
@@ -28,7 +28,9 @@ def test_psps_model_build_and_predict():
     assert outputs.shape == (1000, 2)
 
     tf.random.set_seed(10)
-    model = models.build_toy_model(n_states=3, n_features=ks_data.n_features, compile=True)
+    model = models.build_model(
+        **presets.toy(n_states=3, n_features=ks_data.n_features, compile=True)
+    )
     preds = model.predict(inputs)
     outcome_params_pred, weights, propensity_score = utils.split_y_pred(preds, 2, 1)
 
@@ -78,7 +80,9 @@ def test_psps_causal_loss(reduction, expected_shape):
     assert outputs.shape == (5, 2)
 
     tf.random.set_seed(10)
-    model = models.build_toy_model(n_states=3, n_features=ks_data.n_features, compile=True)
+    model = models.build_model(
+        **presets.toy(n_states=3, n_features=ks_data.n_features, compile=True)
+    )
     preds = model.predict(inputs)
 
     causal_loss = pypsps_causal_loss(outputs, preds)

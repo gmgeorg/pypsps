@@ -5,7 +5,7 @@ import pandas as pd
 import tensorflow as tf
 
 from .. import bootstrap, datasets
-from ..keras import models
+from ..keras import models, presets
 
 tfk = tf.keras
 
@@ -16,14 +16,16 @@ def test_bootstrap_ute_binary():
     ks_data = datasets.KangSchafer(true_ate=5).sample(n_samples=100)
     inputs, _ = ks_data.to_keras_inputs_outputs()
     tf.random.set_seed(1)
-    model = models.build_model_binary_normal(
-        n_states=2,
-        n_features=ks_data.n_features,
-        predictive_state_hidden_layers=[(5, "relu")],
-        outcome_hidden_layers=[(3, "relu")],
-        loc_layer=(20, "selu"),
-        scale_layer=(10, "tanh"),
-        compile=True,
+    model = models.build_model(
+        **presets.binary_normal(
+            n_states=2,
+            n_features=ks_data.n_features,
+            predictive_state_hidden_layers=[(5, "relu")],
+            outcome_hidden_layers=[(3, "relu")],
+            loc_layer=(20, "selu"),
+            scale_layer=(10, "tanh"),
+            compile=True,
+        )
     )
     boot_df = bootstrap.bootstrap_ute_binary(model, inputs[0], n_bootstraps=10)
     assert isinstance(boot_df, pd.DataFrame)
@@ -40,14 +42,16 @@ def test_bootstrap_ate_binary():
     inputs, _ = ks_data.to_keras_inputs_outputs()
     tf.random.set_seed(0)
 
-    model = models.build_model_binary_normal(
-        n_states=2,
-        n_features=ks_data.n_features,
-        predictive_state_hidden_layers=[(5, "relu")],
-        outcome_hidden_layers=[(3, "relu")],
-        loc_layer=(20, "selu"),
-        scale_layer=(10, "tanh"),
-        compile=True,
+    model = models.build_model(
+        **presets.binary_normal(
+            n_states=2,
+            n_features=ks_data.n_features,
+            predictive_state_hidden_layers=[(5, "relu")],
+            outcome_hidden_layers=[(3, "relu")],
+            loc_layer=(20, "selu"),
+            scale_layer=(10, "tanh"),
+            compile=True,
+        )
     )
     # Bootstrap CI with small samples for speed
     ate_bootstraps = bootstrap.bootstrap_ate_binary(model, inputs[0], n_bootstraps=10)
@@ -66,14 +70,16 @@ def test_bootstrap_ate_binary_random_state_is_reproducible_and_controllable():
     ks_data = datasets.KangSchafer(true_ate=5).sample(n_samples=100)
     inputs, _ = ks_data.to_keras_inputs_outputs()
     tf.random.set_seed(2)
-    model = models.build_model_binary_normal(
-        n_states=2,
-        n_features=ks_data.n_features,
-        predictive_state_hidden_layers=[(5, "relu")],
-        outcome_hidden_layers=[(3, "relu")],
-        loc_layer=(20, "selu"),
-        scale_layer=(10, "tanh"),
-        compile=True,
+    model = models.build_model(
+        **presets.binary_normal(
+            n_states=2,
+            n_features=ks_data.n_features,
+            predictive_state_hidden_layers=[(5, "relu")],
+            outcome_hidden_layers=[(3, "relu")],
+            loc_layer=(20, "selu"),
+            scale_layer=(10, "tanh"),
+            compile=True,
+        )
     )
     same_a = bootstrap.bootstrap_ate_binary(model, inputs[0], n_bootstraps=5, random_state=7)
     same_b = bootstrap.bootstrap_ate_binary(model, inputs[0], n_bootstraps=5, random_state=7)
