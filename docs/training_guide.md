@@ -238,7 +238,21 @@ model = models.build_model(**(args | {"predictive_states_regularizer": reg}))
 Compare the candidates on `val_causal_loss_metric` or `val_outcome_nll_metric`. Neither
 includes the penalty, so models trained with different regularizers are comparable.
 
-pypress's `ScheduledValue` (warm `l2` up from 0, or anneal `target` down from about
-`n_states`) doesn't work here yet: `pypress.keras.callbacks.RegularizerScheduler` looks for
-scheduled values in the layers' regularizers only, so one on the loss's regularizer stays at
-its `end` value for the whole fit.
+The regularizer's `l2` and `target` can also follow a pypress `ScheduledValue`, advanced by
+`pypress.keras.callbacks.RegularizerScheduler`. Over-provisioned states are cheap early, and a
+state whose weight collapses to 0 rarely recovers, so either warm `l2` up from 0 or anneal
+`target` down from about `n_states`:
+
+```python
+from pypress.keras import callbacks as press_callbacks
+from pypress.keras import schedules
+
+target = schedules.ScheduledValue(start=6.0, end=3.0, duration_epochs=20)
+reg = regularizers.DegreesOfFreedom(l2=0.1, target=target)
+model = models.build_model(**(args | {"predictive_states_regularizer": reg}))
+model.fit(..., callbacks=[press_callbacks.RegularizerScheduler(), ...])
+```
+
+Without the callback a `ScheduledValue` stays at its `end` value, so the penalty is applied
+fully from the first epoch. This needs pypress 0.3.2 or later, which finds scheduled values
+in the loss's regularizer.

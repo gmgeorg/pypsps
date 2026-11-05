@@ -410,6 +410,24 @@ def test_binary_presets_build_and_train(preset, kwargs):
     assert np.isfinite(history.history["loss"]).all()
 
 
+def test_scheduled_regularizer_values_advance_during_fit():
+    """A pypress `ScheduledValue` in the loss's state regularizer is advanced by
+    `RegularizerScheduler` (pypress >= 0.3.2 also walks the compiled loss)."""
+    from pypress.keras import callbacks as press_callbacks
+    from pypress.keras import schedules
+
+    l2 = schedules.ScheduledValue(start=0.0, end=1.0, duration_epochs=3)
+    reg = pypress.keras.regularizers.DegreesOfFreedom(l2=l2, target=2.0)
+    model = models.build_model(**(presets.toy(K, F) | {"predictive_states_regularizer": reg}))
+    x, t, _ = _data()
+    y = np.hstack([x[:, :1], t])  # [outcome, treatment]
+    fit = dict(batch_size=32, verbose=0)
+    model.fit([x, t], y, epochs=1, callbacks=[press_callbacks.RegularizerScheduler()], **fit)
+    np.testing.assert_allclose(float(l2.variable), 0.0)
+    model.fit([x, t], y, epochs=4, callbacks=[press_callbacks.RegularizerScheduler()], **fit)
+    np.testing.assert_allclose(float(l2.variable), 1.0)
+
+
 def test_binary_preset_regularizers():
     """Toy and binary normal penalize the degrees of freedom; binary exponential is uniform."""
     df = presets.binary_normal(10, F, [], [], df_penalty_l2=0.3)["predictive_states_regularizer"]

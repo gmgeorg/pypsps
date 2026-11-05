@@ -78,6 +78,12 @@ migration section.
 * The private `models._build_binary_normal_causal_loss` and
   `_build_binary_exponential_causal_loss` helpers.
 
+### Dependencies
+
+* pypress v0.3.2. Its `RegularizerScheduler` now advances a `ScheduledValue` in the
+  predictive-state regularizer, which pypsps holds on the loss; with v0.3.1 the value stayed
+  at its `end`. The training guide shows how to warm up `l2` or anneal `target`.
+
 ### Development
 
 * `pyproject.toml` configures isort with the black profile and 100 columns, so isort and
