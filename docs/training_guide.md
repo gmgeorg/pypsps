@@ -143,7 +143,7 @@ schedule, selected on the outcome term after the warmup, and then used for the A
 import numpy as np
 
 from pypsps import inference
-from pypsps.keras import callbacks, models
+from pypsps.keras import callbacks, models, presets
 
 rng = np.random.default_rng(0)
 n = 2000
@@ -156,14 +156,16 @@ time = np.minimum(t_event, t_censor)
 event = (t_event <= t_censor).astype("float32")
 y = np.column_stack([time, event, a]).astype("float32")  # [time, event, treatment]
 
-model = models.build_model_continuous_weibull(
-    n_states=3,
-    n_features=3,
-    predictive_state_hidden_layers=[(16, "relu")],
-    outcome_hidden_layers=[(16, "relu")],
-    log_scale_bounds=(-3.0, 6.0),
-    log_shape_bounds=(-2.0, 2.0),
-    max_time=float(time.max()),
+model = models.build_model(
+    **presets.continuous_weibull(
+        n_states=3,
+        n_features=3,
+        predictive_state_hidden_layers=[(16, "relu")],
+        outcome_hidden_layers=[(16, "relu")],
+        log_scale_bounds=(-3.0, 6.0),
+        log_shape_bounds=(-2.0, 2.0),
+        max_time=float(time.max()),
+    )
 )
 
 schedule = callbacks.GaussianAlphaSchedule(alpha_start=10.0, alpha_end=1.0, verbose=False)

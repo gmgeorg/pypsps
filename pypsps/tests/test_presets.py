@@ -1,14 +1,18 @@
-"""Equivalence of the model builders with the frozen v0.3.5 reference builders.
+"""Presets, and their equivalence with the frozen v0.3.5 reference builders.
 
-Until the presets land, the "new" side is `models.build_*` itself, so the harness is
-trivially green; PRs 2 and 3 switch each builder to its preset and keep these cases.
+The continuous cases build the new side with `build_model(**presets.continuous_*(...))`. The
+binary builders are not presets yet, so their "new" side is still `models.build_*` itself.
 """
 
+import warnings
+
 import numpy as np
+import pypress.keras.regularizers
 import pytest
 import tensorflow as tf
 
-from ..keras import models
+from ..keras import families, layers, models, neglogliks, presets
+from ..keras.layout import ColumnLayout
 from . import _reference_builders as reference
 
 N, K, F = 16, 3, 4
@@ -59,6 +63,20 @@ CASES = {
 }
 
 
+# The builders that are deprecated preset calls, and their presets.
+_PRESETS = {
+    "build_model_continuous_exponential": "continuous_exponential",
+    "build_model_continuous_weibull": "continuous_weibull",
+}
+
+
+def _new(name, kwargs):
+    """The new side: the builder's preset through `build_model`, or the builder itself."""
+    if name in _PRESETS:
+        return models.build_model(**getattr(presets, _PRESETS[name])(**kwargs))
+    return getattr(models, name)(**kwargs)
+
+
 def _data(seed=0):
     """Inputs and a ``y_true`` whose width fits both binary and continuous models."""
     rng = np.random.default_rng(seed)
@@ -100,7 +118,7 @@ def test_adapter_equivalence(case, tmp_path):
     """Same predictions, loss and gradients under a weight transfer; old weight files load."""
     name, kwargs = CASES[case]
     old = getattr(reference, name)(**kwargs)
-    new = getattr(models, name)(**kwargs)
+    new = _new(name, kwargs)
     _randomize(old)
     new.set_weights(old.get_weights())
     x, t, y_true = _data()
@@ -116,6 +134,183 @@ def test_adapter_equivalence(case, tmp_path):
 
     path = str(tmp_path / "old.weights.h5")
     old.save_weights(path)
-    loaded = getattr(models, name)(**kwargs)
+    loaded = _new(name, kwargs)
     loaded.load_weights(path)
     np.testing.assert_array_equal(loaded([x, t], training=False), old([x, t], training=False))
+
+
+# --- deprecated continuous builders ---
+
+_CONTINUOUS_CASES = sorted(c for c in CASES if CASES[c][0] in _PRESETS)
+
+
+@pytest.mark.parametrize("case", _CONTINUOUS_CASES)
+def test_deprecated_continuous_builders_warn_once_and_match_their_preset(case):
+    """One FutureWarning, pointing at the caller and naming the preset; the same model."""
+    name, kwargs = CASES[case]
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        old = getattr(models, name)(**kwargs)
+    future = [w for w in record if issubclass(w.category, FutureWarning)]
+    assert len(future) == 1
+    assert f"presets.{_PRESETS[name]}(...)" in str(future[0].message)
+    assert "v0.5.0" in str(future[0].message)
+    assert future[0].filename == __file__
+    new = _new(name, kwargs)
+    _randomize(old)
+    new.set_weights(old.get_weights())
+    x, t, _ = _data()
+    np.testing.assert_array_equal(new([x, t], training=False), old([x, t], training=False))
+
+
+def test_deprecated_continuous_survival_builder_warns():
+    """`build_model_continuous_survival` forwards every argument to its preset."""
+    with pytest.warns(FutureWarning, match=r"presets\.continuous_survival"):
+        model = models.build_model_continuous_survival(
+            "exponential",
+            2,
+            F,
+            [(4, "relu")],
+            [(4, "relu")],
+            (-2.0, 4.0),
+            state_hidden_layer=(3, "tanh"),
+            compile=False,
+        )
+    assert model.get_layer("log_scale_hidden_state_0").units == 3
+    assert getattr(model, "optimizer", None) is None
+
+
+# --- the presets ---
+
+_HIDDEN = dict(predictive_state_hidden_layers=[(4, "relu")], outcome_hidden_layers=[(4, "relu")])
+
+
+def _continuous(distribution="weibull", **kwargs):
+    """`presets.continuous_survival` with small layers and the test bounds."""
+    if distribution == "weibull":
+        kwargs.setdefault("log_shape_bounds", (-2.0, 2.0))
+    return presets.continuous_survival(
+        distribution, n_states=K, n_features=F, log_scale_bounds=(-3.0, 6.0), **_HIDDEN, **kwargs
+    )
+
+
+def test_continuous_preset_validates_its_arguments():
+    """Bounds are required and checked; shape bounds belong to Weibull only."""
+    with pytest.raises(ValueError, match="distribution"):
+        _continuous("normal")
+    with pytest.raises(ValueError, match="log_shape_bounds"):
+        _continuous("weibull", log_shape_bounds=None)
+    with pytest.raises(ValueError, match="weibull"):
+        _continuous("exponential", log_shape_bounds=(-2.0, 2.0))
+    with pytest.raises(ValueError, match="log_shape_bounds"):
+        _continuous("weibull", log_shape_bounds=(1.0, -1.0))
+    with pytest.raises(ValueError, match="log_scale_bounds"):
+        presets.continuous_exponential(K, F, log_scale_bounds=None, **_HIDDEN)
+    with pytest.raises(ValueError, match="init_scale"):
+        _continuous("weibull", init_scale=0.0)
+    with pytest.raises(ValueError, match="treatment_init_values"):
+        _continuous("weibull", treatment_init_values=[0.0, 1.0, 2.0])
+    with pytest.raises(ValueError, match="lie in"):
+        models.build_model(**_continuous("weibull", init_scale=np.exp(7.0)))
+
+
+def test_continuous_preset_max_time_rejects_overflow_with_a_margin():
+    """max_time rejects bounds whose worst corner overflows the Weibull NLL, and also bounds
+    within the margin (exponent above 50 but still finite), and accepts bounds well inside."""
+    unsafe = dict(log_scale_bounds=(-10.0, 5.0), log_shape_bounds=(-1.0, 3.0))  # exponent 293
+    margin = dict(log_scale_bounds=(-8.0, 5.0), log_shape_bounds=(-1.0, 1.5))  # exponent 56
+    safe = dict(log_scale_bounds=(-3.0, 5.0), log_shape_bounds=(-1.0, 1.0))  # exponent 21
+    max_time = 100.0
+    nll = neglogliks.NegloglikWeibull(reduction="none")
+    for bounds, overflows in ((unsafe, True), (margin, False), (safe, False)):
+        worst = [[bounds["log_scale_bounds"][0], bounds["log_shape_bounds"][1]]]
+        value = nll(tf.constant([[max_time, 1.0]]), tf.constant(worst)).numpy()
+        assert np.isfinite(value).all() != overflows
+    kwargs = dict(n_states=2, n_features=F, max_time=max_time, compile=False, **_HIDDEN)
+    for rejected in (unsafe, margin):
+        with pytest.raises(ValueError, match="overflow"):
+            models.build_model(**presets.continuous_weibull(**rejected, **kwargs))
+    models.build_model(**presets.continuous_weibull(**safe, **kwargs))
+
+
+def test_presets_return_fresh_dicts_and_create_no_layers():
+    """A preset is data: a new dict per call, and no Keras layer is created."""
+    before = tf.keras.backend.get_uid("dense")
+    first, second = _continuous(), _continuous()
+    assert first is not second and first.keys() == second.keys()
+    assert tf.keras.backend.get_uid("dense") == before + 1
+
+
+def test_compile_false_leaves_out_the_compile_keywords():
+    """With compile=False the dict has no compile keywords; merging compile=False raises."""
+    compiled = _continuous(alpha=2.0)
+    assert compiled["alpha"] == 2.0 and "compile" not in compiled
+    uncompiled = _continuous(compile=False, alpha=2.0)
+    assert uncompiled["compile"] is False and "alpha" not in uncompiled
+    assert getattr(models.build_model(**uncompiled), "optimizer", None) is None
+    with pytest.raises(TypeError, match="compile=False"):
+        models.build_model(**(compiled | {"compile": False}))
+
+
+def test_continuous_preset_maps_its_arguments():
+    """init_scale, treatment_init_values and separate_shape_per_state reach build_model."""
+    arguments = _continuous(
+        init_scale=5.0, treatment_init_values=[0.5, 2.0], separate_shape_per_state=False
+    )
+    assert arguments["outcome_init"] == {"log_scale": pytest.approx(np.log(5.0))}
+    assert arguments["treatment_init"] == {"loc": 0.5, "scale": 2.0}
+    assert arguments["outcome_heads"]["log_shape"].per_state is False
+    assert arguments["architecture"] == "gated"
+    assert isinstance(arguments["outcome_family"], families.Weibull)
+    assert isinstance(arguments["treatment_family"], families.Normal)
+
+
+def test_flat_treatment_init_values_build():
+    """A flat ``(loc, scale)`` crashed the old builder (pypress wants (2, K)); now it builds."""
+    model = models.build_model(**_continuous(treatment_init_values=[0.5, 2.0], compile=False))
+    x, t, _ = _data()
+    block = ColumnLayout.from_model(model).decode_pred(model([x, t], training=False)).treatment
+    np.testing.assert_allclose(block["loc"], 0.5, rtol=1e-6)
+    np.testing.assert_allclose(block["scale"], 2.0, rtol=1e-5)
+
+
+def test_log_shape_bounds_excluding_zero_build():
+    """Shape bounds that exclude 0 crashed the old builder; the shape now starts mid-bounds."""
+    model = models.build_model(**_continuous(log_shape_bounds=(0.2, 1.0), compile=False))
+    want = layers.SoftClip(0.2, 1.0).inverse(0.6)
+    np.testing.assert_allclose(model.get_layer("log_shape_raw_state_0").bias.numpy(), [want])
+
+
+@pytest.mark.parametrize(
+    "preset,kwargs",
+    [
+        ("toy", {}),
+        ("binary_normal", dict(_HIDDEN)),  # loc_layer=None crashed the old builder
+        ("binary_normal", dict(_HIDDEN, loc_layer=(3, "selu"), scale_layer=(3, "tanh"))),
+        ("binary_exponential", dict(_HIDDEN, outcome_loss_weight=0.5)),
+        ("binary_exponential", dict(predictive_state_hidden_layers=[], outcome_hidden_layers=[])),
+    ],
+)
+def test_binary_presets_build_and_train(preset, kwargs):
+    """The binary presets build with every head option and train to a finite loss."""
+    arguments = getattr(presets, preset)(K, F, **kwargs)
+    assert arguments["architecture"] == "shared_trunk"
+    assert arguments["treatment_embedding_units"] is None
+    assert arguments["clipnorm"] is None
+    model = models.build_model(**arguments)
+    x, t, y_true = _data()
+    if preset != "binary_exponential":
+        y_true = np.hstack([x[:, :1], t])
+    history = model.fit([x, t], y_true, epochs=1, verbose=0)
+    assert np.isfinite(history.history["loss"]).all()
+
+
+def test_binary_preset_regularizers():
+    """Toy and binary normal penalize the degrees of freedom; binary exponential is uniform."""
+    df = presets.binary_normal(10, F, [], [], df_penalty_l2=0.3)["predictive_states_regularizer"]
+    assert isinstance(df, pypress.keras.regularizers.DegreesOfFreedom)
+    uniform = presets.binary_exponential(K, F, [], [])["predictive_states_regularizer"]
+    assert isinstance(uniform, pypress.keras.regularizers.Uniform)
+    toy = presets.toy(K, F, compile=False)
+    assert "predictive_states_regularizer" not in toy
+    assert toy["outcome_heads"]["scale"].constant

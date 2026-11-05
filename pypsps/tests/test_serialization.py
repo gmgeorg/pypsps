@@ -14,7 +14,8 @@ import tensorflow as tf
 from .. import datasets, inference
 from ..keras import families, losses, metrics, mixture, models, neglogliks
 from ..keras.layout import ColumnLayout
-from .test_models import _continuous_model, _synthetic_continuous_survival
+from ..keras.presets import continuous_weibull
+from ._continuous import continuous_model, synthetic_continuous_survival
 
 # This module also covers the deprecated column-count API on purpose (removed in v0.5.0).
 pytestmark = pytest.mark.filterwarnings("ignore:.*removed in v0.5.0:FutureWarning")
@@ -44,9 +45,9 @@ def _all_builders():
 
     def continuous(distribution):
         def factory():
-            inputs, y_true, _ = _synthetic_continuous_survival(n_samples=64)
+            inputs, y_true, _ = synthetic_continuous_survival(n_samples=64)
             tf.random.set_seed(10)
-            return _continuous_model(distribution), inputs, y_true
+            return continuous_model(distribution), inputs, y_true
 
         return factory
 
@@ -324,7 +325,8 @@ def test_three_int_metric_configs_still_load(name):
     }
     y_pred = tf.constant(model.predict(inputs, verbose=0))
     y_true = tf.constant(outputs, tf.float32)
-    assert sorted(c["config"]["name"] for c in configs) == sorted(current)
+    # Since v0.3.7 continuous models also have the two mean-squared-error metrics.
+    assert {c["config"]["name"] for c in configs} <= set(current)
     for config in configs:
         assert "mixture" not in config["config"]
         loaded = tf.keras.utils.deserialize_keras_object(config)
@@ -382,12 +384,14 @@ _WEIGHTS_LAYOUT_BUILDERS = {
     "binary_exponential": lambda: models.build_model_binary_exponential(
         n_states=3, n_features=4, log_rate_layer=(5, "selu"), **_HIDDEN
     ),
-    "continuous_weibull": lambda: models.build_model_continuous_weibull(
-        n_states=3,
-        n_features=4,
-        log_scale_bounds=(-3.0, 6.0),
-        log_shape_bounds=(-2.0, 2.0),
-        **_HIDDEN,
+    "continuous_weibull": lambda: models.build_model(
+        **continuous_weibull(
+            n_states=3,
+            n_features=4,
+            log_scale_bounds=(-3.0, 6.0),
+            log_shape_bounds=(-2.0, 2.0),
+            **_HIDDEN,
+        )
     ),
 }
 

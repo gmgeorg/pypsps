@@ -284,11 +284,11 @@ def test_uncensored_family_metric_unchanged_by_mask(cls, error):
 
 def _censored_weibull_model():
     """The continuous Weibull model, recompiled with the outcome MSE, plus its data."""
-    from .test_models import _continuous_model, _synthetic_continuous_survival
+    from ._continuous import continuous_model, synthetic_continuous_survival
 
-    inputs, y_true, _ = _synthetic_continuous_survival(n_samples=70)
+    inputs, y_true, _ = synthetic_continuous_survival(n_samples=70)
     tf.random.set_seed(0)
-    model = _continuous_model("weibull")
+    model = continuous_model("weibull")
     model.compile(
         loss=model.loss,
         optimizer="adam",

@@ -79,11 +79,11 @@ def test_end_to_end_dataset_model_fit_and_inference():
 def test_predict_ate_continuous_weibull_end_to_end():
     """A continuous Weibull model's ATE curve has the true signs and returns an ndarray for
     array features and a Series named "ate" for a DataFrame."""
-    from .test_models import _continuous_model, _synthetic_continuous_survival
+    from ._continuous import continuous_model, synthetic_continuous_survival
 
     tf.random.set_seed(0)
-    inputs, y_true, true_ate = _synthetic_continuous_survival(n_samples=1024)
-    model = _continuous_model("weibull")
+    inputs, y_true, true_ate = synthetic_continuous_survival(n_samples=1024)
+    model = continuous_model("weibull")
     model.fit(inputs, y_true, epochs=20, batch_size=64, verbose=0)
 
     grid = [-1.0, 0.0, 1.0]
