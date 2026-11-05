@@ -49,6 +49,44 @@ parts = layout.decode_pred(y_pred)          # parts.outcome["loc"] is [N, 3]
 means = families.Normal().mean(parts.outcome)   # E[Y | state k], [N, 3]
 ```
 
+## One Builder for Every Family (Experimental)
+
+`models.build_model` builds a PSPS model for any outcome family and any treatment family,
+and `models.compile_model` compiles any network that ends in `layers.CausalOutput`. They
+are experimental in v0.3.6: the arguments may still change, and the `build_*` builders
+remain the supported API until they become presets of `build_model`.
+
+```python
+from pypsps.keras import families, models
+
+model = models.build_model(
+    n_states=4,
+    n_features=10,
+    outcome_family=families.Weibull(log_scale_bounds=(-2.0, 4.0), log_shape_bounds=(-1.0, 1.0)),
+    treatment_family=families.Normal(),
+    architecture="gated",  # or "shared_trunk"
+    outcome_heads={"log_shape": models.HeadSpec(per_state=False)},
+    outcome_init={"log_scale": 1.6},
+    max_time=100.0,  # checks the bounds against float32 overflow
+    alpha=1.0,  # any further keyword goes to compile_model
+)
+```
+
+* **`architecture`**: `"shared_trunk"` runs one outcome trunk shared by every parameter
+  and state. `"gated"` gives each outcome parameter its own trunk, and gates the treatment
+  input of each state's head by that state's weight.
+* **`outcome_heads`**: one `HeadSpec(hidden_layer=(16, "swish"), constant=False,
+  per_state=True)` per outcome parameter. `constant=True` makes the parameter one trainable
+  constant per state. `per_state=False` shares one head across all states. `hidden_layer=None`
+  makes the head linear.
+* **`outcome_init` / `treatment_init`**: start values on the parameter scale, as a scalar or one
+  value per state. The bias of each head is set so the parameter starts there. Bounded treatment
+  parameters cannot take an init.
+* **`compile_model(model, alpha=..., outcome_loss_weight=..., outcome_likelihood=...,
+  optimizer=..., metrics=..., extra_metrics=...)`**: builds the `CausalLoss` from the model's
+  mixture and compiles with Nadam (learning rate 0.01, clipnorm 1.0) by default.
+  `default_metrics(causal_loss)` lists the metrics it picks for the families.
+
 ## Recommended Training Pattern
 
 ```python
