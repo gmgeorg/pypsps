@@ -10,6 +10,9 @@ import tensorflow as tf
 from .. import datasets, utils
 from ..keras import families, losses, mixture, models, neglogliks
 
+# This module also covers the deprecated column-count API on purpose (removed in v0.5.0).
+pytestmark = pytest.mark.filterwarnings("ignore:.*removed in v0.5.0:FutureWarning")
+
 tfk = tf.keras
 
 

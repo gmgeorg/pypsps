@@ -5,8 +5,9 @@ from typing import Any, Optional, Union
 
 import tensorflow as tf
 
-from .. import utils
+from .. import _deprecation, utils
 from . import families
+from . import layout as layout_lib
 from . import mixture as mixture_lib
 from . import neglogliks
 from .layout import ColumnLayout
@@ -17,7 +18,7 @@ _deser = tf.keras.utils.deserialize_keras_object
 
 
 def _gen_col_selectors(x: int, n: int, k: int) -> list:
-    return utils.get_state_column_indices(x, n, k)
+    return layout_lib._state_column_indices(x, n, k)
 
 
 def prob_state_given_treatment_features(
@@ -45,7 +46,25 @@ def prob_state_given_treatment_features(
 
     Returns:
       gamma: [N,K]
+
+    Deprecated since v0.3.4, removed in v0.5.0: use `StateMixture.state_posterior`.
     """
+    _deprecation.warn(
+        "prob_state_given_treatment_features", "pypsps.keras.mixture.StateMixture.state_posterior"
+    )
+    with _deprecation.silenced():
+        return _prob_state_given_treatment_features(
+            weights, treatment_true, treatment_pred, treatment_nll_loss
+        )
+
+
+def _prob_state_given_treatment_features(
+    weights: tf.Tensor,
+    treatment_true: tf.Tensor,
+    treatment_pred: tf.Tensor,
+    treatment_nll_loss: tf.keras.losses.Loss,
+) -> tf.Tensor:
+    """`prob_state_given_treatment_features` without the deprecation warning."""
     weights = tf.convert_to_tensor(weights)
     treatment_true = tf.convert_to_tensor(treatment_true)
     treatment_pred = tf.convert_to_tensor(treatment_pred)
@@ -148,8 +167,9 @@ class OutcomeLoss(_MixtureLossMixin, tf.keras.losses.Loss):
 
     Construct it from a mixture, ``OutcomeLoss(mixture, outcome_likelihood=...)``. The legacy
     form ``OutcomeLoss(loss, treatment_loss, n_outcome_true_cols, n_outcome_pred_cols,
-    n_treatment_pred_cols)`` still works: it maps the elementwise NLLs onto families with
-    `families.from_negloglik`.
+    n_treatment_pred_cols)`` is deprecated (a `FutureWarning`; removed in v0.5.0). It maps the
+    elementwise NLLs onto families with `families.from_negloglik`. Loading a saved config of
+    that form does not warn.
     """
 
     def __init__(
@@ -193,6 +213,9 @@ class OutcomeLoss(_MixtureLossMixin, tf.keras.losses.Loss):
             self._mixture = mixture
             self._legacy = False
             return
+        _deprecation.warn(
+            "OutcomeLoss(loss, treatment_loss, <three column counts>)", "OutcomeLoss(mixture)"
+        )
         loss = mixture if loss is None else loss
         _require_counts(
             loss=loss,
@@ -233,7 +256,8 @@ class OutcomeLoss(_MixtureLossMixin, tf.keras.losses.Loss):
         else:
             config["loss"] = _deser(config["loss"])
             config["treatment_loss"] = _deser(config["treatment_loss"])
-        return cls(**config)
+        with _deprecation.silenced():
+            return cls(**config)
 
     def penalty_free(self) -> "OutcomeLoss":
         """Returns a fresh instance of this exact class with no penalty terms applied.
@@ -269,7 +293,8 @@ class TreatmentLoss(_MixtureLossMixin, tf.keras.losses.Loss):
 
     Construct it from a mixture, ``TreatmentLoss(mixture)``. The legacy form
     ``TreatmentLoss(loss, n_outcome_true_cols, n_outcome_pred_cols, n_treatment_pred_cols)``
-    still works; its outcome family is a placeholder that is never evaluated.
+    is deprecated (a `FutureWarning`; removed in v0.5.0). Its outcome family is a placeholder
+    that is never evaluated.
     """
 
     def __init__(
@@ -301,6 +326,7 @@ class TreatmentLoss(_MixtureLossMixin, tf.keras.losses.Loss):
             self._mixture = mixture
             self._legacy = False
             return
+        _deprecation.warn("TreatmentLoss(loss, <three column counts>)", "TreatmentLoss(mixture)")
         loss = mixture if loss is None else loss
         _require_counts(
             loss=loss,
@@ -328,7 +354,8 @@ class TreatmentLoss(_MixtureLossMixin, tf.keras.losses.Loss):
             config["mixture"] = _deser(config["mixture"])
         else:
             config["loss"] = _deser(config["loss"])
-        return cls(**config)
+        with _deprecation.silenced():
+            return cls(**config)
 
     def penalty_free(self) -> "TreatmentLoss":
         """Returns a fresh instance of this exact class with no penalty terms applied.

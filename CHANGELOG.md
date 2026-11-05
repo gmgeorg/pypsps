@@ -5,6 +5,35 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.3.4 - Nov 4, 2026
+
+### Added
+
+* `layers.CausalOutput(mixture)`: the output layer of every builder. It encodes the heads
+  into `y_pred` (same columns as before, no weights, still named `output_tensor`) and stores
+  the model's `StateMixture` in the saved model.
+* `StateMixture.from_model(model)` and `ColumnLayout.from_model(model)` read the mixture off
+  the `CausalOutput` layer, falling back to the compiled loss for models built earlier.
+
+### Changed
+
+* `pypsps.inference` and `utils.get_column_layout` read the outcome family from the model,
+  so they also work on a model loaded with `compile=False`. `inference` mixes the family
+  means through `StateMixture.outcome_mean`.
+* Models saved by v0.3.4 contain a `pypsps>CausalOutput` layer and don't load in earlier
+  releases. `.weights.h5` files saved by v0.3.3 still load into models built by v0.3.4.
+
+### Deprecated
+
+* The column-count API raises a `FutureWarning` and is removed in v0.5.0: the three-int
+  constructors of the losses and metrics, the two-int form of `predictive_state_df_gen` and
+  `uniform_entropy_gen`, `utils.split_y_pred`, `split_outcome_pred`, `split_y_true`,
+  `get_n_states`, `get_state_column_indices`, `agg_outcome_pred`, `agg_treatment_pred`,
+  `get_column_layout` and `ColumnLayout`, `neglogliks.negloglik_per_state` and
+  `posterior_from_negloglik_per_state`, and `losses.prob_state_given_treatment_features`.
+  Loading a file saved with column-count configs doesn't warn. `docs/model_building.md`
+  lists the replacements and the v0.5.0 migration.
+
 ## pypsps v0.3.3 - Nov 4, 2026
 
 ### Fixed

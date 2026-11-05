@@ -81,6 +81,15 @@ def _mixture_nll(gamma: tf.Tensor, nll_per_state: tf.Tensor) -> tf.Tensor:
     return -tf.math.reduce_logsumexp(utils.safe_log(gamma) - nll_per_state, axis=1)
 
 
+def _compatible(a: "StateMixture", b: "StateMixture") -> bool:
+    """Equal families, and equal K unless one of them infers K (legacy loss configs)."""
+    return (
+        a.outcome_family == b.outcome_family
+        and a.treatment_family == b.treatment_family
+        and (a.n_states is None or b.n_states is None or a.n_states == b.n_states)
+    )
+
+
 @tf.keras.utils.register_keras_serializable(package="pypsps")
 class StateMixture:
     """The outcome and treatment families of a pypsps model, mixed over predictive states.
@@ -219,6 +228,49 @@ class StateMixture:
         pred = self._layout.decode_pred(y_pred)
         means = self._treatment_family.mean(pred.treatment)
         return tf.reduce_sum(pred.state_weights * means, axis=1, keepdims=True)
+
+    # --- lookup on a model ---
+
+    @classmethod
+    def from_model(cls, model: tf.keras.Model) -> "StateMixture":
+        """The state mixture of a pypsps model, compiled or not.
+
+        It is read from the model's `pypsps.keras.layers.CausalOutput` layer, which every
+        builder adds since v0.3.4, so a model loaded with ``compile=False`` works too. A model
+        without that layer (built before v0.3.4) falls back to the mixture of its compiled
+        `pypsps.keras.losses.CausalLoss`.
+
+        Raises:
+          ValueError: if the output layer and the compiled loss disagree on the families or K.
+          RuntimeError: if the model has neither a `CausalOutput` layer nor a pypsps loss.
+        """
+        layer_mixtures = [
+            m
+            for m in (getattr(layer, "mixture", None) for layer in model.layers)
+            if isinstance(m, StateMixture)
+        ]
+        if len(layer_mixtures) > 1:
+            raise ValueError(f"model has {len(layer_mixtures)} CausalOutput layers; expected one")
+        layer_mixture = layer_mixtures[0] if layer_mixtures else None
+        loss_mixture = getattr(getattr(model, "loss", None), "mixture", None)
+        if not isinstance(loss_mixture, StateMixture):
+            loss_mixture = None
+
+        if layer_mixture is None:
+            if loss_mixture is None:
+                raise RuntimeError(
+                    "Cannot find the model's state mixture: it has no CausalOutput layer and "
+                    f"model.loss is {type(getattr(model, 'loss', None)).__name__}, not a pypsps "
+                    "CausalLoss. Compile it with a CausalLoss, or rebuild it with pypsps >= "
+                    "0.3.4 and copy the weights with `new.set_weights(old.get_weights())`."
+                )
+            return loss_mixture
+        if loss_mixture is not None and not _compatible(layer_mixture, loss_mixture):
+            raise ValueError(
+                f"The model's CausalOutput layer holds {layer_mixture!r}, but its loss holds "
+                f"{loss_mixture!r}"
+            )
+        return layer_mixture
 
     # --- serialization and equality ---
 

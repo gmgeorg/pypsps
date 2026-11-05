@@ -103,3 +103,57 @@ def test_soft_clip_inverse_and_config():
     for bad in ((1.0, 1.0), (2.0, 1.0), (0.0, np.inf)):
         with pytest.raises(ValueError, match="min_value < max_value"):
             layers.SoftClip(*bad)
+
+
+def _normal_bernoulli(n_states=3):
+    from ..keras import families, mixture
+
+    return mixture.StateMixture(families.Normal(), families.Bernoulli(), n_states=n_states)
+
+
+def test_causal_output_matches_concatenate():
+    """CausalOutput gives the same columns as the Concatenate it replaces."""
+    rng = np.random.default_rng(0)
+    loc, scale, weights, prob = (rng.random((5, 3)).astype("float32") for _ in range(4))
+    out = layers.CausalOutput(_normal_bernoulli())(
+        {"outcome": {"loc": loc, "scale": scale}, "state_weights": weights, "treatment": prob}
+    )
+    np.testing.assert_array_equal(np.asarray(out), np.hstack([loc, scale, weights, prob]))
+
+
+def test_causal_output_accepts_whole_blocks():
+    """The outcome and treatment entries may be whole parameter blocks."""
+    rng = np.random.default_rng(1)
+    outcome, weights, prob = rng.random((4, 6)), rng.random((4, 3)), rng.random((4, 3))
+    inputs = {"outcome": outcome, "state_weights": weights, "treatment": prob}
+    out = layers.CausalOutput(_normal_bernoulli())(
+        {k: v.astype("float32") for k, v in inputs.items()}
+    )
+    np.testing.assert_allclose(np.asarray(out), np.hstack([outcome, weights, prob]), rtol=1e-6)
+
+
+def test_causal_output_rejects_wrong_shapes():
+    """A missing parameter or a block of the wrong width raises."""
+    w = np.zeros((2, 3), "float32")
+    layer = layers.CausalOutput(_normal_bernoulli())
+    with pytest.raises(KeyError, match="outcome keys"):
+        layer({"outcome": {"loc": w}, "state_weights": w, "treatment": w})
+    with pytest.raises(ValueError, match="outcome block"):
+        layer({"outcome": w, "state_weights": w, "treatment": w})
+
+
+def test_causal_output_needs_n_states():
+    """The output layer fixes K, so a mixture that infers K is rejected."""
+    with pytest.raises(ValueError, match="n_states"):
+        layers.CausalOutput(_normal_bernoulli(n_states=None))
+
+
+def test_causal_output_config_round_trip():
+    """The mixture survives get_config / from_config through JSON."""
+    import json
+
+    layer = layers.CausalOutput(_normal_bernoulli(), name="output_tensor")
+    config = json.loads(json.dumps(layer.get_config()))
+    restored = layers.CausalOutput.from_config(config)
+    assert restored.mixture == layer.mixture
+    assert restored.name == "output_tensor"

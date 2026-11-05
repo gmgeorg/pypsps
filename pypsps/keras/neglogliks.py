@@ -6,6 +6,9 @@ from typing import TYPE_CHECKING, Any, Callable, Union
 import tensorflow as tf
 
 import pypsps.utils
+from pypsps import _deprecation
+
+from . import layout as layout_lib
 
 if TYPE_CHECKING:  # annotation only: pypsps never imports TensorFlow Probability at runtime
     import tensorflow_probability as tfp
@@ -419,7 +422,11 @@ def negloglik_per_state(
 
     Returns:
         negative loglikelihood per row per state [N, K]
+
+    Deprecated since v0.3.4, removed in v0.5.0: use `StateMixture.nll_per_state` or
+    `Family.nll`.
     """
+    _deprecation.warn("negloglik_per_state", "pypsps.keras.mixture.StateMixture.nll_per_state")
     y_true = tf.cast(tf.convert_to_tensor(y_true), tf.float32)
     if y_true.shape.rank == 1:
         y_true = y_true[:, None]
@@ -437,7 +444,7 @@ def negloglik_per_state(
     for j in range(n_states):
         # 1. Identify which columns belong to state j
         # Assuming: [state0_p0, state1_p0, ..., stateK_p0, state0_p1, ...]
-        indices = pypsps.utils.get_state_column_indices(j, n_states, n_params_per_state)
+        indices = layout_lib._state_column_indices(j, n_states, n_params_per_state)
         # 2. Extract parameters for state j: [N, P]
         params_state_j = tf.gather(y_pred, indices, axis=1)
         # 3. Compute NLL for this state: [N]
@@ -477,7 +484,10 @@ def posterior_from_negloglik_per_state(
     Returns:
         gamma:
             Posterior state probabilities P(S | X, A), shape [N,K].
+
+    Deprecated since v0.3.4, removed in v0.5.0: use `pypsps.keras.mixture.posterior`.
     """
+    _deprecation.warn("posterior_from_negloglik_per_state", "pypsps.keras.mixture.posterior")
     weights = tf.convert_to_tensor(weights)
     nll = tf.convert_to_tensor(nll)
 

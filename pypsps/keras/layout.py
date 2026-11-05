@@ -230,14 +230,15 @@ class ColumnLayout:
 
     def encode(
         self,
-        outcome: Mapping[str, Array],
+        outcome: Union[Mapping[str, Array], Array],
         state_weights: Array,
         treatment: Union[Mapping[str, Array], Array],
     ) -> Array:
         """Inverse of `decode_pred`: concatenates named ``[N, K]`` blocks into ``y_pred``.
 
         Args:
-          outcome: ``{param name: [N, K]}`` with exactly the layout's outcome names.
+          outcome: ``{param name: [N, K]}`` with exactly the layout's outcome names, or the whole
+            ``[N, K * P_o]`` outcome block.
           state_weights: ``[N, K]``.
           treatment: ``{param name: [N, K]}``, or the whole ``[N, K * P_t]`` treatment block.
 
@@ -262,19 +263,30 @@ class ColumnLayout:
                 out.append(block)
             return out
 
-        if isinstance(treatment, Mapping):
-            treatment_blocks = blocks(treatment, self.treatment_params, "treatment")
-        else:
-            expected = k * self.n_treatment_pred_cols
-            if _static_width(treatment, "treatment") != expected:
+        def as_blocks(part: Union[Mapping[str, Array], Array], names: tuple[str, ...], what: str):
+            """A mapping in ``names`` order, or a whole block checked for its width."""
+            if isinstance(part, Mapping):
+                return blocks(part, names, what)
+            expected = k * len(names)
+            if _static_width(part, what) != expected:
                 raise ValueError(
-                    f"treatment block must have {expected} columns, got shape "
-                    f"{tuple(treatment.shape)}"
+                    f"{what} block must have {expected} columns, got shape {tuple(part.shape)}"
                 )
-            treatment_blocks = [treatment]
+            return [part]
+
         return _concat(
-            blocks(outcome, self.outcome_params, "outcome") + [state_weights] + treatment_blocks
+            as_blocks(outcome, self.outcome_params, "outcome")
+            + [state_weights]
+            + as_blocks(treatment, self.treatment_params, "treatment")
         )
+
+    @classmethod
+    def from_model(cls, model: tf.keras.Model) -> "ColumnLayout":
+        """The layout of a pypsps model; see `pypsps.keras.mixture.StateMixture.from_model`."""
+        # Lazy: the mixture module imports this one.
+        from .mixture import StateMixture
+
+        return StateMixture.from_model(model).layout
 
     # --- serialization ---
 

@@ -9,6 +9,9 @@ import tensorflow_probability as tfp
 
 from ..keras import losses, neglogliks
 
+# This module also covers the deprecated column-count API on purpose (removed in v0.5.0).
+pytestmark = pytest.mark.filterwarnings("ignore:.*removed in v0.5.0:FutureWarning")
+
 tfd = tfp.distributions
 
 

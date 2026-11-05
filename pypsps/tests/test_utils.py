@@ -8,6 +8,7 @@ import tensorflow as tf
 
 from .. import datasets, utils
 from ..keras import models
+from ..keras.layout import ColumnLayout
 
 
 def test_get_n_cols_np_array():
@@ -60,24 +61,33 @@ def test_toy_model_fits_in_eager_and_graph_mode():
         assert np.isfinite(loss), f"non-finite loss with run_eagerly={run_eagerly}"
 
 
-def test_get_column_layout_normal_outcome():
+def test_column_layout_from_model_normal_outcome():
     """get_column_layout reads (2, 1, 1) off a compiled Normal-outcome (loc+scale) model"""
     tf.random.set_seed(10)
     model = models.build_toy_model(n_states=3, n_features=4, compile=True)
-    layout = utils.get_column_layout(model)
-    assert layout == utils.ColumnLayout(
-        n_outcome_pred_cols=2, n_treatment_pred_cols=1, n_outcome_true_cols=1
-    )
+    layout = ColumnLayout.from_model(model)
+    assert layout.n_outcome_pred_cols == 2
+    assert layout.n_treatment_pred_cols == 1
+    assert layout.n_outcome_true_cols == 1
 
 
-def test_get_column_layout_uncompiled_model_raises():
-    """get_column_layout gives a clear RuntimeError (not AttributeError) on an uncompiled model"""
+def test_column_layout_from_model_uncompiled_model_reads_the_output_layer():
+    """An uncompiled builder model has a CausalOutput layer, so the layout is known."""
     model = models.build_toy_model(n_states=3, n_features=4, compile=False)
+    assert ColumnLayout.from_model(model).n_outcome_pred_cols == 2
+    assert ColumnLayout.from_model(model).n_treatment_pred_cols == 1
+    assert ColumnLayout.from_model(model).n_outcome_true_cols == 1
+
+
+def test_column_layout_from_model_plain_keras_model_raises():
+    """A model with no CausalOutput layer and no pypsps loss gives a clear RuntimeError."""
+    inp = tf.keras.Input(shape=(4,))
+    model = tf.keras.Model(inp, tf.keras.layers.Dense(9)(inp))
     with pytest.raises(RuntimeError, match="[Cc]ompile"):
-        utils.get_column_layout(model)
+        ColumnLayout.from_model(model)
 
 
-def test_get_column_layout_exponential_outcome():
+def test_column_layout_from_model_exponential_outcome():
     """get_column_layout reads (1, 1, 2) off a compiled exponential/survival (log_rate) model"""
     tf.random.set_seed(10)
     model = models.build_model_binary_exponential(
@@ -88,10 +98,10 @@ def test_get_column_layout_exponential_outcome():
         outcome_hidden_layers=[(10, "selu")],
         log_rate_layer=(10, "selu"),
     )
-    layout = utils.get_column_layout(model)
-    assert layout == utils.ColumnLayout(
-        n_outcome_pred_cols=1, n_treatment_pred_cols=1, n_outcome_true_cols=2
-    )
+    layout = ColumnLayout.from_model(model)
+    assert layout.n_outcome_pred_cols == 1
+    assert layout.n_treatment_pred_cols == 1
+    assert layout.n_outcome_true_cols == 2
 
 
 def test_prepare_keras_inputs_outputs():

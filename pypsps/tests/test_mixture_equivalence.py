@@ -12,6 +12,9 @@ import tensorflow as tf
 from ..keras import families, losses, mixture, neglogliks
 from . import _reference_v0_2 as ref
 
+# This module also covers the deprecated column-count API on purpose (removed in v0.5.0).
+pytestmark = pytest.mark.filterwarnings("ignore:.*removed in v0.5.0:FutureWarning")
+
 _N = 12
 
 _CASES = {

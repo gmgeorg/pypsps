@@ -10,31 +10,23 @@ to obtain counterfactual predictions).
 For uncertainty estimates see the bootstrap.py module.
 """
 
-from typing import Any, List, Optional, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
 import tensorflow as tf
 import tqdm
 
-from . import utils
+from .keras.mixture import StateMixture
 
 
-def _state_conditional_outcome_mean(
-    model: tf.keras.Model, outcome_params_pred: np.ndarray, layout: utils.ColumnLayout
-) -> np.ndarray:
-    """Each state's conditional outcome mean E[Y | a, x, s_k] from raw outcome params.
-
-    `outcome_params_pred` holds each state's *raw* outcome-distribution parameters (e.g.
-    Normal's (loc, scale), or Exponential's log_rate), not the mean itself. The outcome family
-    of the loss the model was compiled with (`model.loss.mixture`) maps them to the mean; a
-    loss without a built-in family raises `NotImplementedError`.
-    """
-    family = model.loss.mixture.outcome_family
-    blocks = utils.split_outcome_pred(
-        outcome_params_pred, n_outcome_pred_cols=layout.n_outcome_pred_cols
-    )
-    return np.asarray(family.mean(dict(zip(family.param_names, blocks))))
+def _state_means_and_weights(
+    mixture: StateMixture, y_pred: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Each state's outcome mean E[Y | a, x, s_k] and the state weights, both ``[N, K]``."""
+    means = np.asarray(mixture.outcome_mean(y_pred, per_state=True))
+    weights = np.asarray(mixture.layout.decode_pred(y_pred).state_weights)
+    return means, weights
 
 
 def predict_counterfactual(
@@ -68,10 +60,9 @@ def predict_counterfactual(
 def predict_ute_binary(model: tf.keras.Model, features: Any) -> Union[pd.Series, np.ndarray]:
     """Predicts unit-level treatment effect for binary treatment.
 
-    Supports models compiled with a Normal, Exponential, Exponential (scale), or Weibull
-    outcome loss (see
-    `_state_conditional_outcome_mean`); raises `NotImplementedError` for any other outcome
-    distribution rather than silently returning a meaningless number.
+    The outcome family comes from the model (`StateMixture.from_model`), so this also works
+    on a model loaded with ``compile=False``. An outcome family without a mean (a custom loss
+    wrapped by the legacy constructors) raises `NotImplementedError`.
 
     Args:
       model: a trained pypsps model.
@@ -87,20 +78,9 @@ def predict_ute_binary(model: tf.keras.Model, features: Any) -> Union[pd.Series,
     y_pred0 = predict_counterfactual(model, features, np.zeros(shape=features.shape[0]))
     y_pred1 = predict_counterfactual(model, features, np.ones(shape=features.shape[0]))
 
-    layout = utils.get_column_layout(model)
-    outcome_params_pred0, weights, _ = utils.split_y_pred(
-        y_pred0,
-        n_outcome_pred_cols=layout.n_outcome_pred_cols,
-        n_treatment_pred_cols=layout.n_treatment_pred_cols,
-    )
-    outcome_params_pred1 = utils.split_y_pred(
-        y_pred1,
-        n_outcome_pred_cols=layout.n_outcome_pred_cols,
-        n_treatment_pred_cols=layout.n_treatment_pred_cols,
-    )[0]
-
-    outcome_mean_pred0 = _state_conditional_outcome_mean(model, outcome_params_pred0, layout)
-    outcome_mean_pred1 = _state_conditional_outcome_mean(model, outcome_params_pred1, layout)
+    mixture = StateMixture.from_model(model)
+    outcome_mean_pred0, weights = _state_means_and_weights(mixture, y_pred0)
+    outcome_mean_pred1, _ = _state_means_and_weights(mixture, y_pred1)
 
     utes = outcome_mean_pred1 - outcome_mean_pred0
     weighted_ute = (weights * utes).sum(axis=1)
@@ -122,10 +102,9 @@ def predict_ute_continuous(
 ) -> Union[pd.DataFrame, np.ndarray]:
     """Predicts unit-level treatment effect for continuous treatment.
 
-    Supports models compiled with a Normal, Exponential, Exponential (scale), or Weibull
-    outcome loss (see
-    `_state_conditional_outcome_mean`); raises `NotImplementedError` for any other outcome
-    distribution rather than silently returning a meaningless number.
+    The outcome family comes from the model (`StateMixture.from_model`), so this also works
+    on a model loaded with ``compile=False``. An outcome family without a mean (a custom loss
+    wrapped by the legacy constructors) raises `NotImplementedError`.
 
     Args:
       model: a trained pypsps model.
@@ -148,26 +127,15 @@ def predict_ute_continuous(
     n_samples = features.shape[0]
     base_treatment = np.full((n_samples, 1), baseline_treatment)
 
+    mixture = StateMixture.from_model(model)
     base_preds = predict_counterfactual(model, features, base_treatment)
-
-    layout = utils.get_column_layout(model)
-    o_base, weights_base, t_base = utils.split_y_pred(
-        base_preds,
-        n_outcome_pred_cols=layout.n_outcome_pred_cols,
-        n_treatment_pred_cols=layout.n_treatment_pred_cols,
-    )
-    mean_base = _state_conditional_outcome_mean(model, o_base, layout)
+    mean_base, weights_base = _state_means_and_weights(mixture, base_preds)
 
     utes = []
     for c in tqdm.tqdm(treatment_grid):
         c_treatment = np.full((n_samples, 1), c)
         c_preds = predict_counterfactual(model, features, c_treatment)
-        o_c, _, _ = utils.split_y_pred(
-            c_preds,
-            n_outcome_pred_cols=layout.n_outcome_pred_cols,
-            n_treatment_pred_cols=layout.n_treatment_pred_cols,
-        )
-        mean_c = _state_conditional_outcome_mean(model, o_c, layout)
+        mean_c, _ = _state_means_and_weights(mixture, c_preds)
         c_ute = mean_c - mean_base
         # Weighted average across states.
         c_ute_weighted = (weights_base * c_ute).sum(axis=1)

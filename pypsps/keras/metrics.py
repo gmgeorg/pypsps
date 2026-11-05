@@ -6,7 +6,9 @@ The propensity, treatment and outcome metrics take the model's `StateMixture`
 (`predictive_state_df_gen`, `uniform_entropy_gen`) only need the `ColumnLayout`.
 
 The legacy three-int constructors (``n_outcome_pred_cols``, ``n_treatment_pred_cols``,
-``n_outcome_true_cols``) still work. They map the counts onto families with a shape rule: 2
+``n_outcome_true_cols``) are deprecated: they warn (`FutureWarning`) and are removed in
+v0.5.0; loading a saved config of that form does not warn. They map the counts onto families
+with a shape rule: 2
 parameters and 1 ``y_true`` column is `Normal`, 1 parameter is its own mean (identity), and
 anything else raises, asking for a mixture.
 """
@@ -18,6 +20,7 @@ from typing import Any, Mapping, Optional
 import pypress.utils
 import tensorflow as tf
 
+from .. import _deprecation
 from . import families, losses
 from . import mixture as mixture_lib
 from .layout import Array, ColumnLayout
@@ -99,6 +102,8 @@ class _MixtureMetricMixin:
                 f"{type(self).__name__} needs a StateMixture (or the legacy "
                 f"{', '.join(self._LEGACY_COUNTS)}); missing {', '.join(missing)}"
             )
+        name = type(self).__name__
+        _deprecation.warn(f"{name}(<column counts>)", f"{name}(mixture)", stacklevel=4)
         self._legacy_counts = {k: int(counts[k]) for k in self._LEGACY_COUNTS}
         self._mixture = self._legacy_mixture(**self._legacy_counts)
 
@@ -125,7 +130,8 @@ class _MixtureMetricMixin:
         config = dict(config)
         if "mixture" in config:
             config["mixture"] = _deser(config["mixture"])
-        return cls(**config)
+        with _deprecation.silenced():
+            return cls(**config)
 
 
 class _PropensityMetric(_MixtureMetricMixin):
@@ -378,6 +384,7 @@ def _layout_kwargs(
         n_outcome_pred_cols = layout
     if n_outcome_pred_cols is None or n_treatment_pred_cols is None:
         raise TypeError(f"{name} needs a ColumnLayout (e.g. mixture.layout)")
+    _deprecation.warn(f"{name}(<column counts>)", f"{name}(mixture.layout)", stacklevel=4)
     return {
         "n_outcome_pred_cols": int(n_outcome_pred_cols),
         "n_treatment_pred_cols": int(n_treatment_pred_cols),
@@ -411,7 +418,8 @@ def predictive_state_df_gen(
     ``predictive_state_df``. Serializable: it wraps the registered `predictive_state_df`.
 
     Pass the model's `ColumnLayout` (``mixture.layout``). The legacy form
-    ``predictive_state_df_gen(n_outcome_pred_cols, n_treatment_pred_cols)`` still works.
+    ``predictive_state_df_gen(n_outcome_pred_cols, n_treatment_pred_cols)`` is deprecated
+    (`FutureWarning`; removed in v0.5.0).
     """
     return tf.keras.metrics.MeanMetricWrapper(
         fn=predictive_state_df,
@@ -562,8 +570,8 @@ def uniform_entropy_gen(
     Parameters
     ----------
     layout : ColumnLayout
-        The model's column layout (``mixture.layout``). The legacy form passes
-        ``n_outcome_pred_cols`` and ``n_treatment_pred_cols`` instead.
+        The model's column layout (``mixture.layout``). The deprecated legacy form passes
+        ``n_outcome_pred_cols`` and ``n_treatment_pred_cols`` instead (removed in v0.5.0).
 
     Returns
     -------

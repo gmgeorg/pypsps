@@ -1,0 +1,128 @@
+{
+ "layers/batch_normalization/vars/0": [
+  4
+ ],
+ "layers/batch_normalization/vars/1": [
+  4
+ ],
+ "layers/batch_normalization/vars/2": [
+  4
+ ],
+ "layers/batch_normalization/vars/3": [
+  4
+ ],
+ "layers/batch_normalization_1/vars/0": [
+  10
+ ],
+ "layers/batch_normalization_1/vars/1": [
+  10
+ ],
+ "layers/batch_normalization_1/vars/2": [
+  10
+ ],
+ "layers/batch_normalization_1/vars/3": [
+  10
+ ],
+ "layers/batch_normalization_2/vars/0": [
+  10
+ ],
+ "layers/batch_normalization_2/vars/1": [
+  10
+ ],
+ "layers/batch_normalization_2/vars/2": [
+  10
+ ],
+ "layers/batch_normalization_2/vars/3": [
+  10
+ ],
+ "layers/bias_only/vars/0": [
+  1
+ ],
+ "layers/bias_only_1/vars/0": [
+  1
+ ],
+ "layers/bias_only_2/vars/0": [
+  1
+ ],
+ "layers/bias_only_3/vars/0": [
+  1
+ ],
+ "layers/bias_only_4/vars/0": [
+  1
+ ],
+ "layers/bias_only_5/vars/0": [
+  1
+ ],
+ "layers/dense/vars/0": [
+  5,
+  10
+ ],
+ "layers/dense/vars/1": [
+  10
+ ],
+ "layers/dense_1/vars/0": [
+  4,
+  10
+ ],
+ "layers/dense_1/vars/1": [
+  10
+ ],
+ "layers/dense_2/vars/0": [
+  15,
+  5
+ ],
+ "layers/dense_2/vars/1": [
+  5
+ ],
+ "layers/dense_3/vars/0": [
+  15,
+  5
+ ],
+ "layers/dense_3/vars/1": [
+  5
+ ],
+ "layers/dense_4/vars/0": [
+  15,
+  5
+ ],
+ "layers/dense_4/vars/1": [
+  5
+ ],
+ "layers/dense_5/vars/0": [
+  5,
+  1
+ ],
+ "layers/dense_5/vars/1": [
+  1
+ ],
+ "layers/dense_6/vars/0": [
+  5,
+  1
+ ],
+ "layers/dense_6/vars/1": [
+  1
+ ],
+ "layers/dense_7/vars/0": [
+  5,
+  1
+ ],
+ "layers/dense_7/vars/1": [
+  1
+ ],
+ "layers/dense_8/vars/0": [
+  10,
+  10
+ ],
+ "layers/dense_8/vars/1": [
+  10
+ ],
+ "layers/predictive_state_simplex/vars/0": [
+  14,
+  3
+ ],
+ "layers/predictive_state_simplex/vars/1": [
+  3
+ ],
+ "optimizer/vars/0": [],
+ "optimizer/vars/1": []
+}
