@@ -47,6 +47,22 @@ def test_bias_only_get_config_roundtrip_no_regularizer():
     assert restored._bias_regularizer is None
 
 
+def test_bias_only_initializer_sets_the_constant_and_round_trips():
+    """A Constant initializer sets the start value, and the config keeps it."""
+    layer = layers.BiasOnly(initializer=tf.keras.initializers.Constant(-1.5))
+    np.testing.assert_allclose(layer(tf.zeros((2, 3))).numpy(), np.full((2, 1), -1.5))
+    restored = layers.BiasOnly.from_config(layer.get_config())
+    np.testing.assert_allclose(restored(tf.zeros((1, 3))).numpy(), [[-1.5]])
+
+
+def test_bias_only_loads_a_config_without_initializer():
+    """Configs saved before the initializer argument load with the zeros default."""
+    config = layers.BiasOnly(units=2).get_config()
+    del config["initializer"]
+    restored = layers.BiasOnly.from_config(config)
+    np.testing.assert_array_equal(restored(tf.zeros((1, 3))).numpy(), [[0.0, 0.0]])
+
+
 def test_state_column_gate_selects_its_own_column_in_a_loop():
     """Gates built in a loop each select their own column."""
     n_states = 3

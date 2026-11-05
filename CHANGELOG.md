@@ -5,6 +5,21 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.3.6 - Nov 4, 2026
+
+### Added
+
+* `models.build_model` (experimental): one builder for any outcome family and any treatment
+  family, with a `"shared_trunk"` or `"gated"` architecture, a `HeadSpec` per outcome parameter
+  (hidden layer, constant, or shared across states), start values for outcome and treatment
+  parameters, and the `max_time` overflow check for time-to-event outcomes. It validates every
+  argument before it creates any layer.
+* `models.compile_model`: compiles any network that ends in `layers.CausalOutput`, with the
+  `CausalLoss` built from the model's mixture. `models.default_metrics` gives the metrics it
+  uses for each pair of families.
+* `layers.BiasOnly(initializer=...)` sets the start value of the constant. Configs saved without
+  the argument still load.
+
 ## pypsps v0.3.5 - Nov 4, 2026
 
 ### Fixed
