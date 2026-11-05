@@ -12,32 +12,34 @@ import pytest
 import tensorflow as tf
 
 from .. import datasets, inference
-from ..keras import families, losses, metrics, mixture, models, neglogliks
+from ..keras import families, losses, metrics, mixture, models, neglogliks, presets
 from ..keras.layout import ColumnLayout
-from ..keras.presets import continuous_weibull
 from ._continuous import continuous_model, synthetic_continuous_survival
 
 # This module also covers the deprecated column-count API on purpose (removed in v0.5.0).
 pytestmark = pytest.mark.filterwarnings("ignore:.*removed in v0.5.0:FutureWarning")
 
 
-def _small(builder, **extra):
-    """A small compiled model from `builder`, plus matching (inputs, outputs)."""
-    if builder is models.build_model_binary_exponential:
+def _small(preset, **extra):
+    """A small compiled model from `presets.<preset>`, plus matching (inputs, outputs)."""
+    if preset == "binary_exponential":
         data = datasets.CancerSurvivalSimulator(seed=42).sample(n_samples=64)
         extra.setdefault("log_rate_layer", (5, "selu"))
     else:
         np.random.seed(10)
         data = datasets.KangSchafer(true_ate=10).sample(n_samples=64)
-        if builder is models.build_model_binary_normal:
+        if preset == "binary_normal":
             extra.setdefault("loc_layer", (5, "selu"))
             extra.setdefault("scale_layer", (5, "tanh"))
-    if builder is not models.build_toy_model:
+    if preset != "toy":
         extra.setdefault("predictive_state_hidden_layers", [(5, "selu")])
         extra.setdefault("outcome_hidden_layers", [(5, "selu")])
     inputs, outputs = data.to_keras_inputs_outputs()
     tf.random.set_seed(10)
-    return builder(n_states=3, n_features=data.n_features, compile=True, **extra), inputs, outputs
+    arguments = getattr(presets, preset)(
+        n_states=3, n_features=data.n_features, compile=True, **extra
+    )
+    return models.build_model(**arguments), inputs, outputs
 
 
 def _all_builders():
@@ -52,9 +54,9 @@ def _all_builders():
         return factory
 
     return [
-        ("toy", lambda: _small(models.build_toy_model)),
-        ("binary_normal", lambda: _small(models.build_model_binary_normal)),
-        ("binary_exponential", lambda: _small(models.build_model_binary_exponential)),
+        ("toy", lambda: _small("toy")),
+        ("binary_normal", lambda: _small("binary_normal")),
+        ("binary_exponential", lambda: _small("binary_exponential")),
         ("continuous_exponential", continuous("exponential")),
         ("continuous_weibull", continuous("weibull")),
     ]
@@ -85,7 +87,7 @@ def test_compiled_model_round_trips_through_load_model(factory, tmp_path):
 
 def test_causal_loss_metric_ignores_the_training_alpha_after_a_reload(tmp_path):
     """The reloaded training loss keeps following alpha; causal_loss_metric still doesn't."""
-    model, inputs, outputs = _small(models.build_toy_model)
+    model, inputs, outputs = _small("toy")
     path = str(tmp_path / "model.keras")
     model.save(path)
     reloaded = tf.keras.models.load_model(path)
@@ -189,14 +191,10 @@ def test_alpha_property_is_the_variable_and_setter_assigns():
         loss.alpha = tf.Variable(2.0)
 
 
-def test_underscore_alpha_is_a_deprecated_alias():
-    """`_alpha` still reads and writes the variable, with a FutureWarning naming v0.4.0."""
+def test_underscore_alpha_is_removed():
+    """The deprecated `_alpha` alias is gone in v0.4.0; `alpha` is the variable."""
     loss = _causal_loss(alpha=2.0)
-    with pytest.warns(FutureWarning, match="v0.4.0"):
-        assert loss._alpha is loss.alpha
-    with pytest.warns(FutureWarning, match="v0.4.0"):
-        loss._alpha = 7.0
-    assert float(loss.alpha) == 7.0
+    assert not hasattr(loss, "_alpha")
 
 
 def test_load_in_a_fresh_process_after_import_pypsps_keras(tmp_path):
@@ -206,7 +204,7 @@ def test_load_in_a_fresh_process_after_import_pypsps_keras(tmp_path):
     In-process tests can't catch a missing registration, an import cycle, or TFP creeping
     back in, because everything is already imported here.
     """
-    model, _, _ = _small(models.build_toy_model)
+    model, _, _ = _small("toy")
     path = str(tmp_path / "model.keras")
     model.save(path)
     script = textwrap.dedent(
@@ -376,16 +374,11 @@ def test_compile_false_reload_runs_inference(factory, tmp_path):
 
 _WEIGHTS_LAYOUT_DIR = pathlib.Path(__file__).parent / "fixtures" / "weights_layout"
 _HIDDEN = dict(predictive_state_hidden_layers=[(5, "selu")], outcome_hidden_layers=[(5, "selu")])
+# Binary and toy weight files changed in v0.4.0 (one treatment head); test_presets pins that
+# their old files don't load and copy_legacy_weights maps them.
 _WEIGHTS_LAYOUT_BUILDERS = {
-    "toy": lambda: models.build_toy_model(n_states=3, n_features=4),
-    "binary_normal": lambda: models.build_model_binary_normal(
-        n_states=3, n_features=4, loc_layer=(5, "selu"), scale_layer=(5, "selu"), **_HIDDEN
-    ),
-    "binary_exponential": lambda: models.build_model_binary_exponential(
-        n_states=3, n_features=4, log_rate_layer=(5, "selu"), **_HIDDEN
-    ),
     "continuous_weibull": lambda: models.build_model(
-        **continuous_weibull(
+        **presets.continuous_weibull(
             n_states=3,
             n_features=4,
             log_scale_bounds=(-3.0, 6.0),
@@ -398,7 +391,7 @@ _WEIGHTS_LAYOUT_BUILDERS = {
 
 @pytest.mark.parametrize("name", sorted(_WEIGHTS_LAYOUT_BUILDERS))
 def test_weights_file_layout_matches_v0_3_3(name, tmp_path):
-    """`.weights.h5` files saved by v0.3.3 still load: same dataset paths and shapes.
+    """Continuous `.weights.h5` files saved by v0.3.3 still load: same paths and shapes.
 
     Keras 3 keys weight files by layer order, so swapping the output layer must not reorder
     the layers that hold weights. The fixtures were written by v0.3.3's builders.

@@ -470,6 +470,12 @@ def get_default_callbacks(
 
     Returns:
         List of callbacks
+
+    The alpha schedule moves the training loss only. ``causal_loss_metric`` is fixed at alpha
+    1 and has no penalties, so during the alpha warm-up it can stall, or briefly rise, while
+    the loss falls. Choose ``patience`` larger than the steep part of the warm-up (about
+    ``half_life_epoch + 1 / steepness``, 20 epochs at the defaults). A model trained at a
+    constant alpha other than 1 is still selected at alpha 1.
     """
     callbacks = [
         tf.keras.callbacks.EarlyStopping(

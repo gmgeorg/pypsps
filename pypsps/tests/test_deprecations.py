@@ -9,7 +9,7 @@ import pytest
 import tensorflow as tf
 
 from .. import utils
-from ..keras import families, losses, metrics, mixture, models, neglogliks
+from ..keras import families, losses, metrics, mixture, models, neglogliks, presets
 from ..keras.layout import ColumnLayout
 
 _REMOVED = "removed in v0.5.0"
@@ -96,7 +96,7 @@ def test_agg_treatment_pred_warns_and_matches_treatment_mean():
 
 
 def test_get_column_layout_warns_and_matches_from_model():
-    model = models.build_toy_model(n_states=K, n_features=4, compile=False)
+    model = models.build_model(**presets.toy(n_states=K, n_features=4, compile=False))
     with pytest.warns(FutureWarning, match=_REMOVED):
         layout = utils.get_column_layout(model)
     new = ColumnLayout.from_model(model)
@@ -210,7 +210,7 @@ def test_the_builder_workflow_raises_no_future_warning(tmp_path):
     y = np.hstack([rng.normal(size=(32, 1)), t]).astype("float32")
     with warnings.catch_warnings():
         warnings.simplefilter("error", FutureWarning)
-        model = models.build_toy_model(n_states=K, n_features=4)
+        model = models.build_model(**presets.toy(n_states=K, n_features=4))
         model.fit([x, t], y, epochs=1, verbose=0)
         model.save(str(tmp_path / "m.keras"))
         reloaded = tf.keras.models.load_model(str(tmp_path / "m.keras"))

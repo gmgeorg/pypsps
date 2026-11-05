@@ -5,7 +5,7 @@ import pytest
 import tensorflow as tf
 
 from .. import datasets
-from ..keras import callbacks, families, losses, mixture, models
+from ..keras import callbacks, families, losses, mixture, models, presets
 
 
 def _causal_loss(alpha=1.0) -> losses.CausalLoss:
@@ -163,8 +163,8 @@ def test_alpha_schedule_updates_causal_loss_alpha_during_fit():
     inputs, outputs = ks_data.to_keras_inputs_outputs()
 
     tf.random.set_seed(10)
-    model = models.build_toy_model(
-        n_states=3, n_features=ks_data.n_features, compile=True, alpha=10.0
+    model = models.build_model(
+        **presets.toy(n_states=3, n_features=ks_data.n_features, compile=True, alpha=10.0)
     )
     assert isinstance(model.loss.alpha, tf.Variable)
     assert float(model.loss.alpha.numpy()) == 10.0
@@ -194,7 +194,7 @@ def test_alpha_schedule_assigns_the_variable_in_place():
     training graph reading it via ReadVariableOp -- see
     test_losses.test_causal_loss_alpha_assign_reaches_traced_graph for the underlying mechanism.
     """
-    model = models.build_toy_model(n_states=2, n_features=3, compile=True, alpha=10.0)
+    model = models.build_model(**presets.toy(n_states=2, n_features=3, compile=True, alpha=10.0))
     alpha_var = model.loss.alpha
     assert isinstance(alpha_var, tf.Variable)
 
@@ -368,8 +368,8 @@ def test_gaussian_schedule_and_eligible_checkpoint_in_a_fit():
     inputs, outputs = ks_data.to_keras_inputs_outputs()
 
     tf.random.set_seed(11)
-    model = models.build_toy_model(
-        n_states=3, n_features=ks_data.n_features, compile=True, alpha=10.0
+    model = models.build_model(
+        **presets.toy(n_states=3, n_features=ks_data.n_features, compile=True, alpha=10.0)
     )
     schedule = callbacks.GaussianAlphaSchedule(alpha_start=10.0, decay_const=0.5, verbose=False)
     checkpoint = callbacks.EligibleBestCheckpoint(

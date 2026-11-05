@@ -7,7 +7,7 @@ import pytest
 import tensorflow as tf
 
 from .. import datasets, utils
-from ..keras import models
+from ..keras import models, presets
 from ..keras.layout import ColumnLayout
 
 
@@ -52,8 +52,8 @@ def test_toy_model_fits_in_eager_and_graph_mode():
 
     for run_eagerly in (True, False):
         tf.random.set_seed(13)
-        model = models.build_toy_model(
-            n_states=3, n_features=ks_data.features.shape[1], compile=True
+        model = models.build_model(
+            **presets.toy(n_states=3, n_features=ks_data.features.shape[1], compile=True)
         )
         model.run_eagerly = run_eagerly
         history = model.fit(inputs, outputs, epochs=1, batch_size=64, verbose=0)
@@ -64,7 +64,7 @@ def test_toy_model_fits_in_eager_and_graph_mode():
 def test_column_layout_from_model_normal_outcome():
     """get_column_layout reads (2, 1, 1) off a compiled Normal-outcome (loc+scale) model"""
     tf.random.set_seed(10)
-    model = models.build_toy_model(n_states=3, n_features=4, compile=True)
+    model = models.build_model(**presets.toy(n_states=3, n_features=4, compile=True))
     layout = ColumnLayout.from_model(model)
     assert layout.n_outcome_pred_cols == 2
     assert layout.n_treatment_pred_cols == 1
@@ -73,7 +73,7 @@ def test_column_layout_from_model_normal_outcome():
 
 def test_column_layout_from_model_uncompiled_model_reads_the_output_layer():
     """An uncompiled builder model has a CausalOutput layer, so the layout is known."""
-    model = models.build_toy_model(n_states=3, n_features=4, compile=False)
+    model = models.build_model(**presets.toy(n_states=3, n_features=4, compile=False))
     assert ColumnLayout.from_model(model).n_outcome_pred_cols == 2
     assert ColumnLayout.from_model(model).n_treatment_pred_cols == 1
     assert ColumnLayout.from_model(model).n_outcome_true_cols == 1
@@ -90,13 +90,15 @@ def test_column_layout_from_model_plain_keras_model_raises():
 def test_column_layout_from_model_exponential_outcome():
     """get_column_layout reads (1, 1, 2) off a compiled exponential/survival (log_rate) model"""
     tf.random.set_seed(10)
-    model = models.build_model_binary_exponential(
-        n_states=3,
-        n_features=4,
-        compile=True,
-        predictive_state_hidden_layers=[(10, "selu")],
-        outcome_hidden_layers=[(10, "selu")],
-        log_rate_layer=(10, "selu"),
+    model = models.build_model(
+        **presets.binary_exponential(
+            n_states=3,
+            n_features=4,
+            compile=True,
+            predictive_state_hidden_layers=[(10, "selu")],
+            outcome_hidden_layers=[(10, "selu")],
+            log_rate_layer=(10, "selu"),
+        )
     )
     layout = ColumnLayout.from_model(model)
     assert layout.n_outcome_pred_cols == 1

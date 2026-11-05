@@ -612,13 +612,13 @@ def test_outcome_nll_metric_is_penalty_free_and_leaves_the_loss_untouched():
 def test_outcome_nll_metric_does_not_move_with_alpha():
     """Changing the training loss's alpha leaves the metric unchanged."""
     from pypsps import datasets
-    from pypsps.keras import models
+    from pypsps.keras import models, presets
 
     np.random.seed(3)
     ks_data = datasets.KangSchafer(true_ate=10).sample(n_samples=128)
     inputs, outputs = ks_data.to_keras_inputs_outputs()
     tf.random.set_seed(3)
-    model = models.build_toy_model(n_states=2, n_features=ks_data.n_features, alpha=1.0)
+    model = models.build_model(**presets.toy(n_states=2, n_features=ks_data.n_features, alpha=1.0))
     metric = metrics.outcome_nll_metric_gen(model.loss._outcome_loss)
     model.compile(loss=model.loss, optimizer="adam", metrics=[metric])
 

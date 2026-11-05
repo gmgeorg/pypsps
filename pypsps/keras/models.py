@@ -17,70 +17,6 @@ from . import mixture as mixture_lib
 
 tfk = tf.keras
 
-_EPS = 1e-3
-
-
-def _binary_exponential_mixture(n_states: int) -> mixture_lib.StateMixture:
-    """Exponential (log-rate) outcome and Bernoulli treatment."""
-    return mixture_lib.StateMixture(
-        families.Exponential("log_rate"), families.Bernoulli(), n_states=n_states
-    )
-
-
-def _binary_normal_mixture(n_states: int) -> mixture_lib.StateMixture:
-    """Normal outcome and Bernoulli treatment."""
-    return mixture_lib.StateMixture(families.Normal(), families.Bernoulli(), n_states=n_states)
-
-
-def _build_binary_exponential_causal_loss(
-    mixture: mixture_lib.StateMixture,
-    alpha: float,
-    df_penalty_l2: float,
-    outcome_loss_weight: float,
-) -> losses.CausalLoss:
-    """Causal loss for a binary treatment and an exponential (log-rate) survival outcome."""
-    return losses.CausalLoss.from_mixture(
-        mixture,
-        alpha=alpha,
-        outcome_loss_weight=outcome_loss_weight,
-        predictive_states_regularizer=pypress.keras.regularizers.Uniform(l2=df_penalty_l2),
-        reduction="sum_over_batch_size",
-    )
-
-
-def _build_binary_normal_causal_loss(
-    mixture: mixture_lib.StateMixture,
-    alpha: float,
-    df_penalty_l2: float,
-) -> losses.CausalLoss:
-    """Causal loss for a binary treatment and a Normal outcome."""
-    return losses.CausalLoss.from_mixture(
-        mixture,
-        alpha=alpha,
-        outcome_loss_weight=1.0,
-        predictive_states_regularizer=pypress.keras.regularizers.DegreesOfFreedom(
-            l2=df_penalty_l2,
-            target=max(1, np.log(0.5 * mixture.n_states)),
-        ),
-        reduction="sum_over_batch_size",
-    )
-
-
-def _binary_metrics(
-    causal_loss: losses.CausalLoss,
-) -> Tuple[List[tf.keras.metrics.Metric], metrics.CausalLossMetric]:
-    """``(propensity metrics, causal loss metric)`` of the binary-treatment builders."""
-    mixture = causal_loss.mixture
-    return [
-        metrics.PropensityScoreBinaryCrossentropy(mixture),
-        metrics.PropensityScoreAUC(mixture, curve="ROC", name="propensity_score_auroc"),
-        metrics.PropensityScoreAUC(mixture, curve="PR", name="propensity_score_aupr"),
-    ], metrics.CausalLossMetric(
-        causal_loss._outcome_loss,
-        causal_loss._treatment_loss,
-        outcome_loss_weight=causal_loss._outcome_loss_weight,
-    )
-
 
 def build_toy_model(
     n_states: int,
@@ -90,116 +26,16 @@ def build_toy_model(
     df_penalty_l2: float = 1.0,
     learning_rate: float = 0.01,
 ) -> tf.keras.Model:
-    """Builds a pypsps toy model for binary treatment & continuous outcome.
+    """Deprecated: use ``build_model(**presets.toy(...))``; removed in v0.5.0.
 
-    All pypsps keras layers can be used to build more complex causal model architectures
-    within a TensorFlow graph.  The specific model structure here is only used
-    for proof-of-concept / demo purposes.
-
-    Args:
-      n_states: number of predictive states to use in the pypsps model.
-      n_features: number of (numeric) features to use as input.
-      compile: if True, compiles pypsps model with the appropriate pypsps causal loss functions.
-      alpha: weight of the treatment (propensity) log-likelihood relative to the outcome
-        log-likelihood in the causal loss (λ in Eq. 10 of the paper). The default 1.0 gives
-        the joint log-likelihood. Values above 1 act as a penalty that prioritizes fitting
-        treatment over fitting outcome: training then learns the propensity and the
-        predictive states first, and refines the outcome models afterwards.
-      df_penalty_l2: l2 parameter for the DF regularization
-      learning_rate: learning rate of the optimizer.
-
-    Returns:
-      A tf.keras Model with the pypsps architecture (compiled model if `compile=True`).
+    The arguments are those of `presets.toy`, which documents them.
     """
+    arguments = dict(locals())
+    _warn_deprecated("build_toy_model", "toy")
+    # Lazy: presets imports this module.
+    from . import presets
 
-    assert n_states >= 1, f"Got n_states={n_states}"
-    assert n_features >= 1, f"Got n_features={n_features}"
-
-    features = tfk.layers.Input(shape=(n_features,), name="features")
-    treat = tfk.layers.Input(shape=(1,), name="treatment")
-
-    features_bn = tfk.layers.BatchNormalization(name="features_bn")(features)
-    feat_treat_bn = tfk.layers.Concatenate(name="features_bn_and_treatment")([features_bn, treat])
-
-    ps_hidden = tfk.layers.Dense(10, "relu")(features_bn)
-    ps_hidden = tfk.layers.BatchNormalization()(ps_hidden)
-    ps_hidden = tfk.layers.Dropout(0.2)(ps_hidden)
-    ps_hidden = tfk.layers.Dense(10, "selu")(ps_hidden)
-
-    ps_hidden = tf.keras.layers.Concatenate(name="ps_hidden_and_features_bn")(
-        [ps_hidden, features_bn]
-    )
-    pss = pypress.keras.layers.PredictiveStateSimplex(n_states=n_states, input_dim=n_features)
-    pred_states = pss(ps_hidden)
-    # State-conditional propensity for binary treatment (--> "sigmoid" activation), one constant
-    # per state (the "balancedness" assumption: treatment probability is homogeneous within a
-    # predictive state). Kept state-conditional (not pre-mixed) so the causal loss can compute
-    # the exact posterior P(state | X, treatment) via Bayes' rule.
-    prop_score_preds = []
-    for state_id in range(n_states):
-        prop_score_preds.append(
-            tf.keras.activations.sigmoid(
-                layers.BiasOnly(name="propensity_logit_state_" + str(state_id))(features_bn)
-            )
-        )
-    prop_score = tfk.layers.Concatenate(name="propensity_score")(prop_score_preds)
-
-    outcome_hidden = tf.keras.layers.Dense(10, "tanh", name="inputs_processing")(feat_treat_bn)
-    outcome_hidden = tf.keras.layers.Dropout(0.2)(outcome_hidden)
-    outcome_hidden = tf.keras.layers.BatchNormalization()(outcome_hidden)
-
-    outcome_hidden = tf.keras.layers.Concatenate(name="outcome_hidden_and_ft")(
-        [outcome_hidden, feat_treat_bn]
-    )
-
-    loc_preds = []
-    scale_preds = []
-    # One outcome model per state.
-    for state_id in range(n_states):
-        loc_preds.append(
-            tfk.layers.Dense(1, name="loc_pred_state_" + str(state_id))(
-                tfk.layers.Dense(5, "selu", name="feat_eng_state_" + str(state_id))(outcome_hidden)
-            )
-        )
-
-        # In this toy model use a constant scale estimate (BiasOnly); if needed
-        # change this to a scale parameter that changes as a function of inputs / hidden layers.
-        scale_preds.append(
-            tf.keras.activations.softplus(
-                layers.BiasOnly(name="scale_logit_" + str(state_id))(feat_treat_bn)
-            )
-        )
-
-    loc_comb = tfk.layers.Concatenate(name="loc_all_states")(loc_preds)
-    scale_comb = tfk.layers.Concatenate(name="scale_all_states")(scale_preds)
-
-    # Kept so the layer order, hence the `.weights.h5` layout, matches earlier releases.
-    outcome_pred = tfk.layers.Concatenate(name="loc_scale_all_states")([loc_comb, scale_comb])
-    mixture = _binary_normal_mixture(n_states)
-    outputs_concat = layers.CausalOutput(mixture, name="output_tensor")(
-        {"outcome": outcome_pred, "state_weights": pred_states, "treatment": prop_score}
-    )
-
-    model = tfk.models.Model(inputs=[features, treat], outputs=outputs_concat)
-
-    if compile:
-        psps_causal_loss = _build_binary_normal_causal_loss(
-            mixture,
-            alpha=alpha,
-            df_penalty_l2=df_penalty_l2,
-        )
-        propensity_metrics, causal_loss_metric = _binary_metrics(psps_causal_loss)
-        model.compile(
-            loss=psps_causal_loss,
-            optimizer=tfk.optimizers.Nadam(learning_rate=learning_rate),
-            metrics=[
-                *propensity_metrics,
-                metrics.OutcomeMeanSquaredError(psps_causal_loss.mixture),
-                causal_loss_metric,
-            ],
-        )
-
-    return model
+    return build_model(**presets.toy(**arguments))
 
 
 def build_model_binary_normal(
@@ -207,156 +43,25 @@ def build_model_binary_normal(
     n_features: int,
     predictive_state_hidden_layers: List[Tuple[int, str]],
     outcome_hidden_layers: List[Tuple[int, str]],
-    loc_layer: Tuple[int, str] = None,
-    scale_layer: Tuple[int, str] = None,
+    loc_layer: Optional[Tuple[int, str]] = None,
+    scale_layer: Optional[Tuple[int, str]] = None,
     compile: bool = True,
     alpha: float = 1.0,
     df_penalty_l2: float = 1.0,
     learning_rate: float = 0.01,
     dropout_rate: float = 0.2,
 ) -> tf.keras.Model:
-    """Builds a pypsps toy model for binary treatment & continuous outcome.
+    """Deprecated: use ``build_model(**presets.binary_normal(...))``; removed in v0.5.0.
 
-    All pypsps keras layers can be used to build more complex causal model architectures
-    within a TensorFlow graph.  The specific model structure here is only used
-    for proof-of-concept / demo purposes.
-
-    Args:
-      n_states: number of predictive states to use in the pypsps model.
-      n_features: number of (numeric) features to use as input.
-      compile: if True, compiles pypsps model with the appropriate pypsps causal loss functions.
-      alpha: weight of the treatment (propensity) log-likelihood relative to the outcome
-        log-likelihood in the causal loss (λ in Eq. 10 of the paper). The default 1.0 gives
-        the joint log-likelihood. Values above 1 act as a penalty that prioritizes fitting
-        treatment over fitting outcome: training then learns the propensity and the
-        predictive states first, and refines the outcome models afterwards.
-      df_penalty_l2: l2 parameter for the DF regularization
-      learning_rate: learning rate of the optimizer.
-
-    Returns:
-      A tf.keras Model with the pypsps architecture (compiled model if `compile=True`).
+    The arguments are those of `presets.binary_normal`, which documents them. Weight files
+    saved before v0.4.0 don't load into the new model; see `copy_legacy_weights`.
     """
+    arguments = dict(locals())
+    _warn_deprecated("build_model_binary_normal", "binary_normal")
+    # Lazy: presets imports this module.
+    from . import presets
 
-    assert n_states >= 1, f"Got n_states={n_states}"
-    assert n_features >= 1, f"Got n_features={n_features}"
-
-    features = tfk.layers.Input(shape=(n_features,))
-    treat = tfk.layers.Input(shape=(1,))
-
-    features_bn = tfk.layers.BatchNormalization()(features)
-    feat_treat_bn = tfk.layers.Concatenate(name="features_and_treatment")([features_bn, treat])
-
-    ps_hidden = tf.keras.layers.Dense(
-        predictive_state_hidden_layers[0][0],
-        predictive_state_hidden_layers[0][1],
-        name="features_processing_for_propensity_score",
-    )(features_bn)
-    ps_hidden = tf.keras.layers.Dropout(dropout_rate)(ps_hidden)
-    ps_hidden = tf.keras.layers.BatchNormalization()(ps_hidden)
-
-    for units, act in predictive_state_hidden_layers[1:]:
-        ps_hidden = tf.keras.layers.Dense(units, act)(ps_hidden)
-        ps_hidden = tf.keras.layers.Dropout(dropout_rate)(ps_hidden)
-        ps_hidden = tf.keras.layers.BatchNormalization()(ps_hidden)
-
-    ps_hidden = tf.keras.layers.Concatenate()([ps_hidden, features_bn])
-    pss = pypress.keras.layers.PredictiveStateSimplex(n_states=n_states, input_dim=n_features)
-    pred_states = pss(ps_hidden)
-
-    # State-conditional propensity for binary treatment (--> "sigmoid" activation), one constant
-    # per state; kept state-conditional (not pre-mixed) so the causal loss can compute the exact
-    # posterior P(state | X, treatment) via Bayes' rule.
-    prop_score_preds = []
-    for state_id in range(n_states):
-        prop_score_preds.append(
-            tf.keras.activations.sigmoid(
-                layers.BiasOnly(name="propensity_logit_state_" + str(state_id))(features_bn)
-            )
-        )
-    prop_score = tfk.layers.Concatenate(name="propensity_score")(prop_score_preds)
-
-    outcome_hidden = tf.keras.layers.Dense(
-        outcome_hidden_layers[0][0], outcome_hidden_layers[0][1], name="inputs_processing"
-    )(feat_treat_bn)
-    outcome_hidden = tf.keras.layers.Dropout(dropout_rate)(outcome_hidden)
-    outcome_hidden = tf.keras.layers.BatchNormalization()(outcome_hidden)
-
-    for units, act in outcome_hidden_layers[1:]:
-        outcome_hidden = tf.keras.layers.Dense(units, act)(outcome_hidden)
-        outcome_hidden = tf.keras.layers.Dropout(dropout_rate)(outcome_hidden)
-        outcome_hidden = tf.keras.layers.BatchNormalization()(outcome_hidden)
-
-    outcome_hidden = tf.keras.layers.Concatenate(name="outcome_hidden_and_ft")(
-        [outcome_hidden, feat_treat_bn]
-    )
-
-    loc_preds = []
-    scale_preds = []
-    # One outcome model per state.
-    for state_id in range(n_states):
-        loc_preds.append(
-            tfk.layers.Dense(1, name="loc_pred_state_" + str(state_id))(
-                tfk.layers.Dense(
-                    loc_layer[0],
-                    loc_layer[1],
-                    name="loc_feat_eng_state_" + str(state_id),
-                )(outcome_hidden)
-            )
-        )
-
-        if scale_layer is None:
-            # In this toy model use a constant scale estimate (BiasOnly); if needed
-            # change this to a scale parameter that changes as a function of inputs / hidden layers.
-            scale_preds.append(
-                tf.keras.activations.softplus(
-                    layers.BiasOnly(name="scale_logit_" + str(state_id))(feat_treat_bn)
-                )
-            )
-        else:
-            scale_preds.append(
-                tfk.layers.Dense(
-                    1, activation="softplus", name="scale_pred_state_" + str(state_id)
-                )(
-                    tfk.layers.Dense(
-                        scale_layer[0],
-                        scale_layer[1],
-                        name="scale_feat_eng_state_" + str(state_id),
-                    )(outcome_hidden)
-                )
-            )
-
-    loc_comb = tfk.layers.Concatenate(name="loc_all_states")(loc_preds)
-    scale_comb = tfk.layers.Concatenate(name="scale_all_states")(scale_preds)
-
-    mixture = _binary_normal_mixture(n_states)
-    outputs_concat = layers.CausalOutput(mixture, name="output_tensor")(
-        {
-            "outcome": {"loc": loc_comb, "scale": scale_comb},
-            "state_weights": pred_states,
-            "treatment": prop_score,
-        }
-    )
-
-    model = tfk.models.Model(inputs=[features, treat], outputs=outputs_concat)
-
-    if compile:
-        psps_causal_loss = _build_binary_normal_causal_loss(
-            mixture,
-            alpha=alpha,
-            df_penalty_l2=df_penalty_l2,
-        )
-        propensity_metrics, causal_loss_metric = _binary_metrics(psps_causal_loss)
-        model.compile(
-            loss=psps_causal_loss,
-            optimizer=tfk.optimizers.Nadam(learning_rate=learning_rate),
-            metrics=[
-                *propensity_metrics,
-                metrics.OutcomeMeanSquaredError(psps_causal_loss.mixture),
-                causal_loss_metric,
-            ],
-        )
-
-    return model
+    return build_model(**presets.binary_normal(**arguments))
 
 
 def build_model_binary_exponential(
@@ -364,7 +69,7 @@ def build_model_binary_exponential(
     n_features: int,
     predictive_state_hidden_layers: List[Tuple[int, str]],
     outcome_hidden_layers: List[Tuple[int, str]],
-    log_rate_layer: Tuple[int, str] = None,
+    log_rate_layer: Optional[Tuple[int, str]] = None,
     compile: bool = True,
     alpha: float = 1.0,
     outcome_loss_weight: float = 1.0,
@@ -372,126 +77,17 @@ def build_model_binary_exponential(
     learning_rate: float = 0.01,
     dropout_rate: float = 0.2,
 ) -> tf.keras.Model:
-    """Builds a pypsps toy model for binary treatment & continuous outcome.
+    """Deprecated: use ``build_model(**presets.binary_exponential(...))``; removed in v0.5.0.
 
-    All pypsps keras layers can be used to build more complex causal model architectures
-    within a TensorFlow graph.  The specific model structure here is only used
-    for proof-of-concept / demo purposes.
-
-    Args:
-      n_states: number of predictive states to use in the pypsps model.
-      n_features: number of (numeric) features to use as input.
-      compile: if True, compiles pypsps model with the appropriate pypsps causal loss functions.
-      alpha: weight of the treatment (propensity) log-likelihood relative to the outcome
-        log-likelihood in the causal loss (λ in Eq. 10 of the paper). The default 1.0 gives
-        the joint log-likelihood. Values above 1 act as a penalty that prioritizes fitting
-        treatment over fitting outcome: training then learns the propensity and the
-        predictive states first, and refines the outcome models afterwards.
-      df_penalty_l2: l2 parameter for the DF regularization
-      learning_rate: learning rate of the optimizer.
-
-    Returns:
-      A tf.keras Model with the pypsps architecture (compiled model if `compile=True`).
+    The arguments are those of `presets.binary_exponential`, which documents them. Weight
+    files saved before v0.4.0 don't load into the new model; see `copy_legacy_weights`.
     """
+    arguments = dict(locals())
+    _warn_deprecated("build_model_binary_exponential", "binary_exponential")
+    # Lazy: presets imports this module.
+    from . import presets
 
-    assert n_states >= 1, f"Got n_states={n_states}"
-    assert n_features >= 1, f"Got n_features={n_features}"
-
-    features = tfk.layers.Input(shape=(n_features,), name="features")
-    treat = tfk.layers.Input(shape=(1,), name="treatment")
-
-    features_bn = tfk.layers.BatchNormalization(name="features_bn")(features)
-    feat_treat_bn = tfk.layers.Concatenate(name="features_and_treatment")([features_bn, treat])
-
-    ps_hidden = tf.keras.layers.Dense(
-        predictive_state_hidden_layers[0][0], predictive_state_hidden_layers[0][1]
-    )(features_bn)
-    ps_hidden = tf.keras.layers.Dropout(dropout_rate)(ps_hidden)
-    ps_hidden = tf.keras.layers.BatchNormalization()(ps_hidden)
-
-    for units, act in predictive_state_hidden_layers[1:]:
-        ps_hidden = tf.keras.layers.Dense(units, act)(ps_hidden)
-        ps_hidden = tf.keras.layers.Dropout(dropout_rate)(ps_hidden)
-        ps_hidden = tf.keras.layers.BatchNormalization()(ps_hidden)
-
-    ps_hidden = tf.keras.layers.Concatenate(name="concat_skip_connection_treatment")(
-        [ps_hidden, features_bn]
-    )
-    pss = pypress.keras.layers.PredictiveStateSimplex(n_states=n_states, input_dim=n_features)
-    pred_states = pss(ps_hidden)
-
-    # State-conditional propensity for binary treatment (--> "sigmoid" activation), one constant
-    # per state; kept state-conditional (not pre-mixed) so the causal loss can compute the exact
-    # posterior P(state | X, treatment) via Bayes' rule.
-    prop_score_preds = []
-    for state_id in range(n_states):
-        prop_score_preds.append(
-            tf.keras.activations.sigmoid(
-                layers.BiasOnly(name="propensity_logit_state_" + str(state_id))(features_bn)
-            )
-        )
-    prop_score = tfk.layers.Concatenate(name="propensity_score")(prop_score_preds)
-
-    outcome_hidden = tf.keras.layers.Dense(
-        outcome_hidden_layers[0][0], outcome_hidden_layers[0][1], name="inputs_processing"
-    )(feat_treat_bn)
-    outcome_hidden = tf.keras.layers.Dropout(dropout_rate)(outcome_hidden)
-    outcome_hidden = tf.keras.layers.BatchNormalization()(outcome_hidden)
-
-    for units, act in outcome_hidden_layers[1:]:
-        outcome_hidden = tf.keras.layers.Dense(units, act)(outcome_hidden)
-        outcome_hidden = tf.keras.layers.Dropout(dropout_rate)(outcome_hidden)
-        outcome_hidden = tf.keras.layers.BatchNormalization()(outcome_hidden)
-
-    outcome_hidden = tf.keras.layers.Concatenate(name="concat_skip_connection_outcome")(
-        [outcome_hidden, feat_treat_bn]
-    )
-
-    log_rate_preds = []
-    # One outcome model per state.
-    for state_id in range(n_states):
-        log_rate_preds.append(
-            tfk.layers.Dense(1, name="log_rate_pred_state_" + str(state_id))(
-                tfk.layers.Dense(
-                    log_rate_layer[0],
-                    log_rate_layer[1],
-                    name="log_rate_feat_eng_state_" + str(state_id),
-                )(outcome_hidden)
-            )
-        )
-
-    log_rate_comb = tfk.layers.Concatenate(name="log_rate_all_states")(log_rate_preds)
-
-    mixture = _binary_exponential_mixture(n_states)
-    outputs_concat = layers.CausalOutput(mixture, name="output_tensor")(
-        {
-            "outcome": {"log_rate": log_rate_comb},
-            "state_weights": pred_states,
-            "treatment": prop_score,
-        }
-    )
-
-    model = tfk.models.Model(inputs=[features, treat], outputs=outputs_concat)
-
-    if compile:
-        psps_causal_loss = _build_binary_exponential_causal_loss(
-            mixture,
-            alpha=alpha,
-            df_penalty_l2=df_penalty_l2,
-            outcome_loss_weight=outcome_loss_weight,
-        )
-        propensity_metrics, causal_loss_metric = _binary_metrics(psps_causal_loss)
-        model.compile(
-            loss=psps_causal_loss,
-            optimizer=tfk.optimizers.Nadam(learning_rate=learning_rate),
-            metrics=[
-                *propensity_metrics,
-                metrics.predictive_state_df_gen(psps_causal_loss.layout),
-                causal_loss_metric,
-            ],
-        )
-
-    return model
+    return build_model(**presets.binary_exponential(**arguments))
 
 
 def _dense_stack(
@@ -612,6 +208,144 @@ def build_model_continuous_weibull(
             **kwargs,
         )
     )
+
+
+def _consumers(model: tf.keras.Model, tensor: Any) -> list:
+    """The layers of ``model`` that take ``tensor`` as (one of) their inputs."""
+    return [
+        layer
+        for layer in model.layers
+        if not isinstance(layer, tfk.layers.InputLayer)
+        and any(t is tensor for t in tf.nest.flatten(layer.input))
+    ]
+
+
+def _weighted_chain(model: tf.keras.Model, first: tf.keras.layers.Layer) -> list:
+    """The weighted layers from ``first`` along its single-consumer chain, up to the first
+    layer without weights that is not Dropout (the skip ``Concatenate``)."""
+    chain, layer = [], first
+    while True:
+        if layer.weights:
+            chain.append(layer)
+        elif not isinstance(layer, tfk.layers.Dropout):
+            return chain
+        nxt = _consumers(model, layer.output)
+        if len(nxt) != 1:
+            return chain
+        layer = nxt[0]
+
+
+def _legacy_pairs(old: tf.keras.Model, new: tf.keras.Model) -> list:
+    """``(old layer, new layer)`` for every weighted layer of a pre-v0.4.0 binary model,
+    except the propensity logits; raises ValueError if the two models don't match."""
+    mixture = mixture_lib.StateMixture.from_model(new)
+    if mixture != mixture_lib.StateMixture.from_model(old):
+        raise ValueError("old and new models have different families or n_states")
+    n_states = mixture.n_states
+
+    features_bn = _consumers(old, old.inputs[0])
+    features_bn = [x for x in features_bn if isinstance(x, tfk.layers.BatchNormalization)]
+    if len(features_bn) != 1:
+        raise ValueError("cannot find the old model's feature BatchNormalization")
+    state_dense = [
+        x for x in _consumers(old, features_bn[0].output) if isinstance(x, tfk.layers.Dense)
+    ]
+    if len(state_dense) != 1:
+        raise ValueError("cannot find the old model's predictive-state network")
+    old_state = _weighted_chain(old, state_dense[0])
+    old_trunk = _weighted_chain(old, old.get_layer("inputs_processing"))
+
+    def chain(prefix: str) -> list:
+        return [
+            x
+            for x in new.layers
+            if x.name.startswith(prefix)
+            and isinstance(x, (tfk.layers.Dense, tfk.layers.BatchNormalization))
+        ]
+
+    new_state = chain("predictive_state_")
+    new_trunk = chain("outcome_trunk_")
+    if len(old_state) != len(new_state) or len(old_trunk) != len(new_trunk):
+        raise ValueError(
+            "the hidden stacks differ (e.g. a toy model, whose state network has no "
+            "BatchNormalization after its last layer); its weights don't map"
+        )
+    pairs = [(features_bn[0], new.get_layer("features_bn"))]
+    pairs += list(zip(old_state, new_state)) + list(zip(old_trunk, new_trunk))
+    for p in mixture.outcome_family.param_names:
+        for k in range(n_states):
+            names = {x.name for x in old.layers}
+            if f"{p}_feat_eng_state_{k}" in names:
+                pairs.append(
+                    (
+                        old.get_layer(f"{p}_feat_eng_state_{k}"),
+                        new.get_layer(f"{p}_hidden_state_{k}"),
+                    )
+                )
+            raw = f"{p}_pred_state_{k}" if f"{p}_pred_state_{k}" in names else f"{p}_logit_{k}"
+            pairs.append((old.get_layer(raw), new.get_layer(f"{p}_raw_state_{k}")))
+    simplex = [x for x in old.layers if isinstance(x, pypress.keras.layers.PredictiveStateSimplex)]
+    pairs.append((simplex[0], new.get_layer("state_weights")))
+    for a, b in pairs:
+        shapes_a = [tuple(w.shape) for w in a.weights]
+        shapes_b = [tuple(w.shape) for w in b.weights]
+        if type(a) is not type(b) or shapes_a != shapes_b:
+            raise ValueError(
+                f"layer {a.name!r} ({type(a).__name__}, {shapes_a}) does not map onto "
+                f"{b.name!r} ({type(b).__name__}, {shapes_b})"
+            )
+    return pairs
+
+
+def copy_legacy_weights(old: tf.keras.Model, new: tf.keras.Model) -> tf.keras.Model:
+    """Copies the weights of a model built before v0.4.0 into its preset model.
+
+    Deprecated with the ``build_*`` builders; removed in v0.5.0.
+
+    Since v0.4.0 binary-treatment models hold the propensity in one `PredictiveStateParams`
+    layer (``treatment_params``) instead of one ``propensity_logit_state_<k>`` layer per state,
+    so their ``.weights.h5`` files saved earlier don't load. Load the old model's ``.keras``
+    file with ``compile=False``, build the new one with the same arguments, and copy:
+
+        old = tf.keras.models.load_model("model.keras", compile=False)
+        new = models.build_model(**presets.binary_normal(...same arguments...))
+        models.copy_legacy_weights(old, new)
+
+    **Warning:** ``new.load_weights`` on an old binary ``.weights.h5`` raises ``ValueError``,
+    but only after overwriting part of the model; discard that model and use this function.
+
+    The layers are matched by their role in the graph, so the copy is exact: the new model's
+    outcome and state-weight columns equal the old ones, and the propensity agrees to float32
+    rounding. For a continuous-treatment model, whose layers are unchanged, this is
+    ``new.set_weights(old.get_weights())``.
+
+    Args:
+      old: a model from a ``build_*`` builder before v0.4.0 (or loaded from its file).
+      new: the model from the matching preset, built with the same arguments.
+
+    Returns:
+      ``new``, with ``old``'s weights.
+
+    Raises:
+      ValueError: if the two models don't match, for example a toy model (whose architecture
+        changed in v0.4.0) or different presets or arguments.
+    """
+    names = {x.name for x in old.layers}
+    if "propensity_logit_state_0" not in names:
+        old_shapes = [tuple(w.shape) for w in old.weights]
+        if old_shapes != [tuple(w.shape) for w in new.weights]:
+            raise ValueError("old and new models have different weights; they don't match")
+        new.set_weights(old.get_weights())
+        return new
+    pairs = _legacy_pairs(old, new)
+    n_states = mixture_lib.StateMixture.from_model(new).n_states
+    logits = np.stack(
+        [old.get_layer(f"propensity_logit_state_{k}").get_weights()[0] for k in range(n_states)]
+    )
+    for a, b in pairs:
+        b.set_weights(a.get_weights())
+    new.get_layer("treatment_params").set_weights([logits.reshape(n_states, 1)])
+    return new
 
 
 def get_propensity_state_conditional_means(model: tf.keras.Model) -> tf.Tensor:
@@ -1007,8 +741,6 @@ def build_model(
 ) -> tf.keras.Model:
     """Builds a pypsps model for any outcome family and treatment family.
 
-    Experimental in v0.3.x: the interface may still change before v0.4.0.
-
     The network has four parts: a state network from the features to the state weights
     (layer ``state_weights``); a treatment head with one feature-independent constant per
     state and treatment parameter (``treatment_params``); one head per outcome parameter and
@@ -1101,8 +833,6 @@ def compile_model(
 ) -> tf.keras.Model:
     """Compiles a pypsps model in place with the causal loss of its state mixture.
 
-    Experimental in v0.3.x: the interface may still change before v0.4.0.
-
     Works on any model whose output layer is a `layers.CausalOutput`, including hand-built
     networks: the loss is ``CausalLoss.from_mixture(StateMixture.from_model(model), ...)``.
 
@@ -1156,7 +886,8 @@ def default_metrics(causal_loss: losses.CausalLoss) -> List[tf.keras.metrics.Met
 
     Always ``causal_loss_metric`` (penalty-free, alpha = 1), ``outcome_nll_metric``,
     ``predictive_state_df`` and ``uniform_entropy``. A binary treatment adds
-    ``propensity_score_binary_crossentropy`` and ``propensity_score_aupr``; any other treatment
+    ``propensity_score_binary_crossentropy``, ``propensity_score_auroc`` and
+    ``propensity_score_aupr``; any other treatment
     adds ``treatment_mean_squared_error``. Every outcome family but `families.LossFamily` adds
     ``outcome_mean_squared_error`` (over units with an event, for survival families).
     """
@@ -1175,6 +906,7 @@ def default_metrics(causal_loss: losses.CausalLoss) -> List[tf.keras.metrics.Met
     if mixture.treatment_family.is_binary:
         chosen += [
             metrics.PropensityScoreBinaryCrossentropy(mixture),
+            metrics.PropensityScoreAUC(mixture, curve="ROC", name="propensity_score_auroc"),
             metrics.PropensityScoreAUC(mixture, curve="PR", name="propensity_score_aupr"),
         ]
     else:

@@ -92,12 +92,6 @@ def _prob_state_given_treatment_features(
     return gamma
 
 
-_ALPHA_DEPRECATION = (
-    "CausalLoss._alpha is deprecated since v0.3.0 and will be removed in v0.4.0; "
-    "use CausalLoss.alpha"
-)
-
-
 def _check_elementwise(loss: Any, what: str) -> None:
     """Raises unless ``loss`` is a Keras loss with ``reduction="none"``."""
     if not isinstance(loss, tf.keras.losses.Loss):
@@ -545,17 +539,6 @@ class CausalLoss(tf.keras.losses.Loss):
                 "assigning one later would leave the traced training graph reading the old one."
             )
         self._alpha_var.assign(float(value))
-
-    @property
-    def _alpha(self) -> tf.Variable:
-        """Deprecated alias of `alpha`."""
-        warnings.warn(_ALPHA_DEPRECATION, FutureWarning, stacklevel=2)
-        return self._alpha_var
-
-    @_alpha.setter
-    def _alpha(self, value: float) -> None:
-        warnings.warn(_ALPHA_DEPRECATION, FutureWarning, stacklevel=2)
-        self.alpha = value
 
     def get_config(self) -> dict:
         """Returns the config, with the *current* alpha value and serialized nested objects."""

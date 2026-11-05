@@ -5,6 +5,84 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.4.0 - Nov 4, 2026
+
+Breaking: every model now uses one treatment head, `treatment_params` (a
+`PredictiveStateParams` layer). The binary builders' `propensity_logit_state_<k>` and
+`propensity_score` layers are gone, and binary-model `.weights.h5` files saved by earlier
+versions don't load. **Warning:** `load_weights` on such a file raises `ValueError` only after
+it has overwritten part of the model (the old propensity logits land in the constant scale
+heads). Discard that model, and migrate from the old `.keras` file with
+`models.copy_legacy_weights`. Several other layer names change (see "Changed"), and the toy
+model gets one more BatchNormalization layer, so toy-model `.weights.h5` files don't load
+either. `.keras` files load as before.
+
+Deprecated: every `build_*` function. Use `models.build_model(**presets.<name>(...))` with the
+same arguments. The `build_*` functions are removed in v0.5.0. `docs/model_building.md` has a
+migration section.
+
+### Added
+
+* `models.copy_legacy_weights(old, new)` copies the weights of a model built before v0.4.0
+  into the matching preset model. For binary models it maps each layer by its role and moves
+  the per-state propensity logits into `treatment_params`; the outcome and state weights then
+  match exactly, and the propensity up to float32 rounding. For continuous models it is
+  `new.set_weights(old.get_weights())`. It raises `ValueError` for a toy model and for models
+  that don't match. It is removed in v0.5.0.
+* `models.default_metrics` logs `propensity_score_auroc` for a binary treatment, as the binary
+  builders did, next to `propensity_score_aupr`.
+
+### Changed
+
+* `build_toy_model`, `build_model_binary_normal` and `build_model_binary_exponential` build
+  their preset's model:
+  * The propensity is one `treatment_params` layer, like the continuous-treatment models.
+  * Layer names follow one scheme (listed in `docs/model_building.md`): `features` and
+    `treatment` for the inputs (were auto-named in the binary-normal model), `features_bn`,
+    `features_and_treatment` (toy: was `features_bn_and_treatment`),
+    `predictive_state_dense_<i>` (was `features_processing_for_propensity_score` and auto
+    names), `state_weights` (was `predictive_state_simplex_<n>`), `outcome_trunk_dense_<i>`
+    (was `inputs_processing`), and `{param}_hidden_state_<k>` / `{param}_raw_state_<k>` /
+    `{param}_state_<k>` (were `{param}_feat_eng_state_<k>` / `{param}_pred_state_<k>` /
+    `scale_logit_<k>`). `output_tensor` and `{param}_all_states` are unchanged.
+  * The toy model's state network uses the standard hidden stack, which adds one
+    BatchNormalization layer.
+  * Metrics: the toy and binary-normal models add `outcome_nll_metric`,
+    `predictive_state_df` and `uniform_entropy`; the binary-exponential model adds
+    `outcome_nll_metric`, `uniform_entropy` and `outcome_mean_squared_error` (over units with
+    an event). `causal_loss_metric` is unchanged.
+* `build_model` and `compile_model` are no longer experimental.
+* The toy and binary-normal degrees-of-freedom target stays `max(1, log(n_states / 2))`; the
+  training guide's new section on the predictive-state regularizer explains how to tune it.
+* The `get_default_callbacks` docstring and the training guide explain why
+  `val_causal_loss_metric` can stall during the alpha warm-up, and how to choose `patience`.
+
+### Deprecated
+
+* `models.build_toy_model`, `build_model_binary_normal` and `build_model_binary_exponential`
+  warn with `FutureWarning` and are removed in v0.5.0.
+
+### Fixed
+
+* `build_model_binary_normal(loc_layer=None)` and `build_model_binary_exponential(log_rate_layer=None)`
+  raised `TypeError`; `None` now gives a linear head per state. Empty hidden-layer lists raised
+  `IndexError`; they now give an identity stack.
+* `outcome_loss_weight` can be set for the binary-normal and toy models (through the preset
+  dict); the builders ignored it.
+* The binary models no longer pass `input_dim` to `PredictiveStateSimplex`, which made Keras
+  warn.
+
+### Removed
+
+* `CausalLoss._alpha` (deprecated in v0.3.0); use `CausalLoss.alpha`.
+* The private `models._build_binary_normal_causal_loss` and
+  `_build_binary_exponential_causal_loss` helpers.
+
+### Development
+
+* `pyproject.toml` configures isort with the black profile and 100 columns, so isort and
+  ruff-format no longer rewrite each other's imports.
+
 ## pypsps v0.3.8 - Nov 4, 2026
 
 ### Fixed

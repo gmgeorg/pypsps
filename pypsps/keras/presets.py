@@ -87,6 +87,10 @@ def binary_normal(
 ) -> Dict[str, Any]:
     """Binary treatment and Normal outcome, on a shared outcome trunk.
 
+    Warning: a binary model's ``.weights.h5`` file saved before v0.4.0 does not load into this
+    model. ``load_weights`` raises ``ValueError``, but only after it has overwritten part of the
+    model; discard that model and use `models.copy_legacy_weights` on the old ``.keras`` file.
+
     Args:
       n_states: number of predictive states.
       n_features: number of numeric features.
@@ -144,6 +148,10 @@ def binary_exponential(
     dropout_rate: float = 0.2,
 ) -> Dict[str, Any]:
     """Binary treatment and an exponential (log-rate) time-to-event outcome.
+
+    Warning: a binary model's ``.weights.h5`` file saved before v0.4.0 does not load into this
+    model. ``load_weights`` raises ``ValueError``, but only after it has overwritten part of the
+    model; discard that model and use `models.copy_legacy_weights` on the old ``.keras`` file.
 
     Args:
       n_states: number of predictive states.

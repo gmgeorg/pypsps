@@ -1,7 +1,9 @@
 """Presets, and their equivalence with the frozen v0.3.5 reference builders.
 
-The continuous cases build the new side with `build_model(**presets.continuous_*(...))`. The
-binary builders are not presets yet, so their "new" side is still `models.build_*` itself.
+The new side is always `build_model(**presets.<name>(...))`. Continuous models take the old
+weights with `set_weights` and match bit for bit. Binary models take them through
+`models.copy_legacy_weights`; their treatment block differs from the old one by float32
+rounding, so the loss and gradients get a tolerance.
 """
 
 import warnings
@@ -63,18 +65,24 @@ CASES = {
 }
 
 
-# The builders that are deprecated preset calls, and their presets.
+# Every deprecated builder and its preset.
 _PRESETS = {
+    "build_toy_model": "toy",
+    "build_model_binary_normal": "binary_normal",
+    "build_model_binary_exponential": "binary_exponential",
     "build_model_continuous_exponential": "continuous_exponential",
     "build_model_continuous_weibull": "continuous_weibull",
 }
 
 
 def _new(name, kwargs):
-    """The new side: the builder's preset through `build_model`, or the builder itself."""
-    if name in _PRESETS:
-        return models.build_model(**getattr(presets, _PRESETS[name])(**kwargs))
-    return getattr(models, name)(**kwargs)
+    """The new side: the builder's preset through `build_model`."""
+    return models.build_model(**getattr(presets, _PRESETS[name])(**kwargs))
+
+
+def _is_binary(case):
+    """Whether a case is a binary-treatment builder."""
+    return "binary" in CASES[case][0]
 
 
 def _data(seed=0):
@@ -113,8 +121,8 @@ def _y_true_for(model, y_true):
     return y_true
 
 
-@pytest.mark.parametrize("case", sorted(CASES))
-def test_adapter_equivalence(case, tmp_path):
+@pytest.mark.parametrize("case", sorted(c for c in CASES if not _is_binary(c)))
+def test_continuous_equivalence(case, tmp_path):
     """Same predictions, loss and gradients under a weight transfer; old weight files load."""
     name, kwargs = CASES[case]
     old = getattr(reference, name)(**kwargs)
@@ -139,15 +147,82 @@ def test_adapter_equivalence(case, tmp_path):
     np.testing.assert_array_equal(loaded([x, t], training=False), old([x, t], training=False))
 
 
-# --- deprecated continuous builders ---
+def _grads_by_layer(model, x, t, y_true):
+    """The loss, and its gradient per layer name (one list per layer)."""
+    loss, grads = _loss_and_grads(model, x, t, y_true)
+    by_layer = {}
+    for v, g in zip(model.trainable_weights, grads):
+        by_layer.setdefault(v.path.split("/")[0], []).append(g.numpy())
+    return loss, by_layer
 
-_CONTINUOUS_CASES = sorted(c for c in CASES if CASES[c][0] in _PRESETS)
 
-
-@pytest.mark.parametrize("case", _CONTINUOUS_CASES)
-def test_deprecated_continuous_builders_warn_once_and_match_their_preset(case):
-    """One FutureWarning, pointing at the caller and naming the preset; the same model."""
+@pytest.mark.parametrize("case", sorted(c for c in CASES if _is_binary(c)))
+def test_binary_equivalence_through_copy_legacy_weights(case, tmp_path):
+    """After `copy_legacy_weights` the outcome and state columns are bit-identical, the
+    propensity agrees to float32 rounding, and so do the loss and every gradient. The old
+    weight file does not load into the new model."""
     name, kwargs = CASES[case]
+    old = getattr(reference, name)(**kwargs)
+    new = _new(name, kwargs)
+    _randomize(old)
+    models.copy_legacy_weights(old, new)
+    x, t, y_true = _data()
+
+    layout = ColumnLayout.from_model(new)
+    want = layout.decode_pred(old([x, t], training=False))
+    got = layout.decode_pred(new([x, t], training=False))
+    for p in want.outcome:
+        np.testing.assert_array_equal(got.outcome[p], want.outcome[p])
+    np.testing.assert_array_equal(got.state_weights, want.state_weights)
+    np.testing.assert_allclose(got.treatment["prob"], want.treatment["prob"], rtol=1e-6, atol=0)
+
+    old_loss, old_grads = _grads_by_layer(old, x, t, y_true)
+    new_loss, new_grads = _grads_by_layer(new, x, t, y_true)
+    np.testing.assert_allclose(new_loss, old_loss, rtol=1e-6)
+    for a, b in models._legacy_pairs(old, new):
+        for g_old, g_new in zip(old_grads[a.name], new_grads[b.name]):
+            np.testing.assert_allclose(g_new, g_old, rtol=1e-5, atol=1e-7, err_msg=b.name)
+    propensity = np.ravel([old_grads[f"propensity_logit_state_{k}"] for k in range(K)])
+    np.testing.assert_allclose(
+        np.ravel(new_grads["treatment_params"]), propensity, rtol=1e-5, atol=1e-7
+    )
+
+    path = str(tmp_path / "old.weights.h5")
+    old.save_weights(path)
+    with pytest.raises(ValueError):
+        _new(name, kwargs).load_weights(path)
+
+
+def test_copy_legacy_weights_rejects_what_does_not_map():
+    """A toy model (its state network changed) and mismatched models raise ValueError."""
+    with pytest.raises(ValueError, match="toy"):
+        models.copy_legacy_weights(
+            reference.build_toy_model(K, F),
+            _new("build_toy_model", dict(n_states=K, n_features=F)),
+        )
+    name, kwargs = CASES["binary_normal-constant_scale-depth1"]
+    other = dict(kwargs, outcome_hidden_layers=[(7, "tanh")])
+    with pytest.raises(ValueError, match="does not map"):
+        models.copy_legacy_weights(getattr(reference, name)(**kwargs), _new(name, other))
+    exp_name, exp_kwargs = CASES["binary_exponential"]
+    with pytest.raises(ValueError, match="families"):
+        models.copy_legacy_weights(getattr(reference, name)(**kwargs), _new(exp_name, exp_kwargs))
+    name, kwargs = CASES["continuous_exponential"]
+    with pytest.raises(ValueError, match="different weights"):
+        models.copy_legacy_weights(
+            getattr(reference, name)(**kwargs), _new(name, dict(kwargs, n_states=2))
+        )
+
+
+# --- deprecated builders ---
+
+_DEPRECATED_CASES = {"toy": ("build_toy_model", dict(n_states=K, n_features=F)), **CASES}
+
+
+@pytest.mark.parametrize("case", sorted(_DEPRECATED_CASES))
+def test_deprecated_builders_warn_once_and_match_their_preset(case):
+    """One FutureWarning, pointing at the caller and naming the preset; the same model."""
+    name, kwargs = _DEPRECATED_CASES[case]
     with warnings.catch_warnings(record=True) as record:
         warnings.simplefilter("always")
         old = getattr(models, name)(**kwargs)
@@ -178,6 +253,36 @@ def test_deprecated_continuous_survival_builder_warns():
         )
     assert model.get_layer("log_scale_hidden_state_0").units == 3
     assert getattr(model, "optimizer", None) is None
+
+
+def test_binary_exponential_preset_fits_with_default_callbacks():
+    """The binary exponential preset trains on simulated survival data with the default
+    callbacks, which monitor its `causal_loss_metric`."""
+    from .. import datasets
+    from ..keras import callbacks
+
+    data = datasets.CancerSurvivalSimulator(seed=42).sample(n_samples=300)
+    inputs, outputs = data.to_keras_inputs_outputs()
+    tf.keras.utils.set_random_seed(10)
+    model = models.build_model(
+        **presets.binary_exponential(
+            n_states=3,
+            n_features=data.n_features,
+            predictive_state_hidden_layers=[(10, "selu"), (20, "relu")],
+            outcome_hidden_layers=[(30, "tanh"), (20, "selu")],
+            log_rate_layer=(20, "selu"),
+        )
+    )
+    history = model.fit(
+        inputs,
+        outputs,
+        validation_split=0.2,
+        epochs=2,
+        batch_size=32,
+        verbose=0,
+        callbacks=callbacks.get_default_callbacks(monitor="val_causal_loss_metric", patience=5),
+    )
+    assert np.isfinite(history.history["loss"]).all()
 
 
 # --- the presets ---
