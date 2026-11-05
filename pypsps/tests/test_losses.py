@@ -1,17 +1,14 @@
 """Test module for loss functions."""
 
 import random
-import warnings
 
 import numpy as np
 import pytest
 import tensorflow as tf
 
-from .. import datasets, utils
+from .. import datasets
 from ..keras import families, losses, mixture, models, neglogliks, presets
-
-# This module also covers the deprecated column-count API on purpose (removed in v0.5.0).
-pytestmark = pytest.mark.filterwarnings("ignore:.*removed in v0.5.0:FutureWarning")
+from ..keras.layout import ColumnLayout
 
 tfk = tf.keras
 
@@ -31,12 +28,11 @@ def test_psps_model_build_and_predict():
     model = models.build_model(
         **presets.toy(n_states=3, n_features=ks_data.n_features, compile=True)
     )
-    preds = model.predict(inputs)
-    outcome_params_pred, weights, propensity_score = utils.split_y_pred(preds, 2, 1)
+    parts = ColumnLayout.from_model(model).decode_pred(model.predict(inputs, verbose=0))
 
-    assert outcome_params_pred.shape == (1000, 3 * 2)  # (obs, states * 2) for (loc, scale)
-    assert propensity_score.shape[0] == 1000
-    assert weights.shape == (1000, 3)
+    assert {k: v.shape for k, v in parts.outcome.items()} == {"loc": (1000, 3), "scale": (1000, 3)}
+    assert parts.treatment["prob"].shape == (1000, 3)
+    assert parts.state_weights.shape == (1000, 3)
 
 
 @pytest.mark.parametrize(
@@ -49,22 +45,8 @@ def test_psps_causal_loss(reduction, expected_shape):
     random.seed(0)
     np.random.seed(0)
 
-    pypsps_outcome_loss = losses.OutcomeLoss(
-        loss=neglogliks.NegloglikNormal(reduction="none"),
-        treatment_loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
-        n_outcome_true_cols=1,
-        n_outcome_pred_cols=2,
-        n_treatment_pred_cols=1,
-        reduction=reduction,
-    )
-
-    pypsps_treat_loss = losses.TreatmentLoss(
-        loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
-        n_outcome_true_cols=1,
-        n_outcome_pred_cols=2,
-        n_treatment_pred_cols=1,
-        reduction=reduction,
-    )
+    pypsps_outcome_loss = _normal_outcome_loss(reduction)
+    pypsps_treat_loss = _treatment_loss(reduction)
     pypsps_causal_loss = losses.CausalLoss(
         outcome_loss=pypsps_outcome_loss,
         treatment_loss=pypsps_treat_loss,
@@ -100,21 +82,8 @@ def test_causal_loss_alpha_is_a_variable_assigned_not_rebound():
     updating an eager Python attribute the compiled training function never reads again -- the
     schedule would silently never reach the optimizer. This is the regression guard for that.
     """
-    outcome_loss = losses.OutcomeLoss(
-        loss=neglogliks.NegloglikNormal(reduction="none"),
-        treatment_loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
-        n_outcome_true_cols=1,
-        n_outcome_pred_cols=2,
-        n_treatment_pred_cols=1,
-        reduction="sum_over_batch_size",
-    )
-    treatment_loss = losses.TreatmentLoss(
-        loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
-        n_outcome_true_cols=1,
-        n_outcome_pred_cols=2,
-        n_treatment_pred_cols=1,
-        reduction="sum_over_batch_size",
-    )
+    outcome_loss = _normal_outcome_loss("sum_over_batch_size", n_states=2)
+    treatment_loss = _treatment_loss("sum_over_batch_size", n_states=2)
     causal_loss = losses.CausalLoss(
         outcome_loss=outcome_loss,
         treatment_loss=treatment_loss,
@@ -150,8 +119,8 @@ def test_causal_loss_alpha_is_a_variable_assigned_not_rebound():
 def _build_synthetic_preds(weights, locs, scales, treat_probs):
     """Builds a synthetic interleaved y_pred tensor for OutcomeLoss/TreatmentLoss.
 
-    All inputs have shape (n_rows, n_states). Layout matches utils.split_y_pred with
-    n_outcome_pred_cols=2 (Normal loc, scale) and n_treatment_pred_cols=1 (Bernoulli prob).
+    All inputs have shape (n_rows, n_states). The layout is Normal (loc, scale) outcome and
+    Bernoulli (prob) treatment.
     """
     return tf.constant(
         np.concatenate([locs, scales, weights, treat_probs], axis=1), dtype=tf.float32
@@ -172,17 +141,19 @@ def _outcome_likelihood_fixture(n_rows=16, n_states=3, seed=0):
     return y_true, y_pred, (weights, locs, scales, outcome_true)
 
 
-def _normal_outcome_loss(reduction="none", **kwargs):
+def _normal_bernoulli_mixture(n_states=3):
+    """A Normal outcome and Bernoulli treatment mixture."""
+    return mixture.StateMixture(families.Normal(), families.Bernoulli(), n_states=n_states)
+
+
+def _normal_outcome_loss(reduction="none", n_states=3, **kwargs):
     """OutcomeLoss for a normal outcome and a binary treatment."""
-    return losses.OutcomeLoss(
-        loss=neglogliks.NegloglikNormal(reduction="none"),
-        treatment_loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
-        n_outcome_true_cols=1,
-        n_outcome_pred_cols=2,
-        n_treatment_pred_cols=1,
-        reduction=reduction,
-        **kwargs,
-    )
+    return losses.OutcomeLoss(_normal_bernoulli_mixture(n_states), reduction=reduction, **kwargs)
+
+
+def _treatment_loss(reduction="none", n_states=3):
+    """TreatmentLoss for a normal outcome and a binary treatment."""
+    return losses.TreatmentLoss(_normal_bernoulli_mixture(n_states), reduction=reduction)
 
 
 def test_outcome_likelihood_accepts_strings_and_rejects_unknown_values():
@@ -220,13 +191,7 @@ def test_penalty_free_keeps_outcome_likelihood():
 
 def test_causal_loss_shares_an_alpha_variable():
     """A float32 tf.Variable alpha is used as is; other dtypes are refused."""
-    treatment = losses.TreatmentLoss(
-        loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
-        n_outcome_true_cols=1,
-        n_outcome_pred_cols=2,
-        n_treatment_pred_cols=1,
-        reduction="sum_over_batch_size",
-    )
+    treatment = _treatment_loss("sum_over_batch_size")
     alpha = tf.Variable(3.0, trainable=False, dtype=tf.float32)
     causal = losses.CausalLoss(_normal_outcome_loss("sum_over_batch_size"), treatment, alpha=alpha)
     assert causal.alpha is alpha
@@ -238,58 +203,45 @@ def test_causal_loss_shares_an_alpha_variable():
         )
 
 
-def _normal_bernoulli_mixture(n_states=None):
-    """The mixture the legacy Normal/BCE constructors map to."""
-    return mixture.StateMixture(families.Normal(), families.Bernoulli(), n_states=n_states)
-
-
 @pytest.mark.parametrize("likelihood", ["interventional", "observational"])
-@pytest.mark.parametrize("reduction", ["none", "sum", "sum_over_batch_size"])
-def test_mixture_constructor_matches_legacy_constructor(likelihood, reduction):
-    """OutcomeLoss(mixture) / TreatmentLoss(mixture) equal the three-int constructors."""
+def test_outcome_likelihood_is_the_second_positional_argument(likelihood):
+    """OutcomeLoss(mixture, likelihood) equals the keyword form."""
     y_true, y_pred, _ = _outcome_likelihood_fixture()
-    mix = _normal_bernoulli_mixture(n_states=3)
-    legacy = _normal_outcome_loss(reduction, outcome_likelihood=likelihood)
-    assert legacy.mixture == _normal_bernoulli_mixture()
-    new = losses.OutcomeLoss(mix, likelihood, reduction=reduction)  # positional likelihood
-    assert new.outcome_likelihood is losses.OutcomeLikelihood(likelihood)
-    np.testing.assert_array_equal(new(y_true, y_pred).numpy(), legacy(y_true, y_pred).numpy())
-
-    legacy_t = losses.TreatmentLoss(
-        tf.keras.losses.BinaryCrossentropy(reduction="none"), 1, 2, 1, reduction=reduction
+    positional = losses.OutcomeLoss(_normal_bernoulli_mixture(), likelihood, reduction="none")
+    assert positional.outcome_likelihood is losses.OutcomeLikelihood(likelihood)
+    np.testing.assert_array_equal(
+        positional(y_true, y_pred).numpy(),
+        _normal_outcome_loss(outcome_likelihood=likelihood)(y_true, y_pred).numpy(),
     )
-    new_t = losses.TreatmentLoss(mix, reduction=reduction)
-    np.testing.assert_array_equal(new_t(y_true, y_pred).numpy(), legacy_t(y_true, y_pred).numpy())
 
 
-def test_legacy_loss_keeps_its_nlls_and_counts():
-    """The legacy view metrics, utils and inference still read until they take the mixture."""
-    loss = _normal_outcome_loss()
-    assert isinstance(loss._loss, neglogliks.NegloglikNormal)
-    assert isinstance(loss._treatment_loss, tf.keras.losses.BinaryCrossentropy)
-    assert (loss._n_outcome_true_cols, loss._n_outcome_pred_cols, loss._n_treatment_pred_cols) == (
-        1,
-        2,
-        1,
-    )
-    new = losses.OutcomeLoss(_normal_bernoulli_mixture(3))
-    assert not hasattr(new, "_loss") and new._n_outcome_pred_cols == 2
-
-
-def test_constructor_errors():
-    """Mixture and legacy arguments don't mix; the legacy form needs every count."""
-    mix = _normal_bernoulli_mixture(3)
+def test_constructors_take_only_a_mixture():
+    """The three-int constructors are gone (v0.5.0): anything but a StateMixture raises."""
+    nll = neglogliks.NegloglikNormal(reduction="none")
     bce = tf.keras.losses.BinaryCrossentropy(reduction="none")
-    with pytest.raises(TypeError, match="not both"):
-        losses.OutcomeLoss(mix, n_outcome_true_cols=1)
-    with pytest.raises(TypeError, match="not both"):
-        losses.TreatmentLoss(mix, loss=bce)
-    with pytest.raises(TypeError, match="n_treatment_pred_cols"):
-        losses.TreatmentLoss(bce, 1, 2)
-    with pytest.raises(ValueError, match="reduction='none'"):
-        losses.TreatmentLoss(tf.keras.losses.BinaryCrossentropy(), 1, 2, 1)
-    with pytest.raises(ValueError, match="maps to Normal"):
-        losses.OutcomeLoss(neglogliks.NegloglikNormal(reduction="none"), bce, 1, 1, 1)
+    with pytest.raises(TypeError, match="takes a StateMixture"):
+        losses.OutcomeLoss(nll, bce)
+    with pytest.raises(TypeError, match="takes a StateMixture"):
+        losses.TreatmentLoss(bce)
+    with pytest.raises(TypeError):
+        losses.OutcomeLoss(loss=nll, treatment_loss=bce, n_outcome_true_cols=1)
+
+
+@pytest.mark.parametrize("cls", [losses.OutcomeLoss, losses.TreatmentLoss])
+def test_a_legacy_config_raises(cls):
+    """A v0.3.0-v0.3.3 config (column counts, no mixture) raises with the migration path."""
+    config = {
+        "name": "loss",
+        "reduction": "sum_over_batch_size",
+        "loss": tf.keras.utils.serialize_keras_object(
+            tf.keras.losses.BinaryCrossentropy(reduction="none")
+        ),
+        "n_outcome_true_cols": 1,
+        "n_outcome_pred_cols": 2,
+        "n_treatment_pred_cols": 1,
+    }
+    with pytest.raises(ValueError, match="no 'mixture'.*compile=False"):
+        cls.from_config(config)
 
 
 def test_causal_loss_shares_one_mixture_and_rejects_a_mismatch():
@@ -303,34 +255,8 @@ def test_causal_loss_shares_one_mixture_and_rejects_a_mismatch():
         losses.CausalLoss(losses.OutcomeLoss(a), losses.TreatmentLoss(other))
 
 
-def test_legacy_causal_loss_warns_on_a_treatment_mismatch():
-    """Decision A6: the legacy path warns (raises from v0.5.0); a match links the mixtures."""
-    treatment = losses.TreatmentLoss(
-        neglogliks.NegloglikNormal(reduction="none"), 1, 2, 2, reduction="none"
-    )
-    outcome = losses.OutcomeLoss(
-        neglogliks.NegloglikNormal(reduction="none"),
-        tf.keras.losses.BinaryCrossentropy(reduction="none"),
-        1,
-        2,
-        1,
-        reduction="none",
-    )
-    with pytest.warns(FutureWarning, match="v0.5.0"):
-        losses.CausalLoss(outcome, treatment, reduction="none")
-    assert treatment.mixture is not outcome.mixture
-
-    matching = losses.TreatmentLoss(
-        tf.keras.losses.BinaryCrossentropy(reduction="none"), 1, 2, 1, reduction="none"
-    )
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", FutureWarning)
-        causal = losses.CausalLoss(outcome, matching, reduction="none")
-    assert causal._treatment_loss.mixture is outcome.mixture
-
-
-def test_from_mixture_equals_the_legacy_causal_loss():
-    """CausalLoss.from_mixture gives the legacy value, regularizer included."""
+def test_from_mixture_equals_the_composed_causal_loss():
+    """CausalLoss.from_mixture equals CausalLoss of the two losses, regularizer included."""
     y_true, y_pred, _ = _outcome_likelihood_fixture(seed=5)
     reg = tf.keras.regularizers.L2(0.1)
     new = losses.CausalLoss.from_mixture(
@@ -340,17 +266,13 @@ def test_from_mixture_equals_the_legacy_causal_loss():
         outcome_loss_weight=0.5,
         predictive_states_regularizer=reg,
     )
-    legacy = losses.CausalLoss(
+    composed = losses.CausalLoss(
         _normal_outcome_loss("sum_over_batch_size", outcome_likelihood="observational"),
-        losses.TreatmentLoss(
-            tf.keras.losses.BinaryCrossentropy(reduction="none"),
-            1,
-            2,
-            1,
-            reduction="sum_over_batch_size",
-        ),
+        _treatment_loss("sum_over_batch_size"),
         alpha=2.0,
         outcome_loss_weight=0.5,
         predictive_states_regularizer=reg,
     )
-    np.testing.assert_allclose(float(new(y_true, y_pred)), float(legacy(y_true, y_pred)), rtol=1e-6)
+    np.testing.assert_allclose(
+        float(new(y_true, y_pred)), float(composed(y_true, y_pred)), rtol=1e-6
+    )

@@ -16,7 +16,7 @@ def test_ute_binary_works_for_exponential_survival_model():
 
     Previously hardcoded n_outcome_pred_cols=2 (Normal-only), which silently mis-sliced columns
     for this model's n_outcome_pred_cols=1 (log_rate) and returned a meaningless number with no
-    error -- see get_column_layout.
+    error. The outcome family now comes from the model's StateMixture.
     """
     np.random.seed(10)
     simulator = datasets.CancerSurvivalSimulator(seed=42)

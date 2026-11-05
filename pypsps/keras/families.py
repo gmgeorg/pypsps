@@ -10,13 +10,12 @@ Every per-state method takes ``{param name: [N, K]}`` blocks (as `ColumnLayout.d
 returns them) and gives ``[N, K]``: one value per unit and state.
 
 Built-in families: `Normal`, `Bernoulli`, `Exponential` and `Weibull`. `LossFamily` wraps any
-elementwise Keras loss, and `from_negloglik` maps the legacy `neglogliks` losses onto the
-built-in families. `get` looks a family up by name.
+elementwise Keras loss. `get` looks a family up by name.
 """
 
 import abc
 import dataclasses
-from typing import Any, Mapping, Optional, Union
+from typing import Any, Mapping, Optional
 
 import numpy as np
 import tensorflow as tf
@@ -574,41 +573,3 @@ def get(name: str, **kwargs: Any) -> Family:
     if key not in _BY_NAME:
         raise ValueError(f"unknown family {name!r}; known: {tuple(_BY_NAME)}")
     return _BY_NAME[key](**kwargs)
-
-
-def from_negloglik(
-    loss: Union[tf.keras.losses.Loss, Any], n_params: int, n_true_cols: int
-) -> Family:
-    """Maps a legacy elementwise loss onto a family (adapter for the three-int interfaces).
-
-    `neglogliks.NegloglikNormal`, `NegloglikExponential`, `NegloglikExponentialScale`,
-    `NegloglikWeibull` and a plain `tf.keras.losses.BinaryCrossentropy` map to the built-in
-    families; anything else becomes a `LossFamily`.
-
-    Raises:
-      ValueError: if ``n_params`` or ``n_true_cols`` don't match a built-in family's.
-    """
-    family: Optional[Family] = None
-    if isinstance(loss, neglogliks.NegloglikNormal):
-        family = Normal()
-    elif isinstance(loss, neglogliks.NegloglikExponential):
-        family = Exponential("log_rate" if loss._log_rate else "rate")
-    elif isinstance(loss, neglogliks.NegloglikExponentialScale):
-        family = Exponential("log_scale")
-    elif isinstance(loss, neglogliks.NegloglikWeibull):
-        family = Weibull()
-    elif (
-        isinstance(loss, tf.keras.losses.BinaryCrossentropy)
-        and not getattr(loss, "from_logits", False)
-        and not getattr(loss, "label_smoothing", 0.0)
-    ):
-        family = Bernoulli()
-    if family is None:
-        return LossFamily(loss, n_params=n_params, n_true_cols=n_true_cols)
-    if (len(family.params), family.n_true_cols) != (int(n_params), int(n_true_cols)):
-        raise ValueError(
-            f"{type(loss).__name__} maps to {type(family).__name__}, which has "
-            f"{len(family.params)} params and {family.n_true_cols} y_true columns; got "
-            f"n_params={n_params}, n_true_cols={n_true_cols}"
-        )
-    return family

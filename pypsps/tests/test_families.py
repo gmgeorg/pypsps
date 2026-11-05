@@ -9,9 +9,7 @@ import tensorflow as tf
 
 from ..keras import families, neglogliks
 from ..keras.layout import ColumnLayout
-
-# This module also covers the deprecated column-count API on purpose (removed in v0.5.0).
-pytestmark = pytest.mark.filterwarnings("ignore:.*removed in v0.5.0:FutureWarning")
+from . import _reference_v0_2 as ref
 
 _N, _K = 6, 3
 
@@ -115,8 +113,8 @@ _LEGACY_LOSSES = {
 
 
 @pytest.mark.parametrize("name", _IDS)
-def test_nll_matches_existing_negloglik_per_state(name):
-    """Family.nll equals the per-state loop over the public losses to float32 rounding.
+def test_nll_matches_the_per_state_loop(name):
+    """Family.nll equals the frozen per-state loop over the public losses to float32 rounding.
 
     Not bit for bit: TensorFlow's vectorized float32 log/exp can round an element differently
     depending on its position in the tensor, and the loop sees [N] columns where the family
@@ -127,7 +125,7 @@ def test_nll_matches_existing_negloglik_per_state(name):
     layout = ColumnLayout(family.param_names, ("prob",), family.n_true_cols, n_states=_K)
     y_pred = layout.encode(p, np.full((_N, _K), 1.0 / _K, "float32"), np.zeros((_N, _K), "f4"))
     outcome_block = y_pred[:, : _K * len(family.params)]
-    legacy = neglogliks.negloglik_per_state(
+    legacy = ref._negloglik_per_state(
         _LEGACY_LOSSES[name], tf.constant(y), tf.constant(outcome_block), n_states=_K
     )
     new = family.nll(tf.constant(y), layout.decode_pred(tf.constant(y_pred)).outcome)
@@ -305,34 +303,11 @@ def test_exponential_routes_to_private_impl(parameterization, private_nll):
         families.Exponential("scale")
 
 
-def test_from_negloglik_maps_each_legacy_loss():
-    """Each legacy loss maps to its family; counts must match."""
-    cases = [
-        (neglogliks.NegloglikNormal(reduction="none"), 2, 1, families.Normal()),
-        (tf.keras.losses.BinaryCrossentropy(reduction="none"), 1, 1, families.Bernoulli()),
-        (
-            neglogliks.NegloglikExponential("none", log_rate=True),
-            1,
-            2,
-            families.Exponential("log_rate"),
-        ),
-        (neglogliks.NegloglikExponential("none"), 1, 2, families.Exponential("rate")),
-        (neglogliks.NegloglikExponentialScale("none"), 1, 2, families.Exponential("log_scale")),
-        (neglogliks.NegloglikWeibull("none"), 2, 2, families.Weibull()),
-    ]
-    for loss, n_params, n_true, expected in cases:
-        assert families.from_negloglik(loss, n_params, n_true) == expected
-    with pytest.raises(ValueError, match="maps to Normal"):
-        families.from_negloglik(neglogliks.NegloglikNormal(reduction="none"), 1, 1)
-    smoothed = tf.keras.losses.BinaryCrossentropy(label_smoothing=0.1, reduction="none")
-    assert isinstance(families.from_negloglik(smoothed, 1, 1), families.LossFamily)
-
-
 def test_loss_family_wraps_custom_loss_and_mean_raises():
     """LossFamily loops a custom elementwise loss over states; its mean is unknown."""
     mse = tf.keras.losses.MeanSquaredError(reduction="none")
-    family = families.from_negloglik(mse, n_params=1, n_true_cols=1)
-    assert isinstance(family, families.LossFamily) and family.param_names == ("param_0",)
+    family = families.LossFamily(mse, n_params=1, n_true_cols=1)
+    assert family.param_names == ("param_0",)
     y = np.arange(_N, dtype="float32")[:, None]
     p = {"param_0": np.ones((_N, _K), "float32")}
     np.testing.assert_allclose(family.nll(y, p).numpy(), np.tile((y - 1) ** 2, (1, _K)))

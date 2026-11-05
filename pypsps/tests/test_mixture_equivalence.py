@@ -12,9 +12,6 @@ import tensorflow as tf
 from ..keras import families, losses, mixture, neglogliks
 from . import _reference_v0_2 as ref
 
-# This module also covers the deprecated column-count API on purpose (removed in v0.5.0).
-pytestmark = pytest.mark.filterwarnings("ignore:.*removed in v0.5.0:FutureWarning")
-
 _N = 12
 
 _CASES = {
@@ -96,7 +93,7 @@ def _assert_close(new, old):
 @pytest.mark.parametrize("likelihood", ["interventional", "observational"])
 @pytest.mark.parametrize("case", list(_CASES))
 def test_mixture_matches_reference(case, likelihood, reduction, n_states):
-    """StateMixture.outcome_nll / treatment_nll + reduce equal today's loss math."""
+    """StateMixture.outcome_nll / treatment_nll + reduce equal the frozen loss math."""
     outcome_family, treatment_family, loss, treatment_loss = _CASES[case]
     mix, y_true, y_pred = _data(outcome_family, treatment_family, n_states)
     ints = dict(
@@ -127,10 +124,9 @@ def test_mixture_matches_reference(case, likelihood, reduction, n_states):
 @pytest.mark.parametrize("n_states", [1, 3])
 @pytest.mark.parametrize("reduction", ["none", "sum", "sum_over_batch_size"])
 @pytest.mark.parametrize("likelihood", ["interventional", "observational"])
-@pytest.mark.parametrize("path", ["mixture", "legacy"])
 @pytest.mark.parametrize("case", list(_CASES))
-def test_losses_match_reference(case, path, likelihood, reduction, n_states):
-    """OutcomeLoss / TreatmentLoss, built either way, equal today's loss math."""
+def test_losses_match_reference(case, likelihood, reduction, n_states):
+    """OutcomeLoss / TreatmentLoss equal the frozen loss math."""
     outcome_family, treatment_family, loss, treatment_loss = _CASES[case]
     mix, y_true, y_pred = _data(outcome_family, treatment_family, n_states)
     ints = dict(
@@ -138,14 +134,8 @@ def test_losses_match_reference(case, path, likelihood, reduction, n_states):
         n_outcome_pred_cols=len(outcome_family.params),
         n_treatment_pred_cols=len(treatment_family.params),
     )
-    if path == "mixture":
-        outcome = losses.OutcomeLoss(mix, likelihood, reduction=reduction)
-        treatment = losses.TreatmentLoss(mix, reduction=reduction)
-    else:
-        outcome = losses.OutcomeLoss(
-            loss, treatment_loss, outcome_likelihood=likelihood, reduction=reduction, **ints
-        )
-        treatment = losses.TreatmentLoss(treatment_loss, reduction=reduction, **ints)
+    outcome = losses.OutcomeLoss(mix, likelihood, reduction=reduction)
+    treatment = losses.TreatmentLoss(mix, reduction=reduction)
     _assert_close(
         _value_and_grad(lambda y: outcome(y_true, y), y_pred),
         _value_and_grad(

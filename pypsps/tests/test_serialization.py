@@ -12,12 +12,9 @@ import pytest
 import tensorflow as tf
 
 from .. import datasets, inference
-from ..keras import families, losses, metrics, mixture, models, neglogliks, presets
+from ..keras import families, losses, metrics, mixture, models, presets
 from ..keras.layout import ColumnLayout
 from ._continuous import continuous_model, synthetic_continuous_survival
-
-# This module also covers the deprecated column-count API on purpose (removed in v0.5.0).
-pytestmark = pytest.mark.filterwarnings("ignore:.*removed in v0.5.0:FutureWarning")
 
 
 def _small(preset, **extra):
@@ -102,25 +99,13 @@ def test_causal_loss_metric_ignores_the_training_alpha_after_a_reload(tmp_path):
 
 
 def _causal_loss(alpha=2.0, regularizer=None) -> losses.CausalLoss:
-    treatment_nll = tf.keras.losses.BinaryCrossentropy(reduction="none")
-    kwargs = dict(
-        n_outcome_true_cols=1,
-        n_outcome_pred_cols=2,
-        n_treatment_pred_cols=1,
-        reduction="sum_over_batch_size",
-    )
-    return losses.CausalLoss(
-        outcome_loss=losses.OutcomeLoss(
-            loss=neglogliks.NegloglikNormal(reduction="none"),
-            treatment_loss=treatment_nll,
-            outcome_likelihood="observational",
-            **kwargs,
-        ),
-        treatment_loss=losses.TreatmentLoss(loss=treatment_nll, **kwargs),
+    """A Normal/Bernoulli K=2 causal loss with the observational likelihood."""
+    return losses.CausalLoss.from_mixture(
+        mixture.StateMixture(families.Normal(), families.Bernoulli(), n_states=2),
         alpha=alpha,
+        outcome_likelihood="observational",
         outcome_loss_weight=0.5,
         predictive_states_regularizer=regularizer,
-        reduction="sum_over_batch_size",
     )
 
 
@@ -226,42 +211,34 @@ def test_load_in_a_fresh_process_after_import_pypsps_keras(tmp_path):
 
 
 _FIXTURES = pathlib.Path(__file__).parent / "fixtures" / "three_int"
-_FIXTURE_BUILDERS = {
-    "toy": _BUILDERS[0][1],
-    "binary_normal": _BUILDERS[1][1],
-    "binary_exponential": _BUILDERS[2][1],
-    "continuous_exponential": _BUILDERS[3][1],
-    "continuous_weibull": _BUILDERS[4][1],
-}
+_FIXTURE_NAMES = [
+    "toy",
+    "binary_normal",
+    "binary_exponential",
+    "continuous_exponential",
+    "continuous_weibull",
+]
 
 
-@pytest.mark.parametrize("name", list(_FIXTURE_BUILDERS))
-def test_three_int_configs_still_load(name):
-    """A loss config saved by v0.3.0 (three ints, nested NLLs) loads and gives today's value.
-
-    The fixtures were written by v0.3.0's builders with alpha = 2.5. Delete in v0.5.0 with
-    the legacy from_config branch.
-    """
+@pytest.mark.parametrize("name", _FIXTURE_NAMES)
+def test_three_int_loss_configs_raise(name):
+    """A loss config saved by v0.3.0 (three ints, nested NLLs) raises since v0.5.0, naming the
+    migration: load with compile=False and compile again."""
     config = json.loads((_FIXTURES / f"{name}_loss.json").read_text())
     assert "n_outcome_pred_cols" in config["config"]["outcome_loss"]["config"]
-    loaded = tf.keras.utils.deserialize_keras_object(config)
-    assert isinstance(loaded, losses.CausalLoss)
-    assert float(loaded.alpha) == 2.5
-    assert loaded._treatment_loss.mixture is loaded.mixture
+    with pytest.raises(ValueError, match="no 'mixture'.*compile=False"):
+        tf.keras.utils.deserialize_keras_object(config)
 
-    model, inputs, outputs = _FIXTURE_BUILDERS[name]()
-    model.loss.alpha = 2.5
-    y_pred = tf.constant(model.predict(inputs, verbose=0))
-    y_true = tf.constant(outputs, tf.float32)
-    np.testing.assert_allclose(
-        float(loaded(y_true, y_pred)), float(model.loss(y_true, y_pred)), rtol=1e-6
-    )
-    # Saving again writes the mixture schema, which loads to the same value.
-    again = tf.keras.utils.deserialize_keras_object(tf.keras.utils.serialize_keras_object(loaded))
-    assert "mixture" in again._outcome_loss.get_config()
-    np.testing.assert_allclose(
-        float(again(y_true, y_pred)), float(loaded(y_true, y_pred)), rtol=1e-6
-    )
+
+@pytest.mark.parametrize("name", _FIXTURE_NAMES)
+def test_three_int_metric_configs_raise(name):
+    """Every pypsps metric config saved by v0.3.0 raises the same way."""
+    configs = json.loads((_FIXTURES / f"{name}_metrics.json").read_text())
+    pypsps_configs = [c for c in configs if (c.get("registered_name") or "").startswith("pypsps>")]
+    assert pypsps_configs
+    for config in pypsps_configs:
+        with pytest.raises(ValueError, match="no 'mixture'.*compile=False"):
+            tf.keras.utils.deserialize_keras_object(config)
 
 
 class _PenalizedOutcomeLoss(losses.OutcomeLoss):
@@ -300,44 +277,6 @@ def test_causal_loss_from_config_shares_one_mixture():
     assert rebuilt._outcome_loss.mixture is rebuilt._treatment_loss.mixture
 
 
-def _metric_value(metric, y_true, y_pred) -> float:
-    """One-shot value of a stateful metric: reset, update once, read."""
-    metric.reset_state()
-    metric.update_state(y_true, y_pred)
-    return float(metric.result())
-
-
-@pytest.mark.parametrize("name", list(_FIXTURE_BUILDERS))
-def test_three_int_metric_configs_still_load(name):
-    """The compiled metrics saved by v0.3.0 (three ints, int generator kwargs) load, and each
-    equals today's metric of the same name.
-
-    The values agree because v0.3.0's builders only used counts that the shape rule maps
-    onto the right family: Normal (2, 1) and the 1-parameter identity. Delete in v0.5.0.
-    """
-    configs = json.loads((_FIXTURES / f"{name}_metrics.json").read_text())
-    model, inputs, outputs = _FIXTURE_BUILDERS[name]()
-    current = {
-        m.name: m
-        for m in map(tf.keras.utils.deserialize_keras_object, model.get_compile_config()["metrics"])
-    }
-    y_pred = tf.constant(model.predict(inputs, verbose=0))
-    y_true = tf.constant(outputs, tf.float32)
-    # Since v0.3.7 continuous models also have the two mean-squared-error metrics.
-    assert {c["config"]["name"] for c in configs} <= set(current)
-    for config in configs:
-        assert "mixture" not in config["config"]
-        loaded = tf.keras.utils.deserialize_keras_object(config)
-        if isinstance(loaded, metrics.OutcomeMeanSquaredError):
-            assert loaded.mixture.outcome_family == families.Normal()
-        np.testing.assert_allclose(
-            _metric_value(loaded, y_true, y_pred),
-            _metric_value(current[loaded.name], y_true, y_pred),
-            rtol=1e-5,
-            err_msg=loaded.name,
-        )
-
-
 @pytest.mark.parametrize("builder_id", ["toy", "binary_normal", "binary_exponential"])
 def test_propensity_metric_name_aupr(builder_id):
     """The binary builders compile the PR-curve AUC as propensity_score_aupr (decision B1b),
@@ -374,8 +313,7 @@ def test_compile_false_reload_runs_inference(factory, tmp_path):
 
 _WEIGHTS_LAYOUT_DIR = pathlib.Path(__file__).parent / "fixtures" / "weights_layout"
 _HIDDEN = dict(predictive_state_hidden_layers=[(5, "selu")], outcome_hidden_layers=[(5, "selu")])
-# Binary and toy weight files changed in v0.4.0 (one treatment head); test_presets pins that
-# their old files don't load and copy_legacy_weights maps them.
+# Binary and toy weight files changed in v0.4.0 (one treatment head) and don't load.
 _WEIGHTS_LAYOUT_BUILDERS = {
     "continuous_weibull": lambda: models.build_model(
         **presets.continuous_weibull(

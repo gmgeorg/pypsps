@@ -634,21 +634,10 @@ def test_propensity_means_for_every_model(tmp_path):
     np.testing.assert_allclose(get(reloaded).numpy(), get(continuous).numpy(), rtol=1e-6)
 
 
-def test_propensity_means_of_a_pre_v0_3_4_model():
-    """A model without CausalOutput or a pypsps loss falls back to its propensity layer names."""
+def test_propensity_means_need_a_mixture():
+    """A model with neither a CausalOutput layer nor a pypsps loss (saved before v0.3.4 and
+    loaded with compile=False) raises: there is no layer-name fallback since v0.5.0."""
     features = tf.keras.Input((F,), name="features")
-    logits = [
-        layers.BiasOnly(
-            initializer=tf.keras.initializers.Constant(v), name=f"propensity_logit_state_{k}"
-        )(features)
-        for k, v in enumerate([0.0, 1.0])
-    ]
-    propensity = tf.keras.layers.Concatenate(name="propensity_score")(
-        [tf.keras.layers.Activation("sigmoid")(x) for x in logits]
-    )
-    model = tf.keras.Model(features, propensity)
-    np.testing.assert_allclose(
-        models.get_propensity_state_conditional_means(model).numpy(),
-        [[0.5], [tf.sigmoid(1.0).numpy()]],
-        rtol=1e-6,
-    )
+    model = tf.keras.Model(features, tf.keras.layers.Dense(2)(features))
+    with pytest.raises(RuntimeError, match="CausalOutput"):
+        models.get_propensity_state_conditional_means(model)

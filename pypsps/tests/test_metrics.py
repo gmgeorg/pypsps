@@ -1,4 +1,4 @@
-"""Tests for the pypsps metrics: family means, censoring, configs and the legacy forms."""
+"""Tests for the pypsps metrics: family means, censoring, configs and argument checks."""
 
 import math
 
@@ -6,12 +6,8 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
-from pypsps import utils
-from pypsps.keras import families, losses, metrics, mixture, neglogliks
+from pypsps.keras import families, losses, metrics, mixture
 from pypsps.keras.layout import ColumnLayout
-
-# This module also covers the deprecated column-count API on purpose (removed in v0.5.0).
-pytestmark = pytest.mark.filterwarnings("ignore:.*removed in v0.5.0:FutureWarning")
 
 
 def _make_y_pred(outcome_blocks, weights, treatment_blocks):
@@ -142,8 +138,6 @@ def test_outcome_errors_mix_family_means_not_raw_params(cls, error):
     np.testing.assert_allclose(
         _metric_value(cls(_NORMAL_BERNOULLI), y_true, y_pred), 0.0, atol=1e-6
     )
-    raw_mix = utils.agg_outcome_pred(y_pred, n_outcome_pred_cols=2, n_treatment_pred_cols=1)
-    assert error(y - np.asarray(raw_mix)).mean() > 0.5  # what the metric used to report
 
     mix = mixture.StateMixture(families.Weibull(), families.Bernoulli(), n_states=2)
     log_scale = np.array([[0.0, 1.0], [0.5, -0.5]])
@@ -337,80 +331,53 @@ def test_early_stopping_with_nan_first_epoch():
     assert len(history.history["loss"]) == 3
 
 
-# --- the legacy three-int form and its shape rule (decision A1) ---
+# --- argument checks ---
 
 
-def test_shape_rule_maps_counts_onto_families():
-    """(2 params, 1 col) is Normal, 1 param is the identity, anything else asks for mixture=."""
-    normal = metrics.OutcomeMeanSquaredError(2, 1, 1)
-    assert normal.mixture.outcome_family == families.Normal()
-    y_true, y_pred, _ = _binary_fixture()
+def test_metrics_take_only_a_mixture():
+    """The column-count constructors are gone (v0.5.0): counts or nothing raise TypeError."""
+    with pytest.raises(TypeError, match="takes a StateMixture"):
+        metrics.OutcomeMeanSquaredError(2)
+    with pytest.raises(TypeError):
+        metrics.OutcomeMeanSquaredError(2, 1, 1)
+    with pytest.raises(TypeError):
+        metrics.PropensityScoreBinaryCrossentropy(n_outcome_pred_cols=2, n_treatment_pred_cols=1)
+    with pytest.raises(TypeError):
+        metrics.OutcomeMeanSquaredError()
+    for gen in (metrics.predictive_state_df_gen, metrics.uniform_entropy_gen):
+        with pytest.raises(TypeError, match="takes a ColumnLayout"):
+            gen(2)
+        with pytest.raises(TypeError):
+            gen(2, 1)
+        with pytest.raises(TypeError):
+            gen()
+
+
+def test_state_weight_generators_read_the_weights_through_the_layout():
+    """predictive_state_df is tr_kernel of the state weights; uniform_entropy their mean
+    Shannon entropy."""
+    import pypress.utils
+
+    weights = _WEIGHTS[:3]
+    y_pred = _make_y_pred([np.zeros((3, 2))], weights, [np.zeros((3, 2))])
+    layout = ColumnLayout(("loc",), ("prob",), 1, n_states=2)
     np.testing.assert_allclose(
-        _metric_value(normal, y_true, y_pred),
-        _metric_value(metrics.OutcomeMeanSquaredError(_NORMAL_BERNOULLI), y_true, y_pred),
+        float(metrics.predictive_state_df_gen(layout)(None, y_pred)),
+        float(pypress.utils.tr_kernel(tf.constant(weights, tf.float32))),
         rtol=1e-6,
     )
-
-    identity = metrics.OutcomeMeanSquaredError(1, 1, 1)
-    y_pred = tf.constant([[5.0, 1.0, 0.0], [10.0, 1.0, 0.0]])
-    assert _metric_value(identity, tf.constant([[5.0, 0.0], [12.0, 1.0]]), y_pred) == 2.0
-
-    for counts in [(2, 1, 2), (3, 1, 1)]:
-        with pytest.raises(ValueError, match="mixture="):
-            metrics.OutcomeMeanSquaredError(*counts)
-    with pytest.raises(ValueError, match="mixture="):
-        metrics.TreatmentMeanSquaredError(n_outcome_pred_cols=2, n_treatment_pred_cols=3,
-                                          n_outcome_true_cols=1)  # fmt: skip
-
-
-def test_legacy_propensity_metric_reads_the_last_column():
-    """The two-int propensity form doesn't know C, so it keeps reading y_true[:, -1:]."""
-    y_true, y_pred, marginal = _binary_fixture()
-    expected = tf.keras.metrics.BinaryCrossentropy()
-    expected.update_state(y_true[:, -1:], marginal)
-    legacy = metrics.PropensityScoreBinaryCrossentropy(
-        n_outcome_pred_cols=2, n_treatment_pred_cols=1
-    )
     np.testing.assert_allclose(
-        _metric_value(legacy, y_true, y_pred), float(expected.result()), rtol=1e-5
+        float(metrics.uniform_entropy_gen(layout)(None, y_pred)),
+        (-(weights * np.log(weights)).sum(axis=1)).mean(),
+        rtol=1e-6,
     )
-
-
-def test_metric_constructor_errors():
-    """A mixture and counts together, or neither, raise TypeError."""
-    with pytest.raises(TypeError, match="not both"):
-        metrics.OutcomeMeanSquaredError(_NORMAL_BERNOULLI, n_outcome_true_cols=1)
-    with pytest.raises(TypeError, match="StateMixture"):
-        metrics.OutcomeMeanSquaredError()
-    with pytest.raises(TypeError, match="ColumnLayout"):
-        metrics.uniform_entropy_gen()
-    with pytest.raises(TypeError, match="not both"):
-        metrics.uniform_entropy_gen(_NORMAL_BERNOULLI.layout, n_treatment_pred_cols=1)
-
-
-def test_predictive_state_df_gen():
-    """The state-weight generators take a layout; the legacy counts give the same value."""
-    y_pred = _make_y_pred([np.zeros((3, 2))], _WEIGHTS[:3], [np.zeros((3, 2))])
-    layout = ColumnLayout.from_counts(1, 1, 1, n_states=2)
-    for gen in (metrics.predictive_state_df_gen, metrics.uniform_entropy_gen):
-        value = float(gen(layout)(None, y_pred))
-        np.testing.assert_allclose(float(gen(1, 1)(None, y_pred)), value, rtol=1e-7)
-        np.testing.assert_allclose(
-            float(gen(n_outcome_pred_cols=1, n_treatment_pred_cols=1)(None, y_pred)), value
-        )
 
 
 def _make_treatment_loss(**overrides):
     """Builds a plain (no-penalty) `TreatmentLoss` with sensible test defaults."""
-    kwargs = dict(
-        loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
-        n_outcome_true_cols=1,
-        n_outcome_pred_cols=2,
-        n_treatment_pred_cols=1,
-        reduction="sum_over_batch_size",
-    )
+    kwargs = dict(reduction="sum_over_batch_size")
     kwargs.update(overrides)
-    return losses.TreatmentLoss(**kwargs)
+    return losses.TreatmentLoss(_NORMAL_BERNOULLI, **kwargs)
 
 
 def test_treatment_loss_penalty_free_is_identity_when_no_penalty_declared():
@@ -420,9 +387,7 @@ def test_treatment_loss_penalty_free_is_identity_when_no_penalty_declared():
     clean = original.penalty_free()
 
     assert clean is not original
-    assert clean._n_outcome_true_cols == original._n_outcome_true_cols
-    assert clean._n_outcome_pred_cols == original._n_outcome_pred_cols
-    assert clean._n_treatment_pred_cols == original._n_treatment_pred_cols
+    assert clean.mixture == original.mixture
     assert clean.get_config() == original.get_config()
 
 
@@ -449,10 +414,7 @@ def test_treatment_loss_penalty_free_zeros_declared_penalty_without_mutating_ori
     falls back to its own "off" default (0.0) -- and the original, live instance must be
     left untouched."""
     original = _BalancePenalizedTreatmentLoss(
-        loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
-        n_outcome_true_cols=1,
-        n_outcome_pred_cols=2,
-        n_treatment_pred_cols=1,
+        _NORMAL_BERNOULLI,
         lambda_balance=5.0,
         reduction="sum_over_batch_size",
     )
@@ -478,10 +440,7 @@ def test_treatment_loss_penalty_free_fails_loudly_for_undeclared_required_penalt
             self._lambda_balance = lambda_balance
 
     original = _RequiredPenaltyTreatmentLoss(
-        loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
-        n_outcome_true_cols=1,
-        n_outcome_pred_cols=2,
-        n_treatment_pred_cols=1,
+        _NORMAL_BERNOULLI,
         lambda_balance=5.0,
         reduction="sum_over_batch_size",
     )
@@ -496,7 +455,6 @@ def test_causal_loss_metric_gen_strips_embedded_treatment_loss_penalty():
     """causal_loss_metric_gen must report the exact joint likelihood even when the passed-in
     treatment_loss instance carries an embedded penalty term -- the metric used for
     EarlyStopping/checkpoint selection/Optuna must never be a penalized proxy."""
-    n_outcome_pred_cols, n_treatment_pred_cols, n_outcome_true_cols = 2, 1, 1
     weights = [[0.5, 0.5], [0.3, 0.7], [0.9, 0.1]]
     y_pred = _make_y_pred(
         outcome_blocks=[np.zeros((3, 2)), np.ones((3, 2))],
@@ -507,21 +465,9 @@ def test_causal_loss_metric_gen_strips_embedded_treatment_loss_penalty():
 
     def _build(lambda_balance):
         """Builds a matching (outcome_loss, treatment_loss) pair for a given penalty weight."""
-        outcome_loss = losses.OutcomeLoss(
-            loss=neglogliks.NegloglikNormal(reduction="none"),
-            treatment_loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
-            n_outcome_true_cols=n_outcome_true_cols,
-            n_outcome_pred_cols=n_outcome_pred_cols,
-            n_treatment_pred_cols=n_treatment_pred_cols,
-            reduction="sum_over_batch_size",
-        )
+        outcome_loss = losses.OutcomeLoss(_NORMAL_BERNOULLI, reduction="sum_over_batch_size")
         treatment_loss = _BalancePenalizedTreatmentLoss(
-            loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
-            n_outcome_true_cols=n_outcome_true_cols,
-            n_outcome_pred_cols=n_outcome_pred_cols,
-            n_treatment_pred_cols=n_treatment_pred_cols,
-            lambda_balance=lambda_balance,
-            reduction="sum_over_batch_size",
+            _NORMAL_BERNOULLI, lambda_balance=lambda_balance, reduction="sum_over_batch_size"
         )
         return outcome_loss, treatment_loss
 
@@ -550,15 +496,7 @@ def test_causal_loss_metric_gen_strips_embedded_treatment_loss_penalty():
 
 def _normal_outcome_loss(cls=losses.OutcomeLoss, **extra):
     """An OutcomeLoss for a normal outcome (2 params per state) and binary treatment."""
-    return cls(
-        loss=neglogliks.NegloglikNormal(reduction="none"),
-        treatment_loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
-        n_outcome_true_cols=1,
-        n_outcome_pred_cols=2,
-        n_treatment_pred_cols=1,
-        reduction="sum_over_batch_size",
-        **extra,
-    )
+    return cls(_NORMAL_BERNOULLI, reduction="sum_over_batch_size", **extra)
 
 
 def _normal_fixture():
@@ -703,22 +641,19 @@ def test_causal_loss_metric_rejects_alpha_and_wrong_loss_types():
         metrics.CausalLossMetric(outcome, outcome)
 
 
-def test_causal_loss_metric_gen_alpha_is_deprecated_and_ignored():
-    """A passed alpha warns (FutureWarning, naming v0.5.0) and doesn't change the value."""
-    import warnings
-
+def test_causal_loss_metric_gen_has_no_alpha():
+    """alpha was removed in v0.5.0; outcome_loss_weight is keyword-only and changes the value."""
     outcome, treatment = _normal_outcome_loss(), _make_treatment_loss()
     y_true, y_pred = _normal_fixture()
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")
-        plain = metrics.causal_loss_metric_gen(outcome, treatment)
-        weighted = metrics.causal_loss_metric_gen(outcome, treatment, outcome_loss_weight=2.0)
-    with pytest.warns(FutureWarning, match="v0.5.0"):
-        with_alpha = metrics.causal_loss_metric_gen(outcome, treatment, alpha=5.0)
-
-    value = _metric_value(plain, y_true, y_pred)
-    np.testing.assert_allclose(_metric_value(with_alpha, y_true, y_pred), value, rtol=1e-7)
-    assert _metric_value(weighted, y_true, y_pred) != pytest.approx(value)
+    with pytest.raises(TypeError):
+        metrics.causal_loss_metric_gen(outcome, treatment, alpha=5.0)
+    with pytest.raises(TypeError):
+        metrics.causal_loss_metric_gen(outcome, treatment, 2.0)
+    plain = metrics.causal_loss_metric_gen(outcome, treatment)
+    weighted = metrics.causal_loss_metric_gen(outcome, treatment, outcome_loss_weight=2.0)
+    assert _metric_value(weighted, y_true, y_pred) != pytest.approx(
+        _metric_value(plain, y_true, y_pred)
+    )
 
 
 def test_metric_generators_return_serializable_metrics():
@@ -726,8 +661,8 @@ def test_metric_generators_return_serializable_metrics():
     y_true, y_pred = _normal_fixture()
     for metric in (
         metrics.outcome_nll_metric_gen(_normal_outcome_loss()),
-        metrics.predictive_state_df_gen(n_outcome_pred_cols=2, n_treatment_pred_cols=1),
-        metrics.uniform_entropy_gen(n_outcome_pred_cols=2, n_treatment_pred_cols=1),
+        metrics.predictive_state_df_gen(_NORMAL_BERNOULLI.layout),
+        metrics.uniform_entropy_gen(_NORMAL_BERNOULLI.layout),
     ):
         rebuilt = tf.keras.utils.deserialize_keras_object(
             tf.keras.utils.serialize_keras_object(metric)
@@ -752,10 +687,7 @@ def test_penalty_free_drops_a_penalty_even_if_get_config_serializes_it():
             return {**super().get_config(), "lambda_balance": self._lambda_balance}
 
     original = _SerializedPenaltyTreatmentLoss(
-        loss=tf.keras.losses.BinaryCrossentropy(reduction="none"),
-        n_outcome_true_cols=1,
-        n_outcome_pred_cols=2,
-        n_treatment_pred_cols=1,
+        _NORMAL_BERNOULLI,
         lambda_balance=5.0,
         reduction="sum_over_batch_size",
     )
@@ -785,20 +717,11 @@ _METRIC_CLASSES = [
 _METRIC_IDS = [cls.__name__ for cls, _ in _METRIC_CLASSES]
 
 
-def _legacy_counts(cls) -> dict:
-    """The legacy constructor counts for the Normal/Bernoulli fixture."""
-    counts = {"n_outcome_pred_cols": 2, "n_treatment_pred_cols": 1}
-    if not issubclass(cls, metrics._PropensityMetric):
-        counts["n_outcome_true_cols"] = 1
-    return counts
-
-
 @pytest.mark.parametrize("cls,default_name", _METRIC_CLASSES, ids=_METRIC_IDS)
 def test_metrics_have_explicit_default_names(cls, default_name):
     """The default name is explicit, so Keras doesn't add a per-session `_N` suffix."""
     assert cls(_NORMAL_BERNOULLI).name == default_name
     assert cls(_NORMAL_BERNOULLI).name == default_name
-    assert cls(**_legacy_counts(cls)).name == default_name
 
 
 @pytest.mark.parametrize("cls,default_name", _METRIC_CLASSES, ids=_METRIC_IDS)
@@ -810,25 +733,14 @@ def test_metrics_forward_name_and_kwargs(cls, default_name):
 
 
 @pytest.mark.parametrize("cls,default_name", _METRIC_CLASSES, ids=_METRIC_IDS)
-@pytest.mark.parametrize("form", ["mixture", "legacy"])
-def test_metric_config_round_trips(cls, default_name, form):
-    """`from_config(get_config())` rebuilds the metric with the same result. A mixture metric
-    stores the mixture; a legacy one keeps its counts."""
+def test_metric_config_round_trips(cls, default_name):
+    """`from_config(get_config())` rebuilds the metric, mixture included, with the same result."""
     import json
 
     y_true, y_pred, _ = _binary_fixture()
-    if form == "mixture":
-        metric = cls(_NORMAL_BERNOULLI, name="custom")
-    else:
-        metric = cls(**_legacy_counts(cls), name="custom")
+    metric = cls(_NORMAL_BERNOULLI, name="custom")
     config = metric.get_config()
-    json.dumps(tf.keras.utils.serialize_keras_object(metric))
-    if form == "mixture":
-        assert config["mixture"]["registered_name"] == "pypsps>StateMixture"
-        assert "n_outcome_pred_cols" not in config
-    else:
-        assert "mixture" not in config
-        assert {k: config[k] for k in _legacy_counts(cls)} == _legacy_counts(cls)
+    assert config["mixture"]["registered_name"] == "pypsps>StateMixture"
 
     rebuilt = tf.keras.utils.deserialize_keras_object(
         json.loads(json.dumps(tf.keras.utils.serialize_keras_object(metric)))
@@ -838,6 +750,14 @@ def test_metric_config_round_trips(cls, default_name, form):
     np.testing.assert_allclose(
         _metric_value(rebuilt, y_true, y_pred), _metric_value(metric, y_true, y_pred), rtol=1e-6
     )
+
+
+@pytest.mark.parametrize("cls,default_name", _METRIC_CLASSES, ids=_METRIC_IDS)
+def test_a_legacy_metric_config_raises(cls, default_name):
+    """A v0.3.0-v0.3.3 config (column counts, no mixture) raises with the migration path."""
+    config = {"name": default_name, "n_outcome_pred_cols": 2, "n_treatment_pred_cols": 1}
+    with pytest.raises(ValueError, match="no 'mixture'.*compile=False"):
+        cls.from_config(config)
 
 
 def test_censored_metric_survives_a_config_round_trip():
@@ -877,13 +797,13 @@ def test_propensity_score_auc_honors_curve():
 
 def test_generator_metrics_serialize_layout():
     """predictive_state_df_gen(layout) and uniform_entropy_gen(layout) round-trip through JSON
-    with the layout kwarg; the legacy int kwargs still round-trip too."""
+    with the layout kwarg."""
     import json
 
     y_true, y_pred, _ = _binary_fixture()
     layout = _NORMAL_BERNOULLI.layout
     for gen in (metrics.predictive_state_df_gen, metrics.uniform_entropy_gen):
-        for metric in (gen(layout), gen(2, 1)):
+        for metric in (gen(layout),):
             config = json.loads(json.dumps(tf.keras.utils.serialize_keras_object(metric)))
             rebuilt = tf.keras.utils.deserialize_keras_object(config)
             assert rebuilt.name == metric.name

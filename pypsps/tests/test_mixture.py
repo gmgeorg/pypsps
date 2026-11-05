@@ -189,7 +189,7 @@ def test_causal_nll_outcome_loss_weight():
         mix.causal_nll(y_true, y_pred, outcome_loss_weight=-1.0)
 
 
-@pytest.mark.parametrize("n_states", [None, 3])
+@pytest.mark.parametrize("n_states", [1, 3])
 def test_mixture_config_round_trip_and_equality(n_states):
     """The mixture serializes its families and K, and rebuilds equal."""
     mix = mixture.StateMixture(
@@ -212,7 +212,7 @@ def test_treatment_family_must_have_one_true_col():
     with pytest.raises(ValueError, match="exactly one y_true column"):
         mixture.StateMixture(families.Normal(), families.Weibull(), n_states=2)
     with pytest.raises(TypeError, match="Family"):
-        mixture.StateMixture("normal", families.Bernoulli())
+        mixture.StateMixture("normal", families.Bernoulli(), n_states=2)
 
 
 def _toy_model(compile_with=None, n_states=3):
@@ -262,11 +262,15 @@ def test_from_model_raises_on_layer_and_loss_mismatch():
         mixture.StateMixture.from_model(model)
 
 
-def test_from_model_accepts_a_loss_that_infers_k():
-    """A legacy loss mixture (n_states=None) matches a layer with the same families."""
-    legacy = mixture.StateMixture(families.Normal(), families.Bernoulli(), n_states=None)
-    model, mix = _toy_model(compile_with=legacy)
-    assert mixture.StateMixture.from_model(model) is mix
+def test_mixture_config_without_n_states_raises():
+    """Only the three-int constructors (removed in v0.5.0) saved a mixture without K."""
+    mix = mixture.StateMixture(families.Normal(), families.Bernoulli(), n_states=2)
+    config = tf.keras.utils.serialize_keras_object(mix)
+    config["config"]["n_states"] = None
+    with pytest.raises(ValueError, match="compile=False"):
+        tf.keras.utils.deserialize_keras_object(config)
+    with pytest.raises(ValueError, match="n_states must be an int >= 1"):
+        mixture.StateMixture(families.Normal(), families.Bernoulli(), n_states=None)
 
 
 def test_from_model_raises_without_layer_or_loss():
