@@ -8,8 +8,10 @@ All components are fully compatible with the standard `tf.keras` API.
 
 * **`models`**: Provides model builders like `build_toy_model(n_states,
   n_features, compile=True, alpha=10.)` for binary treatment and continuous
-  outcome, and `build_model_continuous_survival` for a continuous treatment and an
-  exponential or Weibull time-to-event outcome.
+  outcome. For a continuous treatment and an exponential or Weibull time-to-event outcome,
+  use `build_model(**presets.continuous_survival(...))`.
+* **`presets`**: named `build_model` argument sets, one per older `build_*` builder (same
+  arguments). The continuous `build_*` builders are deprecated in their favor.
 * **`layers`**: Custom PSPS layer implementations.
 * **`losses`**: Causal loss functions optimized for predictive state learning.
 * **`metrics`**: Custom evaluation metrics for causal estimation. The propensity,
@@ -53,8 +55,9 @@ means = families.Normal().mean(parts.outcome)   # E[Y | state k], [N, 3]
 
 `models.build_model` builds a PSPS model for any outcome family and any treatment family,
 and `models.compile_model` compiles any network that ends in `layers.CausalOutput`. They
-are experimental in v0.3.6: the arguments may still change, and the `build_*` builders
-remain the supported API until they become presets of `build_model`.
+are experimental in v0.3.x: the arguments may still change before v0.4.0. The continuous
+`build_*` builders are presets of `build_model` since v0.3.7; the toy and binary builders
+follow in v0.4.0.
 
 ```python
 from pypsps.keras import families, models
@@ -207,25 +210,36 @@ sum(w × loss) / sum(w), across all batches.
 
 ## Continuous Treatment, Time-to-Event Outcome
 
-`models.build_model_continuous_survival(distribution, ...)`, with the wrappers
-`build_model_continuous_exponential` and `build_model_continuous_weibull`, models a Normal
-treatment density per state and an exponential or Weibull outcome. `y_true` is
+`presets.continuous_survival(distribution, ...)`, with the wrappers
+`presets.continuous_exponential` and `presets.continuous_weibull`, returns the `build_model`
+arguments of a model with a Normal treatment density per state and an exponential or Weibull
+outcome. `y_true` is
 `[time, event indicator, treatment]`, and `inference.predict_ate_continuous` reads the
 fitted model directly.
 
 ```python
-from pypsps.keras import models
+from pypsps.keras import models, presets
 
-model = models.build_model_continuous_weibull(
-    n_states=3,
-    n_features=10,
-    predictive_state_hidden_layers=[(16, "relu")],
-    outcome_hidden_layers=[(16, "relu")],
-    log_scale_bounds=(-3.0, 6.0),  # log time units
-    log_shape_bounds=(-2.0, 2.0),
-    max_time=y_true[:, 0].max(),
+model = models.build_model(
+    **presets.continuous_weibull(
+        n_states=3,
+        n_features=10,
+        predictive_state_hidden_layers=[(16, "relu")],
+        outcome_hidden_layers=[(16, "relu")],
+        log_scale_bounds=(-3.0, 6.0),  # log time units
+        log_shape_bounds=(-2.0, 2.0),
+        max_time=y_true[:, 0].max(),
+    )
 )
 ```
+
+Since v0.3.7, `models.build_model_continuous_survival`, `build_model_continuous_exponential`
+and `build_model_continuous_weibull` are deprecated and warn with `FutureWarning`; they are
+removed in v0.5.0. The migration is mechanical: `models.build_model_continuous_weibull(...)`
+becomes `models.build_model(**presets.continuous_weibull(...))` with the same arguments, and
+old `.weights.h5` files load into the new model. A preset is a plain dict, so an entry can be
+replaced before building: `models.build_model(**(presets.continuous_weibull(...) | {"alpha":
+alpha_variable}))`.
 
 The outcome parameters are soft-clipped (`layers.SoftClip`) to `log_scale_bounds` and,
 for Weibull, `log_shape_bounds`. Both are required, because sensible values depend on the

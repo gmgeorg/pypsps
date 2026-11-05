@@ -5,6 +5,43 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.3.7 - Nov 4, 2026
+
+### Added
+
+* `pypsps.keras.presets`: one function per `build_*` builder (`toy`, `binary_normal`,
+  `binary_exponential`, `continuous_survival`, `continuous_exponential`,
+  `continuous_weibull`), with the builder's arguments. Each returns a plain dict of
+  `models.build_model` arguments, so `models.build_model(**presets.continuous_weibull(...))`
+  builds the model, and a dict merge (`presets.x(...) | {"alpha": v}`) replaces an entry.
+
+### Deprecated
+
+* `models.build_model_continuous_survival`, `build_model_continuous_exponential` and
+  `build_model_continuous_weibull` warn with `FutureWarning` and are removed in v0.5.0. Use
+  `models.build_model(**presets.continuous_*(...))` with the same arguments. The model is the
+  same: its weights are in the same order, so `.weights.h5` files load, and predictions,
+  loss and gradients are identical.
+
+### Changed
+
+For models from the continuous builders (and presets):
+
+* Layer names: the treatment head `treatment_loc_scale` is now `treatment_params`, and the
+  state simplex is `state_weights`. `outcome_params_all_states` is replaced by
+  `log_scale_all_states` (and `log_shape_all_states` for Weibull). Code that calls
+  `model.get_layer` with an old name needs the new one; weight files are unaffected.
+* Metrics: `treatment_mean_squared_error` and `outcome_mean_squared_error` (over units with
+  an event) are added.
+
+### Fixed
+
+* `treatment_init_values=(loc, scale)` crashed, because pypress wants one row per parameter
+  and one column per state. A flat `(loc, scale)` and two per-state rows both work now.
+* `log_shape_bounds` that exclude 0 crashed (the start value was clipped onto a bound). The
+  log shape now starts at 0 when the bounds contain it, and at their midpoint otherwise.
+* `init_scale <= 0` gave a NaN start value; it raises `ValueError` now.
+
 ## pypsps v0.3.6 - Nov 4, 2026
 
 ### Added

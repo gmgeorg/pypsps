@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pypsps"
-version = "0.3.6"
+version = "0.3.7"
 description = "Predictive State Propensity Subclassification (PSPS) in Python (keras)"
 authors = ["Georg M. Goerg <im@gmge.org>"]
 license = "MIT"
@@ -44,3 +44,7 @@ extend-select = ["ANN001", "ANN002", "ANN003"]
 
 [tool.ruff.lint.per-file-ignores]
 "pypsps/tests/*" = ["ANN001", "ANN002", "ANN003"]
+
+[tool.pytest.ini_options]
+# A deprecated pypsps call in the suite fails it; tests of deprecations catch the warning.
+filterwarnings = ["error::FutureWarning"]
