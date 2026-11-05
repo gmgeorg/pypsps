@@ -16,17 +16,27 @@ tfk = tf.keras
 _EPS = 1e-3
 
 
+def _binary_exponential_mixture(n_states: int) -> mixture_lib.StateMixture:
+    """Exponential (log-rate) outcome and Bernoulli treatment."""
+    return mixture_lib.StateMixture(
+        families.Exponential("log_rate"), families.Bernoulli(), n_states=n_states
+    )
+
+
+def _binary_normal_mixture(n_states: int) -> mixture_lib.StateMixture:
+    """Normal outcome and Bernoulli treatment."""
+    return mixture_lib.StateMixture(families.Normal(), families.Bernoulli(), n_states=n_states)
+
+
 def _build_binary_exponential_causal_loss(
-    n_states: int,
+    mixture: mixture_lib.StateMixture,
     alpha: float,
     df_penalty_l2: float,
     outcome_loss_weight: float,
 ) -> losses.CausalLoss:
     """Causal loss for a binary treatment and an exponential (log-rate) survival outcome."""
     return losses.CausalLoss.from_mixture(
-        mixture_lib.StateMixture(
-            families.Exponential("log_rate"), families.Bernoulli(), n_states=n_states
-        ),
+        mixture,
         alpha=alpha,
         outcome_loss_weight=outcome_loss_weight,
         predictive_states_regularizer=pypress.keras.regularizers.Uniform(l2=df_penalty_l2),
@@ -35,18 +45,18 @@ def _build_binary_exponential_causal_loss(
 
 
 def _build_binary_normal_causal_loss(
-    n_states: int,
+    mixture: mixture_lib.StateMixture,
     alpha: float,
     df_penalty_l2: float,
 ) -> losses.CausalLoss:
     """Causal loss for a binary treatment and a Normal outcome."""
     return losses.CausalLoss.from_mixture(
-        mixture_lib.StateMixture(families.Normal(), families.Bernoulli(), n_states=n_states),
+        mixture,
         alpha=alpha,
         outcome_loss_weight=1.0,
         predictive_states_regularizer=pypress.keras.regularizers.DegreesOfFreedom(
             l2=df_penalty_l2,
-            target=max(1, np.log(0.5 * n_states)),
+            target=max(1, np.log(0.5 * mixture.n_states)),
         ),
         reduction="sum_over_batch_size",
     )
@@ -159,16 +169,18 @@ def build_toy_model(
     loc_comb = tfk.layers.Concatenate(name="loc_all_states")(loc_preds)
     scale_comb = tfk.layers.Concatenate(name="scale_all_states")(scale_preds)
 
+    # Kept so the layer order, hence the `.weights.h5` layout, matches earlier releases.
     outcome_pred = tfk.layers.Concatenate(name="loc_scale_all_states")([loc_comb, scale_comb])
-    outputs_concat = tfk.layers.Concatenate(name="output_tensor")(
-        [outcome_pred, pred_states, prop_score]
+    mixture = _binary_normal_mixture(n_states)
+    outputs_concat = layers.CausalOutput(mixture, name="output_tensor")(
+        {"outcome": outcome_pred, "state_weights": pred_states, "treatment": prop_score}
     )
 
     model = tfk.models.Model(inputs=[features, treat], outputs=outputs_concat)
 
     if compile:
         psps_causal_loss = _build_binary_normal_causal_loss(
-            n_states=n_states,
+            mixture,
             alpha=alpha,
             df_penalty_l2=df_penalty_l2,
         )
@@ -312,15 +324,20 @@ def build_model_binary_normal(
     loc_comb = tfk.layers.Concatenate(name="loc_all_states")(loc_preds)
     scale_comb = tfk.layers.Concatenate(name="scale_all_states")(scale_preds)
 
-    outputs_concat = tfk.layers.Concatenate(name="output_tensor")(
-        [loc_comb, scale_comb, pred_states, prop_score]
+    mixture = _binary_normal_mixture(n_states)
+    outputs_concat = layers.CausalOutput(mixture, name="output_tensor")(
+        {
+            "outcome": {"loc": loc_comb, "scale": scale_comb},
+            "state_weights": pred_states,
+            "treatment": prop_score,
+        }
     )
 
     model = tfk.models.Model(inputs=[features, treat], outputs=outputs_concat)
 
     if compile:
         psps_causal_loss = _build_binary_normal_causal_loss(
-            n_states=n_states,
+            mixture,
             alpha=alpha,
             df_penalty_l2=df_penalty_l2,
         )
@@ -441,15 +458,20 @@ def build_model_binary_exponential(
 
     log_rate_comb = tfk.layers.Concatenate(name="log_rate_all_states")(log_rate_preds)
 
-    outputs_concat = tfk.layers.Concatenate(name="output_tensor")(
-        [log_rate_comb, pred_states, prop_score]
+    mixture = _binary_exponential_mixture(n_states)
+    outputs_concat = layers.CausalOutput(mixture, name="output_tensor")(
+        {
+            "outcome": {"log_rate": log_rate_comb},
+            "state_weights": pred_states,
+            "treatment": prop_score,
+        }
     )
 
     model = tfk.models.Model(inputs=[features, treat], outputs=outputs_concat)
 
     if compile:
         psps_causal_loss = _build_binary_exponential_causal_loss(
-            n_states=n_states,
+            mixture,
             alpha=alpha,
             df_penalty_l2=df_penalty_l2,
             outcome_loss_weight=outcome_loss_weight,
@@ -635,14 +657,15 @@ def build_model_continuous_survival(
             per_state=separate_shape_per_state,
         )
     outcome_pred = tfk.layers.Concatenate(name="outcome_params_all_states")(outcome_params)
-    outputs = tfk.layers.Concatenate(name="output_tensor")(
-        [outcome_pred, pred_states, treatment_params]
+    mixture = mixture_lib.StateMixture(outcome_family, families.Normal(), n_states=n_states)
+    outputs = layers.CausalOutput(mixture, name="output_tensor")(
+        {"outcome": outcome_pred, "state_weights": pred_states, "treatment": treatment_params}
     )
     model = tfk.models.Model(inputs=[features, treat], outputs=outputs)
 
     if compile:
         causal_loss = losses.CausalLoss.from_mixture(
-            mixture_lib.StateMixture(outcome_family, families.Normal(), n_states=n_states),
+            mixture,
             alpha=alpha,
             outcome_likelihood=outcome_likelihood,
             outcome_loss_weight=outcome_loss_weight,

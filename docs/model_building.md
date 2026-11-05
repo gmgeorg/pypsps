@@ -23,6 +23,9 @@ All components are fully compatible with the standard `tf.keras` API.
   (`[outcome params | state weights | treatment params]`, each block one column per state)
   and `y_true` (`[outcome | treatment | ignored]`). `decode_pred` splits a prediction into
   named `[N, K]` blocks and `encode` puts them back together.
+* **`layers.CausalOutput(mixture)`**: the output layer of every builder. It encodes the heads
+  (`{"outcome": ..., "state_weights": ..., "treatment": ...}`) into `y_pred` and stores the
+  mixture in the saved model.
 * **`mixture`**: `StateMixture(outcome_family, treatment_family, n_states)` holds the two
   families and the layout, and computes everything that mixes over predictive states: the
   per-state NLLs, the state posterior P(s | x, a), the outcome and treatment mixture NLLs,
@@ -201,8 +204,11 @@ model = tf.keras.models.load_model("model.keras")
   A bare `import pypsps` is not enough.
 * The training loss reloads with the alpha it had when saved, so a model saved in the
   middle of an alpha schedule keeps that alpha. `causal_loss_metric` has no alpha.
-* A model loaded with `compile=False` can `predict`, but `pypsps.inference` and
-  `utils.get_column_layout` need the compiled loss: load with `compile=True` (the default).
+* The builders end in a `layers.CausalOutput` layer (named `output_tensor`), which carries the
+  model's `StateMixture`. So a model loaded with `compile=False` still runs `pypsps.inference`,
+  and `StateMixture.from_model(model)` and `ColumnLayout.from_model(model)` read it. Models
+  built before v0.3.4 have no such layer; for those, load with `compile=True` (the default),
+  and the mixture comes from the loss.
 * A custom elementwise NLL must be registered with
   `tf.keras.utils.register_keras_serializable` to load. `neglogliks.NegloglikLoss`, which
   holds a distribution constructor, isn't serializable.

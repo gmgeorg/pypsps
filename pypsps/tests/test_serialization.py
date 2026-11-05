@@ -11,7 +11,7 @@ import pypress
 import pytest
 import tensorflow as tf
 
-from .. import datasets, utils
+from .. import datasets, inference, utils
 from ..keras import families, losses, metrics, mixture, models, neglogliks
 from .test_models import _continuous_model, _synthetic_continuous_survival
 
@@ -345,3 +345,66 @@ def test_propensity_metric_name_aupr(builder_id):
     for metric in compiled:
         if isinstance(metric, metrics._MixtureMetricMixin):
             assert metric.mixture is model.loss.mixture
+
+
+@pytest.mark.parametrize("factory", [f for _, f in _BUILDERS], ids=[i for i, _ in _BUILDERS])
+def test_compile_false_reload_runs_inference(factory, tmp_path):
+    """A `compile=False` reload reads the mixture off its CausalOutput layer for inference."""
+    model, inputs, _ = factory()
+    features = np.asarray(inputs[0])
+    binary = model.loss.mixture.treatment_family.is_binary
+
+    def estimate(m):
+        if binary:
+            return inference.predict_ute_binary(m, features)
+        return inference.predict_ate_continuous(m, features, treatment_grid=[-1.0, 0.0, 1.0])
+
+    path = str(tmp_path / "model.keras")
+    model.save(path)
+    reloaded = tf.keras.models.load_model(path, compile=False)
+
+    assert reloaded.loss is None
+    assert mixture.StateMixture.from_model(reloaded) == model.loss.mixture
+    np.testing.assert_allclose(estimate(reloaded), estimate(model), rtol=1e-5, atol=1e-6)
+
+
+_WEIGHTS_LAYOUT_DIR = pathlib.Path(__file__).parent / "fixtures" / "weights_layout"
+_HIDDEN = dict(predictive_state_hidden_layers=[(5, "selu")], outcome_hidden_layers=[(5, "selu")])
+_WEIGHTS_LAYOUT_BUILDERS = {
+    "toy": lambda: models.build_toy_model(n_states=3, n_features=4),
+    "binary_normal": lambda: models.build_model_binary_normal(
+        n_states=3, n_features=4, loc_layer=(5, "selu"), scale_layer=(5, "selu"), **_HIDDEN
+    ),
+    "binary_exponential": lambda: models.build_model_binary_exponential(
+        n_states=3, n_features=4, log_rate_layer=(5, "selu"), **_HIDDEN
+    ),
+    "continuous_weibull": lambda: models.build_model_continuous_weibull(
+        n_states=3,
+        n_features=4,
+        log_scale_bounds=(-3.0, 6.0),
+        log_shape_bounds=(-2.0, 2.0),
+        **_HIDDEN,
+    ),
+}
+
+
+@pytest.mark.parametrize("name", sorted(_WEIGHTS_LAYOUT_BUILDERS))
+def test_weights_file_layout_matches_v0_3_3(name, tmp_path):
+    """`.weights.h5` files saved by v0.3.3 still load: same dataset paths and shapes.
+
+    Keras 3 keys weight files by layer order, so swapping the output layer must not reorder
+    the layers that hold weights. The fixtures were written by v0.3.3's builders.
+    """
+    import h5py
+
+    path = tmp_path / "model.weights.h5"
+    _WEIGHTS_LAYOUT_BUILDERS[name]().save_weights(str(path))
+    layout = {}
+    with h5py.File(path, "r") as f:
+        f.visititems(
+            lambda p, o: layout.__setitem__(p, list(o.shape))
+            if isinstance(o, h5py.Dataset)
+            else None
+        )
+    expected = json.loads((_WEIGHTS_LAYOUT_DIR / f"{name}.json").read_text())
+    assert layout == expected

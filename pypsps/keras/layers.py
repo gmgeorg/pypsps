@@ -124,3 +124,49 @@ class SoftClip(tf.keras.layers.Layer):
         config = super().get_config()
         config.update({"min_value": self.min_value, "max_value": self.max_value})
         return config
+
+
+@tf.keras.utils.register_keras_serializable(package="pypsps")
+class CausalOutput(tf.keras.layers.Layer):
+    """The output layer of a pypsps model: encodes the heads into ``y_pred`` via the mixture.
+
+    It replaces the final ``Concatenate`` and produces the same columns, ``[outcome params |
+    state weights | treatment params]`` (see `pypsps.keras.layout.ColumnLayout.encode`). It has
+    no weights. It carries the model's `pypsps.keras.mixture.StateMixture` in its config, so a
+    model loaded with ``compile=False`` still knows its families and layout, and
+    `pypsps.inference` runs on it (`StateMixture.from_model`).
+
+    Call it on a dict ``{"outcome": ..., "state_weights": [N, K], "treatment": ...}``, where
+    the outcome and treatment entries are ``{param name: [N, K]}`` or a whole parameter block.
+    """
+
+    def __init__(self, mixture: Any, **kwargs: Any):
+        """Stores the `StateMixture` (or its serialized config)."""
+        super().__init__(**kwargs)
+        if isinstance(mixture, dict):
+            mixture = tf.keras.utils.deserialize_keras_object(mixture)
+        if mixture.n_states is None:
+            raise ValueError("CausalOutput needs a StateMixture with n_states set")
+        self._mixture = mixture
+
+    @property
+    def mixture(self) -> Any:
+        """The model's `pypsps.keras.mixture.StateMixture`."""
+        return self._mixture
+
+    def call(self, inputs: dict):
+        """Returns ``y_pred``, the encoded heads."""
+        return self._mixture.layout.encode(
+            inputs["outcome"], inputs["state_weights"], inputs["treatment"]
+        )
+
+    def compute_output_shape(self, input_shape: Any) -> tuple:
+        """``(batch, layout width)``."""
+        batch = input_shape["state_weights"][0]
+        return (batch, self._mixture.layout.y_pred_width())
+
+    def get_config(self):
+        """Returns the layer config, including the serialized mixture."""
+        config = super().get_config()
+        config.update({"mixture": tf.keras.utils.serialize_keras_object(self._mixture)})
+        return config

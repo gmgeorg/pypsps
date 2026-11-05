@@ -213,3 +213,65 @@ def test_treatment_family_must_have_one_true_col():
         mixture.StateMixture(families.Normal(), families.Weibull(), n_states=2)
     with pytest.raises(TypeError, match="Family"):
         mixture.StateMixture("normal", families.Bernoulli())
+
+
+def _toy_model(compile_with=None, n_states=3):
+    """A tiny functional model ending in a CausalOutput layer."""
+    from ..keras import layers
+
+    mix = mixture.StateMixture(families.Normal(), families.Bernoulli(), n_states=n_states)
+    inp = tf.keras.Input(shape=(2,))
+    weights = tf.keras.layers.Dense(n_states, activation="softmax")(inp)
+    loc = tf.keras.layers.Dense(n_states)(inp)
+    scale = tf.keras.layers.Dense(n_states, activation="softplus")(inp)
+    prob = tf.keras.layers.Dense(n_states, activation="sigmoid")(inp)
+    out = layers.CausalOutput(mix, name="output_tensor")(
+        {"outcome": {"loc": loc, "scale": scale}, "state_weights": weights, "treatment": prob}
+    )
+    model = tf.keras.Model(inp, out)
+    if compile_with is not None:
+        from ..keras import losses
+
+        model.compile(loss=losses.CausalLoss.from_mixture(compile_with))
+    return model, mix
+
+
+def test_from_model_reads_the_output_layer_without_a_loss():
+    """An uncompiled model's mixture comes from its CausalOutput layer."""
+    model, mix = _toy_model()
+    assert mixture.StateMixture.from_model(model) is mix
+    assert ColumnLayout.from_model(model) == mix.layout
+
+
+def test_from_model_falls_back_to_the_loss():
+    """A model without CausalOutput (built before v0.3.4) uses its compiled loss."""
+    from ..keras import losses
+
+    mix = mixture.StateMixture(families.Normal(), families.Bernoulli(), n_states=2)
+    inp = tf.keras.Input(shape=(2,))
+    model = tf.keras.Model(inp, tf.keras.layers.Dense(8)(inp))
+    model.compile(loss=losses.CausalLoss.from_mixture(mix))
+    assert mixture.StateMixture.from_model(model) is mix
+
+
+def test_from_model_raises_on_layer_and_loss_mismatch():
+    """The output layer and the loss must describe the same families and K."""
+    other = mixture.StateMixture(families.Exponential("log_rate"), families.Bernoulli(), 3)
+    model, _ = _toy_model(compile_with=other)
+    with pytest.raises(ValueError, match="CausalOutput layer holds"):
+        mixture.StateMixture.from_model(model)
+
+
+def test_from_model_accepts_a_loss_that_infers_k():
+    """A legacy loss mixture (n_states=None) matches a layer with the same families."""
+    legacy = mixture.StateMixture(families.Normal(), families.Bernoulli(), n_states=None)
+    model, mix = _toy_model(compile_with=legacy)
+    assert mixture.StateMixture.from_model(model) is mix
+
+
+def test_from_model_raises_without_layer_or_loss():
+    """A plain Keras model has no mixture."""
+    inp = tf.keras.Input(shape=(2,))
+    model = tf.keras.Model(inp, tf.keras.layers.Dense(9)(inp))
+    with pytest.raises(RuntimeError, match="no CausalOutput layer"):
+        mixture.StateMixture.from_model(model)

@@ -182,38 +182,22 @@ class ColumnLayout:
 
 
 def get_column_layout(model: tf.keras.Model) -> ColumnLayout:
-    """Reads a compiled pypsps model's column layout off its loss, instead of hardcoding it.
+    """The three column counts of a pypsps model, read from its state mixture.
 
-    A `pypsps.keras.losses.CausalLoss` already stores `n_outcome_pred_cols`,
-    `n_treatment_pred_cols`, and `n_outcome_true_cols` on its `_outcome_loss`/`_treatment_loss`
-    (they were required constructor args to build the model in the first place). Re-typing
-    these ints at every downstream call site is a copy/paste hazard once a model's outcome
-    distribution changes shape (e.g. Normal's loc+scale = 2 outcome params/state vs.
-    exponential's log_rate = 1) -- exactly the bug this helper is meant to prevent.
-
-    Requires `model.loss` to be a `pypsps.keras.losses.CausalLoss` instance, i.e. the model
-    must already be compiled via one of this package's `build_*` functions (or equivalent).
+    A wrapper over `pypsps.keras.mixture.StateMixture.from_model`: it works on a compiled
+    model and, for models built with pypsps >= 0.3.4, on a model loaded with ``compile=False``.
 
     Raises:
-      RuntimeError: if `model.loss` is not a `CausalLoss` (e.g. the model is uncompiled).
+      RuntimeError: if the model has neither a `CausalOutput` layer nor a pypsps `CausalLoss`.
     """
-    # Imported lazily: `pypsps.keras.losses` imports this module.
-    from .keras import losses
+    # Lazy: `pypsps.keras` imports this module.
+    from .keras.mixture import StateMixture
 
-    if not isinstance(getattr(model, "loss", None), losses.CausalLoss):
-        raise RuntimeError(
-            "Model must be compiled with a `pypsps.keras.losses.CausalLoss` to read its column "
-            f"layout, but model.loss is {type(getattr(model, 'loss', None)).__name__}. "
-            "Compile the model first (e.g. build with `compile=True`). A model loaded with "
-            "`load_model(path, compile=False)` has no loss; load it with `compile=True` (the "
-            "default, after `import pypsps.keras`)."
-        )
-    outcome_loss = model.loss._outcome_loss
-    treatment_loss = model.loss._treatment_loss
+    layout = StateMixture.from_model(model).layout
     return ColumnLayout(
-        n_outcome_pred_cols=outcome_loss._n_outcome_pred_cols,
-        n_treatment_pred_cols=treatment_loss._n_treatment_pred_cols,
-        n_outcome_true_cols=outcome_loss._n_outcome_true_cols,
+        n_outcome_pred_cols=layout.n_outcome_pred_cols,
+        n_treatment_pred_cols=layout.n_treatment_pred_cols,
+        n_outcome_true_cols=layout.n_outcome_true_cols,
     )
 
 
