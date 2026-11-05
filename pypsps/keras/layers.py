@@ -1,6 +1,6 @@
 """Module for models & layers for pypsps."""
 
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import numpy as np
 import tensorflow as tf
@@ -18,11 +18,21 @@ class BiasOnly(tf.keras.layers.Layer):
         self,
         units: int = 1,
         bias_regularizer: Optional[tf.keras.regularizers.Regularizer] = None,
+        initializer: Union[str, tf.keras.initializers.Initializer] = "zeros",
         **kwargs: Any,
     ):
+        """Initializes the layer.
+
+        Args:
+          units: width of the constant output.
+          bias_regularizer: optional regularizer on the constant.
+          initializer: initializer of the constant, e.g. ``Constant(raw_value)``.
+          **kwargs: passed to the Keras Layer.
+        """
         super(BiasOnly, self).__init__(**kwargs)
         self._bias_regularizer = bias_regularizer
         self._units = units
+        self._initializer = tf.keras.initializers.get(initializer)
 
     def build(self, input_shape: tuple):
         """Builds the layer based on input_shape."""
@@ -31,7 +41,7 @@ class BiasOnly(tf.keras.layers.Layer):
             shape=[
                 self._units,
             ],
-            initializer="zeros",
+            initializer=self._initializer,
             regularizer=self._bias_regularizer,
             trainable=True,
         )
@@ -42,7 +52,7 @@ class BiasOnly(tf.keras.layers.Layer):
 
     def get_config(self):
         """Returns the layer config, including `units` (dropped before, silently reverting to 1
-        on `from_config`) and a properly serialized `bias_regularizer`."""
+        on `from_config`), a properly serialized `bias_regularizer`, and the `initializer`."""
         config = super().get_config().copy()
         config.update(
             {
@@ -50,15 +60,18 @@ class BiasOnly(tf.keras.layers.Layer):
                 "bias_regularizer": tf.keras.regularizers.serialize(self._bias_regularizer)
                 if self._bias_regularizer is not None
                 else None,
+                "initializer": tf.keras.initializers.serialize(self._initializer),
             }
         )
         return config
 
     @classmethod
     def from_config(cls, config: dict):
-        """Deserializes `bias_regularizer` back into a Regularizer instance."""
+        """Deserializes `bias_regularizer` and `initializer`; older configs have no initializer."""
         config = config.copy()
         config["bias_regularizer"] = tf.keras.regularizers.deserialize(config["bias_regularizer"])
+        if config.get("initializer") is not None:
+            config["initializer"] = tf.keras.initializers.deserialize(config["initializer"])
         return cls(**config)
 
 
