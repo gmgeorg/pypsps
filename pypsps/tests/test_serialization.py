@@ -11,9 +11,13 @@ import pypress
 import pytest
 import tensorflow as tf
 
-from .. import datasets, inference, utils
+from .. import datasets, inference
 from ..keras import families, losses, metrics, mixture, models, neglogliks
+from ..keras.layout import ColumnLayout
 from .test_models import _continuous_model, _synthetic_continuous_survival
+
+# This module also covers the deprecated column-count API on purpose (removed in v0.5.0).
+pytestmark = pytest.mark.filterwarnings("ignore:.*removed in v0.5.0:FutureWarning")
 
 
 def _small(builder, **extra):
@@ -71,7 +75,7 @@ def test_compiled_model_round_trips_through_load_model(factory, tmp_path):
 
     assert isinstance(reloaded.loss, losses.CausalLoss)
     assert float(reloaded.loss.alpha) == pytest.approx(3.0)
-    assert utils.get_column_layout(reloaded) == utils.get_column_layout(model)
+    assert ColumnLayout.from_model(reloaded) == ColumnLayout.from_model(model)
     after = reloaded.evaluate(inputs, outputs, verbose=0, return_dict=True)
     assert set(after) == set(before)
     for key, value in before.items():

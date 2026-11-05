@@ -4,8 +4,9 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
-from .. import datasets, utils
+from .. import datasets
 from ..keras import callbacks, layers, losses, models, neglogliks
+from ..keras.layout import ColumnLayout
 
 tfk = tf.keras
 
@@ -199,20 +200,19 @@ def test_continuous_survival_builder_layout_and_bounds(distribution, n_outcome_p
     """Output is [outcome params | states | treatment (loc, scale)], params inside the bounds."""
     tf.random.set_seed(0)
     model = _continuous_model(distribution)
-    layout = utils.get_column_layout(model)
+    layout = ColumnLayout.from_model(model)
     assert (layout.n_outcome_pred_cols, layout.n_treatment_pred_cols) == (n_outcome_pred_cols, 2)
     assert model.output_shape == (None, 3 * (n_outcome_pred_cols + 1 + 2))
 
     rng = np.random.RandomState(0)
     probe = [100.0 * rng.normal(size=(64, 3)), 100.0 * rng.normal(size=(64, 1))]
     preds = model.predict(probe, verbose=0)
-    outcome_params, weights, _ = utils.split_y_pred(preds, n_outcome_pred_cols, 2)
+    parts = layout.decode_pred(preds)
     bounds = [_LOG_SCALE_BOUNDS, _LOG_SHAPE_BOUNDS][:n_outcome_pred_cols]
-    for block, (low, high) in zip(
-        utils.split_outcome_pred(outcome_params, n_outcome_pred_cols), bounds
-    ):
+    for name, (low, high) in zip(layout.outcome_params, bounds):
+        block = parts.outcome[name]
         assert np.all(block >= low) and np.all(block <= high)
-    np.testing.assert_allclose(weights.sum(axis=1), 1.0, rtol=1e-5)
+    np.testing.assert_allclose(parts.state_weights.sum(axis=1), 1.0, rtol=1e-5)
 
 
 def test_continuous_survival_builder_validates_its_arguments():

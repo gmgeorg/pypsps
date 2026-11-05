@@ -10,6 +10,9 @@ import tensorflow as tf
 from ..keras import families, neglogliks
 from ..keras.layout import ColumnLayout
 
+# This module also covers the deprecated column-count API on purpose (removed in v0.5.0).
+pytestmark = pytest.mark.filterwarnings("ignore:.*removed in v0.5.0:FutureWarning")
+
 _N, _K = 6, 3
 
 

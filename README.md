@@ -85,7 +85,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from pypsps.keras import callbacks, models
-from pypsps import datasets, inference, utils
+from pypsps.keras.mixture import StateMixture
+from pypsps import datasets, inference
 
 np.random.seed(10)
 ks_data = datasets.KangSchafer(true_ate=20).sample(n_samples=1000)
@@ -105,11 +106,11 @@ history = model.fit(inputs,
                     ),
                     )
 preds = model.predict(inputs)
-# treatment_pred is state-conditional (one column per state), not a single marginal
-# propensity score; use utils.agg_treatment_pred(preds, ...) for the marginal P(A | X).
-outcome_pred, weights, treatment_pred = utils.split_y_pred(
-    preds, n_outcome_pred_cols=2, n_treatment_pred_cols=1
-)
+# The model's StateMixture knows the column layout of `preds`.
+mixture = StateMixture.from_model(model)
+parts = mixture.layout.decode_pred(preds)  # parts.outcome["loc"], parts.state_weights, ...
+outcome_mean = mixture.outcome_mean(preds)  # E[Y | a, x], mixing the per-state means
+propensity = mixture.treatment_mean(preds)  # marginal P(A = 1 | X)
 
 pred_ate = inference.predict_ate_binary(model, ks_data.features)
 print("ATE\n\t true: %.1f \n\tnaive: %.1f \n\t PSPS: %.1f" % (

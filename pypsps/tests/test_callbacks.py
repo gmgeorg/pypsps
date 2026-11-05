@@ -5,24 +5,15 @@ import pytest
 import tensorflow as tf
 
 from .. import datasets
-from ..keras import callbacks, losses, models, neglogliks
+from ..keras import callbacks, families, losses, mixture, models
 
 
 def _causal_loss(alpha=1.0) -> losses.CausalLoss:
     """A real CausalLoss (Normal outcome, binary treatment); the callbacks only use alpha."""
-    treatment_nll = tf.keras.losses.BinaryCrossentropy(reduction="none")
-    kwargs = dict(n_outcome_true_cols=1, n_outcome_pred_cols=2, n_treatment_pred_cols=1)
-    return losses.CausalLoss(
-        outcome_loss=losses.OutcomeLoss(
-            loss=neglogliks.NegloglikNormal(reduction="none"),
-            treatment_loss=treatment_nll,
-            reduction="sum_over_batch_size",
-            **kwargs,
-        ),
-        treatment_loss=losses.TreatmentLoss(
-            loss=treatment_nll, reduction="sum_over_batch_size", **kwargs
-        ),
+    return losses.CausalLoss.from_mixture(
+        mixture.StateMixture(families.Normal(), families.Bernoulli(), n_states=3),
         alpha=alpha,
+        reduction="sum_over_batch_size",
     )
 
 

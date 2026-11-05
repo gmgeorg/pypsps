@@ -10,6 +10,9 @@ from pypsps import utils
 from pypsps.keras import families, losses, metrics, mixture, neglogliks
 from pypsps.keras.layout import ColumnLayout
 
+# This module also covers the deprecated column-count API on purpose (removed in v0.5.0).
+pytestmark = pytest.mark.filterwarnings("ignore:.*removed in v0.5.0:FutureWarning")
+
 
 def _make_y_pred(outcome_blocks, weights, treatment_blocks):
     """Builds an interleaved y_pred tensor: [outcome params..., weights, treatment params...].
