@@ -2,7 +2,8 @@
 
 Practical notes for building and training pypsps models: the reasoning behind
 `StateColumnGate`, the alpha schedule and its callbacks, model selection, the outcome
-likelihood option, and safe bounds for time-to-event parameters. The API itself is
+likelihood option, safe bounds for time-to-event parameters, and the predictive-state
+regularizer. The API itself is
 described in [Model Architecture](model_building.md).
 
 ## 1. Per-State Layers in a Loop
@@ -28,7 +29,8 @@ deserialize.
 `layers.StateColumnGate(i)` avoids both problems. It stores `i` in its config, so each
 gate keeps its own index and the model round-trips through `model.save` and `load_model`.
 The same reasoning applies to any per-state computation: prefer a small serializable layer
-with explicit arguments over a `Lambda` that captures loop variables.
+with explicit arguments over a `Lambda` that captures loop variables. `build_model`'s
+`"gated"` architecture, the default, already gates each head with `StateColumnGate`.
 
 ## 2. Alpha Schedules
 
@@ -70,16 +72,27 @@ Even after the warmup, the total loss depends on alpha and on any predictive-sta
 regularizer, so two runs with different settings cannot be compared on it.
 `metrics.outcome_nll_metric_gen(outcome_loss)` reports the outcome negative
 log-likelihood alone, with penalties stripped and no alpha. Monitoring
-`val_outcome_nll_metric` selects every model by the same rule. The continuous survival
-builders compile this metric.
+`val_outcome_nll_metric` selects every model by the same rule. Every model compiled by
+`compile_model` with the default metrics logs it.
 
-`causal_loss_metric`, which every builder compiles, is the joint version: the
+`causal_loss_metric`, which every model logs, is the joint version: the
 `outcome_loss_weight`-weighted outcome NLL plus the treatment NLL, at alpha = 1 and without
 penalties. It doesn't move with the alpha schedule either, so `val_causal_loss_metric` is
 comparable across epochs and across schedules, and keeping `start_from_epoch` at the
 warmup only skips epochs whose weights were still fit under a large alpha. Models compiled
 this way save and reload with their losses and metrics; see
 [Saving and Loading](model_building.md#saving-and-loading).
+
+**Early stopping during the alpha warm-up.** The metric stays at alpha = 1 while the loss
+follows the schedule, so early in training the optimizer trades outcome fit for treatment
+fit more than the metric rewards. `val_causal_loss_metric` can then stall, or briefly rise,
+while the loss falls, and `EarlyStopping` counts those epochs. With
+`callbacks.get_default_callbacks`, whose sigmoid schedule takes alpha from about 1.73 at
+epoch 0 to 1.05 at epoch 40, choose `patience` larger than the steep part of the warm-up,
+about `half_life_epoch + 1 / steepness` (20 epochs at the defaults). The predictive-state
+penalty is never in the metric either, so epochs where the optimizer pays NLL to lower the
+penalty look like regressions on it. A model trained at a constant alpha other than 1 is
+still selected at alpha = 1, the joint likelihood.
 
 ## 4. Interventional and Observational Outcome Likelihood
 
@@ -195,3 +208,37 @@ ate = inference.predict_ate_continuous(model, x, treatment_grid=[-1.0, 0.0, 1.0]
 
 The true ATEs here are about -0.65 and 0.88, and the fitted model gives values close to
 them, for example `[-0.59, 0.0, 0.90]`.
+
+## 7. Tuning the Predictive-State Regularizer
+
+`compile_model(predictive_states_regularizer=...)` takes any Keras regularizer, which
+`CausalLoss` applies to the batch's state weights. The presets choose one from
+`df_penalty_l2`:
+
+* `presets.toy` and `presets.binary_normal`:
+  `pypress.keras.regularizers.DegreesOfFreedom(l2=df_penalty_l2, target=max(1, log(n_states / 2)))`.
+* `presets.binary_exponential`: `pypress.keras.regularizers.Uniform(l2=df_penalty_l2)`.
+* The continuous presets: the `predictive_states_regularizer` you pass, none by default.
+
+The degrees-of-freedom target is a starting point, not a recommendation. It is 1.0 for up to
+5 states and 1.6 for 10. The degrees of freedom of the state weights start at exactly 1 for
+any `n_states` and grow as the states differentiate, so a target well below `n_states`
+limits that from the first step. Tune `target` and `l2` for the data by replacing the
+regularizer:
+
+```python
+from pypress.keras import regularizers
+from pypsps.keras import models, presets
+
+args = presets.toy(n_states=6, n_features=10)
+reg = regularizers.DegreesOfFreedom(l2=0.1, target=4.0)
+model = models.build_model(**(args | {"predictive_states_regularizer": reg}))
+```
+
+Compare the candidates on `val_causal_loss_metric` or `val_outcome_nll_metric`. Neither
+includes the penalty, so models trained with different regularizers are comparable.
+
+pypress's `ScheduledValue` (warm `l2` up from 0, or anneal `target` down from about
+`n_states`) doesn't work here yet: `pypress.keras.callbacks.RegularizerScheduler` looks for
+scheduled values in the layers' regularizers only, so one on the loss's regularizer stays at
+its `end` value for the whole fit.
