@@ -167,18 +167,6 @@ Continuous Dose–Response Estimation under Right-Censoring**, *The First Worksh
 World Models for High-Stakes Health (WMHS) at NeurIPS 2026*, non-archival workshop
 paper.
 
-```bibtex
-@inproceedings{goerg2026setting,
-  title     = {Setting a Dose versus Observing One: Continuous Dose--Response Estimation
-               under Right-Censoring},
-  author    = {Goerg, Georg M. and Shuryak, Igor},
-  booktitle = {The First Workshop on World Models for High-Stakes Health (WMHS) at NeurIPS},
-  year      = {2026},
-  url       = {https://openreview.net/forum?id=LtfivZ5XJ9},
-  note      = {Non-archival workshop paper}
-}
-```
-
 ## License
 
 This project is licensed under the terms of the [MIT license](LICENSE).
