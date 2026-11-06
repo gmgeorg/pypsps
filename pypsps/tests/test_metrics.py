@@ -354,16 +354,16 @@ def test_metrics_take_only_a_mixture():
 
 
 def test_state_weight_generators_read_the_weights_through_the_layout():
-    """predictive_state_df is tr_kernel of the state weights; uniform_entropy their mean
-    Shannon entropy."""
-    import pypress.utils
+    """predictive_state_df is the degrees of freedom of the state weights; uniform_entropy
+    their mean Shannon entropy."""
+    import pypress.analysis
 
     weights = _WEIGHTS[:3]
     y_pred = _make_y_pred([np.zeros((3, 2))], weights, [np.zeros((3, 2))])
     layout = ColumnLayout(("loc",), ("prob",), 1, n_states=2)
     np.testing.assert_allclose(
         float(metrics.predictive_state_df_gen(layout)(None, y_pred)),
-        float(pypress.utils.tr_kernel(tf.constant(weights, tf.float32))),
+        pypress.analysis.degrees_of_freedom(weights),
         rtol=1e-6,
     )
     np.testing.assert_allclose(

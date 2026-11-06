@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pypsps"
-version = "0.5.0"
+version = "0.5.1"
 description = "Predictive State Propensity Subclassification (PSPS) in Python (keras)"
 authors = ["Georg M. Goerg <im@gmge.org>"]
 license = "MIT"
@@ -14,7 +14,7 @@ numpy = ">=1.11.0"
 pandas = ">=1.0.0"
 tensorflow = ">=2.16"
 tqdm = ">=4.62"
-pypress = { git = "https://github.com/gmgeorg/pypress.git", rev = "v0.3.2" }
+pypress = { git = "https://github.com/gmgeorg/pypress.git", rev = "v0.5.4" }
 
 [tool.poetry.group.dev.dependencies]
 flake8 = "^7.0.0"

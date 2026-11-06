@@ -175,8 +175,8 @@ def test_binary_presets_build_and_train(preset, kwargs):
 
 
 def test_scheduled_regularizer_values_advance_during_fit():
-    """A pypress `ScheduledValue` in the loss's state regularizer is advanced by
-    `RegularizerScheduler` (pypress >= 0.3.2 also walks the compiled loss)."""
+    """A pypress `ScheduledValue` in the loss's state regularizer follows the training clock
+    that `RegularizerScheduler` advances each epoch; after `fit` the clock stops."""
     from pypress.keras import callbacks as press_callbacks
     from pypress.keras import schedules
 
@@ -185,11 +185,20 @@ def test_scheduled_regularizer_values_advance_during_fit():
     model = models.build_model(**(presets.toy(K, F) | {"predictive_states_regularizer": reg}))
     x, t, _ = _data()
     y = np.hstack([x[:, :1], t])  # [outcome, treatment]
-    fit = dict(batch_size=32, verbose=0)
-    model.fit([x, t], y, epochs=1, callbacks=[press_callbacks.RegularizerScheduler()], **fit)
-    np.testing.assert_allclose(float(l2.variable), 0.0)
-    model.fit([x, t], y, epochs=4, callbacks=[press_callbacks.RegularizerScheduler()], **fit)
-    np.testing.assert_allclose(float(l2.variable), 1.0)
+    seen = []
+    record = tf.keras.callbacks.LambdaCallback(
+        on_epoch_end=lambda epoch, logs: seen.append(float(l2.value()))
+    )
+    model.fit(
+        [x, t],
+        y,
+        epochs=5,
+        batch_size=32,
+        verbose=0,
+        callbacks=[press_callbacks.RegularizerScheduler(), record],
+    )
+    np.testing.assert_allclose(seen, [0.0, 1 / 3, 2 / 3, 1.0, 1.0], rtol=1e-6)
+    assert schedules.current_epoch() is None
 
 
 def test_binary_preset_regularizers():

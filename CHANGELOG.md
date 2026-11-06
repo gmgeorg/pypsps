@@ -5,6 +5,25 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.5.1 - Nov 5, 2026
+
+### Dependencies
+
+* pypress v0.5.4 (was v0.3.2). The predictive-state penalty keeps its strength: since
+  pypress v0.5.2, calling a pypress regularizer returns its penalty times the batch size (to
+  cancel Keras's division of activity losses). `CausalLoss` adds the regularizer to the loss
+  itself, never as an activity regularizer, so it now adds `regularizer.penalty(weights)`:
+  the same amount as before, at most `l2`, at any batch size. Other regularizers (e.g. a
+  built-in Keras one) are still called.
+* `ema_decay` on a pypress regularizer (recommended by pypress v0.5.3 for small batches)
+  works inside `CausalLoss`: its running averages advance on training batches only.
+
+### Changed
+
+* `metrics.predictive_state_df_gen` and `uniform_entropy_gen` use
+  `pypress.keras.statistics` instead of the deprecated `pypress.utils.tr_kernel` and
+  `safe_xlogx`. The values are unchanged.
+
 ## pypsps v0.5.0 - Nov 4, 2026
 
 Breaking: removes everything deprecated in v0.3.4 to v0.4.0. `docs/model_building.md`
