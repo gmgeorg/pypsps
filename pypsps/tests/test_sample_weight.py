@@ -1,6 +1,7 @@
 """Losses and loss metrics weight each unit by its ``sample_weight``."""
 
 import numpy as np
+import pypress.keras.regularizers
 import pytest
 import tensorflow as tf
 
@@ -96,6 +97,27 @@ def test_regularizer_is_added_once_and_not_weighted(reduction):
     for w in (None, _W, 10 * _W):
         diff = with_reg(y_true, y_pred, sample_weight=w) - without(y_true, y_pred, sample_weight=w)
         np.testing.assert_allclose(diff.numpy(), np.full(np.shape(diff), penalty), rtol=1e-4)
+
+
+@pytest.mark.parametrize(
+    "reg",
+    [
+        pypress.keras.regularizers.DegreesOfFreedom(l2=0.5, target=1.0),
+        pypress.keras.regularizers.Uniform(l2=0.5),
+    ],
+    ids=["degrees_of_freedom", "uniform"],
+)
+@pytest.mark.parametrize("n", [4, N, 64])
+def test_pypress_regularizer_adds_its_penalty_at_any_batch_size(reg, n):
+    """A pypress regularizer adds `penalty()`, not its activity-regularizer value (the penalty
+    times the batch size, since pypress 0.5.2), so its strength does not grow with the batch."""
+    y_true, y_pred = _data(seed=6, n=n)
+    weights = tf.constant(_MIX.layout.decode_pred(y_pred).state_weights)
+    with_reg = losses.CausalLoss.from_mixture(_MIX, predictive_states_regularizer=reg)
+    without = losses.CausalLoss.from_mixture(_MIX)
+    diff = float(with_reg(y_true, y_pred) - without(y_true, y_pred))
+    np.testing.assert_allclose(diff, float(reg.penalty(weights)), rtol=1e-4, atol=1e-6)
+    assert diff <= 0.5 + 1e-6  # bounded by l2, as pypress documents
 
 
 def test_causal_loss_metric_is_the_weighted_mean_over_units():

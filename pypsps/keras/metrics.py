@@ -8,7 +8,7 @@ The propensity, treatment and outcome metrics take the model's `StateMixture`
 
 from typing import Any, Optional
 
-import pypress.utils
+import pypress.keras.statistics
 import tensorflow as tf
 
 from . import families, losses
@@ -226,10 +226,13 @@ def _layout_kwargs(name: str, layout: ColumnLayout) -> dict:
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")
 def predictive_state_df(y_true: Array, y_pred: Array, layout: ColumnLayout) -> tf.Tensor:
-    """Degrees of freedom of the predictive state weights (`pypress.utils.tr_kernel`)."""
+    """Degrees of freedom, trace(H), of the predictive state weights (pypress)."""
     del y_true
     weights = layout.decode_pred(y_pred).state_weights
-    return pypress.utils.tr_kernel(weights)
+    stats = pypress.keras.statistics
+    return stats.degrees_of_freedom(
+        stats.compute("trace_numerator", weights), stats.compute("trace_denominator", weights)
+    )
 
 
 def predictive_state_df_gen(layout: ColumnLayout) -> tf.keras.metrics.MeanMetricWrapper:
@@ -348,7 +351,7 @@ def uniform_entropy(y_true: Array, y_pred: Array, layout: ColumnLayout) -> tf.Te
     # Shannon entropy per row: -sum(p_i * log(p_i)), with 0 * log(0) taken as 0.
     # safe_xlogx computes that exactly; an epsilon floor (log(p_i + eps)) would distort
     # the entropy of sharp, near-degenerate state weights.
-    entropy_per_row = -1 * tf.math.reduce_sum(pypress.utils.safe_xlogx(weights), axis=1)
+    entropy_per_row = -1 * tf.math.reduce_sum(pypress.keras.statistics.safe_xlogx(weights), axis=1)
     return tf.math.reduce_mean(entropy_per_row)
 
 

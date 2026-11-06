@@ -1,7 +1,7 @@
 """Module for pypsps losses."""
 
 import warnings
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import tensorflow as tf
 
@@ -207,6 +207,18 @@ def _link_mixtures(outcome_loss: "OutcomeLoss", treatment_loss: "TreatmentLoss")
     treatment_loss._mixture = o_mix
 
 
+def _state_penalty(regularizer: Callable, weights: tf.Tensor) -> tf.Tensor:
+    """The amount ``regularizer`` adds to the loss for a batch of state weights.
+
+    pypress regularizers (>= 0.5.2) are activity regularizers: calling one returns its penalty
+    times the batch size, to cancel the division Keras applies to activity losses. `CausalLoss`
+    adds the penalty to the loss itself, with no such division, so it uses ``penalty()``.
+    Any other regularizer (e.g. a built-in Keras one) is called.
+    """
+    penalty = getattr(regularizer, "penalty", None)
+    return penalty(weights) if callable(penalty) else regularizer(weights)
+
+
 @tf.keras.utils.register_keras_serializable(package="pypsps")
 class CausalLoss(tf.keras.losses.Loss):
     """PSPS causal loss is the sum of outcome loss + treatment loss.
@@ -389,7 +401,9 @@ class CausalLoss(tf.keras.losses.Loss):
         if self._predictive_states_regularizer is None:
             return loss
         weights = self.layout.decode_pred(tf.convert_to_tensor(y_pred, loss.dtype)).state_weights
-        return loss + tf.cast(self._predictive_states_regularizer(weights), loss.dtype)
+        return loss + tf.cast(
+            _state_penalty(self._predictive_states_regularizer, weights), loss.dtype
+        )
 
     def call(self, y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
         """The causal loss per unit, ``[N]``, without the regularizer (see `__call__`)."""
