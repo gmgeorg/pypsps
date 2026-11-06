@@ -111,8 +111,9 @@ likelihood the loss evaluates:
 The interventional form is not the exact likelihood of the data conditional on the
 observed treatment. It is a causal likelihood alternative that treats treatment
 assignment and treatment observation differently in the likelihood. In practice we
-observe better accuracy when estimating UTEs and ATEs; research comparing the two is
-forthcoming.
+observe better accuracy when estimating UTEs and ATEs.
+[Goerg and Shuryak (2026)][goerg2026] compare the two for a continuous treatment (dose) and a
+right-censored outcome.
 
 ## 5. Time-to-Event Parameter Bounds
 
@@ -147,6 +148,9 @@ bound, lower the upper log-shape bound, or rescale time. For the exponential out
 same rule holds with shape 1.
 
 ## 6. Example: Continuous Treatment, Weibull Outcome
+
+[Goerg and Shuryak (2026)][goerg2026] study this setting, continuous dose–response estimation
+under right-censoring.
 
 The data below have a treatment confounded by `x0` and Weibull event times whose scale
 grows with the treatment, with random censoring. The model is trained with the alpha
@@ -256,3 +260,5 @@ model.fit(..., callbacks=[press_callbacks.RegularizerScheduler(), ...])
 Without the callback a `ScheduledValue` stays at its `end` value, so the penalty is applied
 fully from the first epoch. This needs pypress 0.3.2 or later, which finds scheduled values
 in the loss's regularizer.
+
+[goerg2026]: https://openreview.net/forum?id=LtfivZ5XJ9

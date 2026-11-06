@@ -340,8 +340,9 @@ loss evaluates, through the state weights that mix the per-state outcome likelih
   states precede treatment. These are the weights at treatment assignment time, before
   the treatment is known, and the same weights the ATE estimates in `pypsps.inference`
   use. With `TreatmentLoss` it does not sum to the joint likelihood of (Y, A | X). In
-  practice we observe better accuracy when estimating UTEs and ATEs; research comparing
-  the two is forthcoming.
+  practice we observe better accuracy when estimating UTEs and ATEs; see
+  [Goerg and Shuryak (2026)][goerg2026] for a comparison with a continuous treatment and a
+  right-censored outcome.
 * `"observational"` (`OutcomeLikelihood.OBSERVATIONAL`): -log p(Y | A = a, X), mixing
   with the posterior state weights P(S | X, A). With `TreatmentLoss` the two sum to the
   exact joint likelihood of (Y, A | X). This was the only behavior from v0.1.0 through
@@ -373,7 +374,8 @@ sum(w × loss) / sum(w), across all batches.
 arguments of a model with a Normal treatment density per state and an exponential or Weibull
 outcome. `y_true` is
 `[time, event indicator, treatment]`, and `inference.predict_ate_continuous` reads the
-fitted model directly.
+fitted model directly. [Goerg and Shuryak (2026)][goerg2026] apply this setup to continuous
+dose–response estimation under right-censoring.
 
 ```python
 from pypsps.keras import models, presets
@@ -424,3 +426,5 @@ model = tf.keras.models.load_model("model.keras")
 * A custom elementwise NLL must be registered with
   `tf.keras.utils.register_keras_serializable` to load. `neglogliks.NegloglikLoss`, which
   holds a distribution constructor, isn't serializable.
+
+[goerg2026]: https://openreview.net/forum?id=LtfivZ5XJ9

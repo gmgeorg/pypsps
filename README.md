@@ -55,6 +55,11 @@ treatment family (Normal, Bernoulli, exponential, Weibull, or any Keras loss).
 binary treatment and a continuous outcome, which can be adapted to your specific
 observational dataset.
 
+[Goerg and Shuryak (2026)][goerg2026] use PSPS to estimate continuous dose–response curves for
+right-censored time-to-event outcomes, and compare the interventional outcome likelihood
+(setting a dose) with the observational one (observing a dose). See the
+[Training Guide](docs/training_guide.md#4-interventional-and-observational-outcome-likelihood).
+
 ## Documentation Overview
 
 * **[Architecture](docs/architecture.md)**: Theoretical framework, predictive
@@ -157,6 +162,23 @@ Propensity Subclassification (PSPS): A causal inference algorithm for
 data-driven propensity score stratification**, Proceedings of MLR for *Causal
 Learning and Reasoning (CLEAR) 2022*.
 
+[Goerg and Shuryak (2026)][goerg2026], **Setting a Dose versus Observing One:
+Continuous Dose–Response Estimation under Right-Censoring**, *The First Workshop on
+World Models for High-Stakes Health (WMHS) at NeurIPS 2026*, non-archival workshop
+paper.
+
+```bibtex
+@inproceedings{goerg2026setting,
+  title     = {Setting a Dose versus Observing One: Continuous Dose--Response Estimation
+               under Right-Censoring},
+  author    = {Goerg, Georg M. and Shuryak, Igor},
+  booktitle = {The First Workshop on World Models for High-Stakes Health (WMHS) at NeurIPS},
+  year      = {2026},
+  url       = {https://openreview.net/forum?id=LtfivZ5XJ9},
+  note      = {Non-archival workshop paper}
+}
+```
+
 ## License
 
 This project is licensed under the terms of the [MIT license](LICENSE).
@@ -166,3 +188,5 @@ original research paper; this repository is not related to Google in any way. It
 is an independent re-implementation of the Google research
 [pre-print](https://research.google/pubs/pub49197/), with additional
 improvements and extensions to the original architecture.
+
+[goerg2026]: https://openreview.net/forum?id=LtfivZ5XJ9
