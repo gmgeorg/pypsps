@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from ..keras import models, presets
+from ...keras import models, presets
 
 LOG_SCALE_BOUNDS = (-3.0, 6.0)
 LOG_SHAPE_BOUNDS = (-2.0, 2.0)

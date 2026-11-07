@@ -5,8 +5,8 @@ import pypress.keras.regularizers
 import pytest
 import tensorflow as tf
 
-from ..keras import families, layers, models, neglogliks, presets
-from ..keras.layout import ColumnLayout
+from ...keras import families, layers, models, neglogliks, presets
+from ...keras.layout import ColumnLayout
 
 N, K, F = 16, 3, 4
 
@@ -24,8 +24,8 @@ def _data(seed=0):
 def test_binary_exponential_preset_fits_with_default_callbacks():
     """The binary exponential preset trains on simulated survival data with the default
     callbacks, which monitor its `causal_loss_metric`."""
-    from .. import datasets
-    from ..keras import callbacks
+    from ... import datasets
+    from ...keras import callbacks
 
     data = datasets.CancerSurvivalSimulator(seed=42).sample(n_samples=300)
     inputs, outputs = data.to_keras_inputs_outputs()

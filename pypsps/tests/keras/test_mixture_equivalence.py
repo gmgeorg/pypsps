@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
-from ..keras import families, losses, mixture, neglogliks
+from ...keras import families, losses, mixture, neglogliks
 from . import _reference_v0_2 as ref
 
 _N = 12

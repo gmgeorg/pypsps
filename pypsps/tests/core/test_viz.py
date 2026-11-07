@@ -7,7 +7,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .. import viz
+from ... import viz
 
 
 def test_plot_propensity_eval_returns_fig_and_axes():

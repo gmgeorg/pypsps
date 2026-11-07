@@ -79,8 +79,21 @@ def test_sample_weight_changes_the_fit_and_zero_weight_units_are_ignored():
     weights = np.ones(_N, "f4")
     weights[:40] = 0.0
     full = training.evaluate(model, x[40:], a[40:], y[40:])
-    masked = training.evaluate(model, x, a, y, weights)
+    masked = training.evaluate(model, x, a, y, weights, weighted_metrics=True)
     assert masked["causal_loss_metric"] == pytest.approx(full["causal_loss_metric"], rel=1e-4)
+
+
+def test_metrics_ignore_sample_weight_unless_asked():
+    """As in Keras, the metrics are unweighted by default; the loss is always weighted."""
+    x, a, y = _data()
+    model = _model().eval()
+    weights = np.linspace(0.1, 3.0, _N).astype("f4")
+    plain = training.evaluate(model, x, a, y)
+    weighted = training.evaluate(model, x, a, y, weights)
+    assert weighted["causal_loss_metric"] == pytest.approx(plain["causal_loss_metric"])
+    assert weighted["loss"] != pytest.approx(plain["loss"])
+    both = training.evaluate(model, x, a, y, weights, weighted_metrics=True)
+    assert both["causal_loss_metric"] != pytest.approx(plain["causal_loss_metric"])
 
 
 def test_optimizer_and_learning_rate_are_exclusive():

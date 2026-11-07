@@ -6,9 +6,9 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
-from .. import datasets
-from ..keras import families, losses, mixture, models, neglogliks, presets
-from ..keras.layout import ColumnLayout
+from ... import datasets
+from ...keras import families, losses, mixture, models, neglogliks, presets
+from ...keras.layout import ColumnLayout
 
 tfk = tf.keras
 

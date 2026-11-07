@@ -7,7 +7,7 @@ import pytest
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-from ..keras import neglogliks
+from ...keras import neglogliks
 
 tfd = tfp.distributions
 

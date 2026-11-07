@@ -7,9 +7,9 @@ import pypress.keras.regularizers
 import pytest
 import tensorflow as tf
 
-from .. import inference
-from ..keras import callbacks, families, layers, losses, mixture, models, presets
-from ..keras.layout import ColumnLayout
+from ... import inference
+from ...keras import callbacks, families, layers, losses, mixture, models, presets
+from ...keras.layout import ColumnLayout
 
 N, F = 128, 4
 _LS_BOUNDS, _SHAPE_BOUNDS = (-2.0, 4.0), (-1.0, 1.0)

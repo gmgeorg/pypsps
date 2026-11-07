@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
-from ..keras import families, mixture
-from ..keras.layout import ColumnLayout
+from ...keras import families, mixture
+from ...keras.layout import ColumnLayout
 
 
 def _normal_pdf(y, loc, scale):
@@ -217,7 +217,7 @@ def test_treatment_family_must_have_one_true_col():
 
 def _toy_model(compile_with=None, n_states=3):
     """A tiny functional model ending in a CausalOutput layer."""
-    from ..keras import layers
+    from ...keras import layers
 
     mix = mixture.StateMixture(families.Normal(), families.Bernoulli(), n_states=n_states)
     inp = tf.keras.Input(shape=(2,))
@@ -230,7 +230,7 @@ def _toy_model(compile_with=None, n_states=3):
     )
     model = tf.keras.Model(inp, out)
     if compile_with is not None:
-        from ..keras import losses
+        from ...keras import losses
 
         model.compile(loss=losses.CausalLoss.from_mixture(compile_with))
     return model, mix
@@ -245,7 +245,7 @@ def test_from_model_reads_the_output_layer_without_a_loss():
 
 def test_from_model_falls_back_to_the_loss():
     """A model without CausalOutput (built before v0.3.4) uses its compiled loss."""
-    from ..keras import losses
+    from ...keras import losses
 
     mix = mixture.StateMixture(families.Normal(), families.Bernoulli(), n_states=2)
     inp = tf.keras.Input(shape=(2,))

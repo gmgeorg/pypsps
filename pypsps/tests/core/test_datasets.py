@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from .. import datasets
+from ... import datasets
 
 
 def test_kang_schafer():

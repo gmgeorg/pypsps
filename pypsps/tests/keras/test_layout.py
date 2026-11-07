@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
-from ..keras import families
-from ..keras.layout import ColumnLayout
+from ...keras import families
+from ...keras.layout import ColumnLayout
 
 _OUTCOME_PARAMS = [("loc", "scale"), ("log_scale",), ("log_scale", "log_shape")]
 _TREATMENT_PARAMS = [("prob",), ("loc", "scale")]

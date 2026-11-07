@@ -4,8 +4,8 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 
-from .. import bootstrap, datasets
-from ..keras import models, presets
+from ... import bootstrap, datasets
+from ...keras import models, presets
 
 tfk = tf.keras
 

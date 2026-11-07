@@ -5,7 +5,7 @@ import pypress.keras.regularizers
 import pytest
 import tensorflow as tf
 
-from ..keras import families, losses, metrics, mixture, models, presets
+from ...keras import families, losses, metrics, mixture, models, presets
 
 N, K = 8, 3
 _MIX = mixture.StateMixture(families.Normal(), families.Bernoulli(), n_states=K)

@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 
-from ..keras import alpha_schedule
+from ...core import alpha_schedule
 
 
 def test_formula_is_exact_zero_based_and_starts_at_alpha_start():

@@ -6,9 +6,9 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
-from .. import datasets, utils
-from ..keras import models, presets
-from ..keras.layout import ColumnLayout
+from ... import datasets, utils
+from ...keras import models, presets
+from ...keras.layout import ColumnLayout
 
 
 def test_get_n_cols_np_array():

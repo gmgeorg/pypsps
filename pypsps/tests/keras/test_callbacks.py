@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
-from .. import datasets
-from ..keras import callbacks, families, losses, mixture, models, presets
+from ... import datasets
+from ...keras import callbacks, families, losses, mixture, models, presets
 
 
 def _causal_loss(alpha=1.0) -> losses.CausalLoss:

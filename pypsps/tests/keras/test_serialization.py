@@ -11,9 +11,9 @@ import pypress
 import pytest
 import tensorflow as tf
 
-from .. import datasets, inference
-from ..keras import families, losses, metrics, mixture, models, presets
-from ..keras.layout import ColumnLayout
+from ... import datasets, inference
+from ...keras import families, losses, metrics, mixture, models, presets
+from ...keras.layout import ColumnLayout
 from ._continuous import continuous_model, synthetic_continuous_survival
 
 

@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
-from ..keras import layers
+from ...keras import layers
 
 
 def test_bias_only_forward_pass():
@@ -122,7 +122,7 @@ def test_soft_clip_inverse_and_config():
 
 
 def _normal_bernoulli(n_states=3):
-    from ..keras import families, mixture
+    from ...keras import families, mixture
 
     return mixture.StateMixture(families.Normal(), families.Bernoulli(), n_states=n_states)
 

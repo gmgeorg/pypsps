@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from ..datasets.utils import identify_binary_features
+from ...datasets.utils import identify_binary_features
 
 
 def _frame():

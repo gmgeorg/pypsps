@@ -5,8 +5,8 @@ import pandas as pd
 import pytest
 import tensorflow as tf
 
-from .. import datasets, inference
-from ..keras import models, presets
+from ... import datasets, inference
+from ...keras import models, presets
 
 tfk = tf.keras
 

@@ -8,7 +8,7 @@ frozen copies of the ``neglogliks`` helpers that v0.5.0 removed.
 
 import tensorflow as tf
 
-from .. import utils
+from ... import utils
 
 
 def _negloglik_per_state(loss, y_true, y_pred, n_states):

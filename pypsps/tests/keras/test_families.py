@@ -7,8 +7,8 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
-from ..keras import families, neglogliks
-from ..keras.layout import ColumnLayout
+from ...keras import families, neglogliks
+from ...keras.layout import ColumnLayout
 from . import _reference_v0_2 as ref
 
 _N, _K = 6, 3
