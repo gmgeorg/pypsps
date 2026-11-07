@@ -28,6 +28,12 @@ See `pyproject.toml`.
 
 ## Testing Strategy
 
-- Tests reside in `tests/`. Run via `pytest`.
+- Tests reside in `pypsps/tests/`. Run via `pytest`. They are split by backend:
+  `core/` (no framework), `keras/` (needs TensorFlow), `torch/` (needs PyTorch) and
+  `parity/` (needs both, compares the two backends). A directory is skipped when its
+  framework is not installed, so `pip install -e ".[torch]"` runs everything but the Keras
+  and parity tests. CI runs the `tf`, `torch` and `tf,torch` installs.
+- Install CPU-only PyTorch with
+  `pip install -e ".[torch]" --extra-index-url https://download.pytorch.org/whl/cpu`.
 - Ensure new features have accompanying unit tests for models, datasets, losses,
   metrics, or inference.

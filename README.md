@@ -2,6 +2,7 @@
 
 ![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)
 ![TensorFlow](https://img.shields.io/badge/TensorFlow-%23FF6F00.svg?style=for-the-badge&logo=TensorFlow&logoColor=white)
+![PyTorch](https://img.shields.io/badge/PyTorch-%23EE4C2C.svg?style=for-the-badge&logo=PyTorch&logoColor=white)
 [![PRs
 Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)
 [![MIT
@@ -68,6 +69,8 @@ right-censored time-to-event outcomes, and compare the interventional outcome li
   formatting, and contribution guidelines.
 * **[Model Building](docs/model_building.md)**: `build_model`, presets,
   custom Keras layers, losses, metrics, and training helpers.
+* **[PyTorch Backend](docs/torch.md)**: `pypsps.torch`, the same model on PyTorch
+  without TensorFlow: `build_model`, `fit`, metrics, callbacks, converting a Keras model.
 * **[Training Guide](docs/training_guide.md)**: Alpha schedules, model
   selection, time-to-event bounds, and the predictive-state regularizer.
 * **[Datasets API](docs/datasets.md)**: Using `CausalDataset` and built-in
@@ -77,11 +80,16 @@ right-censored time-to-event outcomes, and compare the interventional outcome li
 
 ## Installation
 
-Install directly from GitHub:
+Install directly from GitHub, with the backend you use: TensorFlow (`tf`), PyTorch
+(`torch`), or both. Neither framework is installed by default.
 
 ```bash
-pip install git+https://github.com/gmgeorg/pypsps.git
+pip install "pypsps[tf] @ git+https://github.com/gmgeorg/pypsps.git"     # pypsps.keras
+pip install "pypsps[torch] @ git+https://github.com/gmgeorg/pypsps.git"  # pypsps.torch
 ```
+
+The two backends compute the same model; the example below uses Keras, and
+[docs/torch.md](docs/torch.md) has the PyTorch version.
 
 For development setup and requirements, see
 [docs/development.md](docs/development.md).

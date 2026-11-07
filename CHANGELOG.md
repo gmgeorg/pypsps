@@ -5,6 +5,45 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.6.0 - Nov 7, 2026
+
+### Added
+
+* `pypsps.torch`, a native PyTorch backend that computes the same PSPS model as
+  `pypsps.keras` without TensorFlow: `models.build_model` returns a `PSPSModel`
+  (`nn.Module`) with the same architectures, head specs and presets; `losses.CausalLoss`
+  is a plain callable with a settable `alpha`; `training.fit`, `predict` and `evaluate` are
+  a small training loop with the Keras defaults (Nadam, per-parameter `clipnorm`, batch size
+  32, last-fraction `validation_split`) and the Keras history keys; `metrics`, `callbacks`
+  and `io.save` / `io.load` mirror their Keras counterparts. It uses the new `pypress.torch`
+  layers and regularizers. See `docs/torch.md`.
+* `PSPSModel.from_keras` copies a trained Keras model into PyTorch; the cross-backend tests
+  check that both give the same `y_pred`, losses, gradients and metrics.
+* `pypsps.core`, the framework-free part of the package: the column layout, family specs,
+  spec validation, `OutcomeLikelihood`, the alpha schedule and the preset logic. The Keras
+  and PyTorch modules subclass it, so the registered Keras names (`pypsps>Normal`,
+  `pypsps>ColumnLayout`, ...) and saved models are unchanged.
+* `pypsps.inference` and `pypsps.bootstrap` accept PyTorch models as well as Keras models.
+
+### Changed
+
+* TensorFlow and PyTorch are optional: install `pypsps[tf]`, `pypsps[torch]` or both.
+  `import pypsps.keras` or `import pypsps.torch` without its framework raises an
+  `ImportError` naming the extra. `pypsps.core`, `inference`, `bootstrap`, `utils` and
+  `datasets` import neither framework.
+* pypress v0.6.0 (was v0.5.4), which adds `pypress.torch`.
+* The test suite is split into `core`, `keras`, `torch` and `parity` directories; each is
+  skipped when its framework is missing, and CI runs the `tf`, `torch` and `tf,torch`
+  installs.
+
+### Removed
+
+* `ParamSpec.head_activation` (a Keras-only method on the framework-free spec); use
+  `pypsps.keras.families.head_activation(param, name=...)`.
+* `pypsps.utils.safe_log` is now defined in `pypsps.keras.utils`, so that `pypsps.utils`
+  imports without TensorFlow. `pypsps.utils.safe_log` still resolves, loading TensorFlow on
+  first use.
+
 ## pypsps v0.5.1 - Nov 5, 2026
 
 ### Dependencies
