@@ -1,2 +1,10 @@
 __pycache__/
 *.pyc
+
+# Local helpers
+dev-docs/
+TODO.md
+.claude/
+.DS_Store
+.ipynb_checkpoints/
+venv/
