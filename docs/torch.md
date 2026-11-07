@@ -122,6 +122,8 @@ training.
 
 * `training.fit` leaves the model in eval mode; call `model.train()` to continue training
   with your own loop.
+* A trailing training batch of a single unit is merged into the previous batch, since batch
+  normalization cannot train on one unit (Keras runs it as its own step).
 * `seed=` seeds the shuffling only. Dropout draws from PyTorch's global generator, so call
   `torch.manual_seed` for a reproducible fit.
 * `torch.optim.NAdam` differs slightly from `tf.keras.optimizers.Nadam` in its momentum

@@ -221,7 +221,8 @@ def fit(
       outcome: ``[N]`` or ``[N, C]``: the outcome columns the outcome family reads (a survival
         family reads ``[time, event]``).
       epochs: number of passes over the training data.
-      batch_size: units per step (Keras default 32).
+      batch_size: units per step (Keras default 32); a trailing batch of one unit is merged
+        into the previous batch.
       sample_weight: optional ``[N]`` weights multiplying each unit's loss.
       validation_split: fraction of the last rows held out for validation (before shuffling).
       validation_data: ``(features, treatment, outcome[, sample_weight])``; overrides the split.
