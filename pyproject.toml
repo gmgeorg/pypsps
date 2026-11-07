@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "pypsps"
-version = "0.5.1"
-description = "Predictive State Propensity Subclassification (PSPS) in Python (keras)"
+version = "0.6.0"
+description = "Predictive State Propensity Subclassification (PSPS) in Python (Keras and PyTorch)"
 authors = ["Georg M. Goerg <im@gmge.org>"]
 license = "MIT"
 readme = "README.md"
@@ -12,11 +12,20 @@ python = ">=3.12,<4.0.0"
 
 numpy = ">=1.11.0"
 pandas = ">=1.0.0"
-tensorflow = ">=2.16"
 tqdm = ">=4.62"
-pypress = { git = "https://github.com/gmgeorg/pypress.git", rev = "v0.5.4" }
+pypress = { git = "https://github.com/gmgeorg/pypress.git", tag = "v0.6.0" }
+# Each backend is an optional extra: pypsps[tf] and pypsps[torch] (or both).
+tensorflow = { version = ">=2.16,<3.0.0", optional = true }
+torch = { version = ">=2.2", optional = true }
+
+[tool.poetry.extras]
+tf = ["tensorflow"]
+torch = ["torch"]
 
 [tool.poetry.group.dev.dependencies]
+# Both backends, so the whole suite (including the cross-backend parity tests) runs.
+tensorflow = ">=2.16,<3.0.0"
+torch = ">=2.2"
 flake8 = "^7.0.0"
 pre-commit = "^3.7.0"
 pytest = ">=6.1.1"
