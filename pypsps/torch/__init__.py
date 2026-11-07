@@ -31,6 +31,6 @@ except ImportError as error:  # pragma: no cover - exercised in a subprocess
         "pip install 'pypsps[torch] @ git+https://github.com/gmgeorg/pypsps.git'"
     ) from error
 
-from . import families, layers, losses, mixture
+from . import families, layers, losses, mixture, models, presets
 
-__all__ = ["families", "layers", "losses", "mixture"]
+__all__ = ["families", "layers", "losses", "mixture", "models", "presets"]
