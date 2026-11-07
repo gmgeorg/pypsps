@@ -22,5 +22,7 @@
 
 * `notebooks/pypsps_minimal_working_example.ipynb`: Basic workflow for ATE
   estimation.
+* `notebooks/pypsps_minimal_working_example_torch.ipynb`: The same workflow with the
+  PyTorch backend.
 * `notebooks/pypsps_demo.ipynb`: In-depth end-to-end demonstrations covering
   multiple edge cases.

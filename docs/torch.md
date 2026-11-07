@@ -48,6 +48,10 @@ parts = model.layout.decode_pred(y_pred)  # parts.outcome["loc"], parts.state_we
 pred_ate = inference.predict_ate_binary(model, ks_data.features)
 ```
 
+For a complete, runnable walk-through (data, model, training, convergence plots, propensity
+scores and ATE), see `notebooks/pypsps_minimal_working_example_torch.ipynb`, the PyTorch
+counterpart of the Keras `notebooks/pypsps_minimal_working_example.ipynb`.
+
 ## What is where
 
 | Keras (`pypsps.keras`) | PyTorch (`pypsps.torch`) |

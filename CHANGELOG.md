@@ -5,6 +5,13 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+* `notebooks/pypsps_minimal_working_example_torch.ipynb`, the minimal working example on
+  the native `pypsps.torch` backend (runs without TensorFlow).
+
 ## pypsps v0.6.0 - Nov 7, 2026
 
 ### Added
