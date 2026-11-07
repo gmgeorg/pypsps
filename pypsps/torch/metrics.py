@@ -57,7 +57,7 @@ class Metric:
         sample_weight: Optional[torch.Tensor] = None,
     ) -> None:
         """Adds one batch."""
-        values = self.values(y_true, y_pred).detach().to(torch.float64)
+        values = self.values(y_true, y_pred).detach().cpu().to(torch.float64)
         if values.ndim == 0:  # a per-batch value counts once
             self._total += float(values)
             self._weight += 1.0
@@ -65,7 +65,7 @@ class Metric:
         weight = self.unit_weights(y_true, sample_weight)
         if weight is None:
             weight = torch.ones_like(values)
-        weight = torch.as_tensor(weight, dtype=torch.float64).reshape(-1)
+        weight = torch.as_tensor(weight).detach().reshape(-1).cpu().to(torch.float64)
         self._total += float((values * weight).sum())
         self._weight += float(weight.sum())
 
@@ -231,10 +231,10 @@ class PropensityScoreAUC(_PropensityMetric):
         weight = (
             np.ones(n)
             if sample_weight is None
-            else torch.as_tensor(sample_weight, dtype=torch.float64).reshape(-1).numpy()
+            else torch.as_tensor(sample_weight).detach().reshape(-1).cpu().double().numpy()
         )
-        self._scores.append(prob.detach().double().numpy())
-        self._labels.append((treatment.detach().numpy() > 0.5).astype(float))
+        self._scores.append(prob.detach().cpu().double().numpy())
+        self._labels.append((treatment.detach().cpu().numpy() > 0.5).astype(float))
         self._weights.append(weight)
 
     def result(self) -> float:
@@ -318,10 +318,10 @@ class _OutcomeError(Metric):
         event = family.event_indicator(self._mixture.layout.decode_true(y_true).outcome)
         if event is None:
             return sample_weight
-        event = event.reshape(-1).to(torch.float64)
+        event = event.reshape(-1)
         if sample_weight is None:
             return event
-        return event * torch.as_tensor(sample_weight, dtype=torch.float64).reshape(-1)
+        return event * torch.as_tensor(sample_weight, device=event.device).reshape(-1)
 
 
 class OutcomeMeanSquaredError(_OutcomeError):

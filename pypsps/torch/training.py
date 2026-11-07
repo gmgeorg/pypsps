@@ -157,6 +157,7 @@ def _evaluate(
     """The ``loss`` and metrics over ``data`` in eval mode."""
     x, a, y, weight = data
     model.eval()
+    loss.eval()
     for metric in metrics:
         metric.reset()
     total, count = 0.0, 0
@@ -305,6 +306,7 @@ def fit(
         for callback in callbacks:
             callback.on_epoch_begin(epoch)
         model.train()
+        loss.train()
         for metric in chosen:
             metric.reset()
         order = torch.randperm(n, generator=generator) if shuffle else None
@@ -362,7 +364,8 @@ def evaluate(
     """The ``loss`` and the metrics of ``model`` on the data, in eval mode.
 
     The counterpart of Keras ``model.evaluate(..., return_dict=True)`` with the arguments of
-    `fit` that define the loss. The model's training/eval mode is restored afterwards.
+    `fit` that define the loss. The training/eval mode of the model and of the regularizer is
+    restored afterwards.
     """
     dev = next(model.parameters()).device
     data = _prepare(
@@ -385,11 +388,16 @@ def evaluate(
         if metrics is None
         else list(metrics)
     )
-    was_training = model.training
+    modes = [
+        (module, module.training)
+        for module in (model, predictive_states_regularizer)
+        if isinstance(module, torch.nn.Module)
+    ]
     try:
         return _evaluate(model, loss, chosen, data, batch_size, dev, weighted_metrics)
     finally:
-        model.train(was_training)
+        for module, mode in modes:
+            module.train(mode)
 
 
 def predict(

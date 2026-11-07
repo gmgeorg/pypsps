@@ -272,3 +272,73 @@ def test_predict_batches_and_restores_the_mode():
     batched = training.predict(model, x, a, batch_size=7)
     assert model.training
     np.testing.assert_allclose(whole, batched, rtol=1e-5, atol=1e-6)
+
+
+class _ModeRecorder(torch.nn.Module):
+    """A zero regularizer that records whether it was called in training mode."""
+
+    def __init__(self):
+        super().__init__()
+        self.modes = []
+
+    def forward(self, weights):
+        self.modes.append(self.training)
+        return weights.sum() * 0.0
+
+
+def test_validation_and_evaluate_run_the_regularizer_in_eval_mode():
+    """Validation batches do not advance the regularizer; evaluate restores its mode."""
+    x, a, y = _data()
+    recorder = _ModeRecorder()
+    training.fit(
+        _model(),
+        x,
+        a,
+        y,
+        epochs=2,
+        batch_size=40,
+        validation_split=0.25,
+        predictive_states_regularizer=recorder,
+    )
+    assert recorder.modes == [True] * 3 + [False] + [True] * 3 + [False]
+
+    model = _model()
+    recorder = _ModeRecorder().train()
+    training.evaluate(model, x, a, y, predictive_states_regularizer=recorder)
+    assert recorder.modes == [False]
+    assert recorder.training
+
+
+def _accelerator():
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return None
+
+
+@pytest.mark.skipif(_accelerator() is None, reason="needs a CUDA or MPS device")
+def test_fit_and_evaluate_with_metrics_on_an_accelerator():
+    """The metrics (AUC included) move values to the CPU and need no float64 on the device."""
+    x, a, y = _data(survival=True)
+    w = np.linspace(0.5, 1.5, _N).astype("f4")
+    model = models.build_model(
+        3,
+        4,
+        families.Weibull(log_scale_bounds=(-2.0, 4.0), log_shape_bounds=(-1.0, 1.0)),
+        families.Bernoulli(),
+    )
+    history = training.fit(
+        model,
+        x,
+        a,
+        y,
+        epochs=1,
+        sample_weight=w,
+        weighted_metrics=True,
+        validation_split=0.25,
+        device=_accelerator(),
+    )
+    assert np.isfinite(history.history["val_propensity_score_auroc"][-1])
+    logs = training.evaluate(model, x, a, y, sample_weight=w, weighted_metrics=True)
+    assert np.isfinite(logs["outcome_mean_squared_error"])
