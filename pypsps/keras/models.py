@@ -1,16 +1,15 @@
 """Model builders for pypsps: `build_model` and `compile_model`."""
 
-import dataclasses
 import inspect
 from collections.abc import Mapping, Sequence
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any
 
-import numpy as np
 import pypress
 import pypress.keras.layers
 import pypress.keras.regularizers
 import tensorflow as tf
 
+from ..core import spec as core_spec
 from . import families, layers, losses, metrics
 from . import mixture as mixture_lib
 
@@ -19,7 +18,7 @@ tfk = tf.keras
 
 def _dense_stack(
     x: tf.Tensor,
-    hidden_layers: List[Tuple[int, str]],
+    hidden_layers: list[tuple[int, str]],
     dropout_rate: float,
     l1: float,
     name: str,
@@ -56,193 +55,21 @@ def get_propensity_state_conditional_means(model: tf.keras.Model) -> tf.Tensor:
 
 # --- build_model and compile_model ---
 
-Architecture = Literal["shared_trunk", "gated"]
-HiddenLayers = Sequence[Tuple[int, str]]  # (units, activation) per Dense layer
-_ARCHITECTURES = ("shared_trunk", "gated")
+Architecture = core_spec.Architecture
+HiddenLayers = core_spec.HiddenLayers
+_ARCHITECTURES = core_spec.ARCHITECTURES
+HeadSpec = core_spec.HeadSpec
+_Spec = core_spec.Spec
+_hidden_layer = core_spec.check_hidden_layer
+_hidden_layers = core_spec.check_hidden_layers
+_positive_int = core_spec.positive_int
+_check_keys = core_spec.check_keys
+_treatment_init = core_spec.treatment_init_array
 
 
-def _hidden_layer(entry: Any, what: str) -> Tuple[int, str]:
-    """Validates one ``(units, activation)`` entry and returns it as a tuple."""
-    if isinstance(entry, (str, bytes)) or not isinstance(entry, Sequence) or len(entry) != 2:
-        raise ValueError(f"{what} must be a (units, activation) pair, got {entry!r}")
-    units, activation = entry
-    if isinstance(units, bool) or not isinstance(units, (int, np.integer)) or units < 1:
-        raise ValueError(f"{what}: units must be a positive int, got {units!r}")
-    if not isinstance(activation, str):
-        raise ValueError(f"{what}: activation must be a string, got {activation!r}")
-    return int(units), activation
-
-
-def _hidden_layers(entries: HiddenLayers, what: str) -> Tuple[Tuple[int, str], ...]:
-    """Validates a list of ``(units, activation)`` entries; empty is allowed."""
-    if isinstance(entries, (str, bytes)) or not isinstance(entries, Sequence):
-        raise ValueError(f"{what} must be a sequence of (units, activation), got {entries!r}")
-    return tuple(_hidden_layer(e, f"{what}[{i}]") for i, e in enumerate(entries))
-
-
-@dataclasses.dataclass(frozen=True)
-class HeadSpec:
-    """How one outcome parameter's state-conditional outcome model is built.
-
-    Attributes:
-      hidden_layer: ``(units, activation)`` of one Dense layer before the raw ``Dense(1)``;
-        None puts the raw ``Dense(1)`` directly on its input (a linear head).
-      constant: True makes the parameter a feature-independent constant per state
-        (`layers.BiasOnly`); ``hidden_layer`` is then ignored.
-      per_state: False builds one head and uses it for every state.
-    """
-
-    hidden_layer: Optional[Tuple[int, str]] = (16, "swish")
-    constant: bool = False
-    per_state: bool = True
-
-    def __post_init__(self):
-        """Validates ``hidden_layer``."""
-        if self.hidden_layer is not None:
-            object.__setattr__(
-                self, "hidden_layer", _hidden_layer(self.hidden_layer, "HeadSpec.hidden_layer")
-            )
-
-
-@dataclasses.dataclass(frozen=True)
-class _Spec:
-    """The validated arguments of `build_model`; `_assemble` turns it into layers."""
-
-    mixture: mixture_lib.StateMixture
-    n_features: int
-    outcome_params: Tuple[families.ParamSpec, ...]  # family params with init overrides
-    treatment_init: Optional[np.ndarray]  # (n_params, n_states) on the support, or None
-    architecture: str
-    predictive_state_hidden_layers: Tuple[Tuple[int, str], ...]
-    outcome_hidden_layers: Tuple[Tuple[int, str], ...]
-    heads: Dict[str, HeadSpec]
-    treatment_embedding_units: Optional[int]
-    dropout_rate: float
-    l1: float
-
-    @property
-    def n_states(self) -> int:
-        """K."""
-        return self.mixture.n_states
-
-
-def _positive_int(value: Any, what: str) -> int:
-    """Raises ValueError unless ``value`` is an int >= 1."""
-    if isinstance(value, bool) or not isinstance(value, (int, np.integer)) or value < 1:
-        raise ValueError(f"{what} must be an int >= 1, got {value!r}")
-    return int(value)
-
-
-def _check_keys(given: Optional[Mapping[str, Any]], family: families.Family, what: str) -> dict:
-    """Raises KeyError for a key that is not a parameter of ``family``."""
-    given = dict(given or {})
-    unknown = sorted(set(given) - set(family.param_names))
-    if unknown:
-        raise KeyError(
-            f"{what} has unknown parameters {unknown}; {type(family).__name__} has "
-            f"{family.param_names}"
-        )
-    return given
-
-
-def _treatment_init(
-    family: families.Family, given: Optional[Mapping[str, Any]], n_states: int
-) -> Optional[np.ndarray]:
-    """The ``(n_params, n_states)`` init of the treatment head, or None for Keras defaults.
-
-    A value is one float for every state, or one float per state. Without ``given``, the
-    family's defaults apply if every parameter has one (e.g. Bernoulli's 0.5).
-    """
-    params = family.params
-    given = _check_keys(given, family, "treatment_init")
-    bounded = [p.name for p in params if p.bounds is not None]
-    if not given:
-        if bounded or any(p.init is None for p in params):
-            return None
-        given = {p.name: p.init for p in params}
-    elif bounded:
-        raise ValueError(
-            f"treatment_init is not supported for bounded treatment parameters {bounded}"
-        )
-    missing = [p.name for p in params if p.name not in given]
-    if missing:
-        raise ValueError(f"treatment_init must give every treatment parameter; missing {missing}")
-    rows = []
-    for p in params:
-        row = np.broadcast_to(np.asarray(given[p.name], dtype=float), (n_states,))
-        for value in row:
-            p.raw_value(value)  # raises outside the support
-        rows.append(row)
-    return np.stack(rows)
-
-
-def _make_spec(
-    n_states: int,
-    n_features: int,
-    outcome_family: families.Family,
-    treatment_family: families.Family,
-    architecture: str,
-    predictive_state_hidden_layers: HiddenLayers,
-    outcome_hidden_layers: HiddenLayers,
-    outcome_heads: Optional[Mapping[str, HeadSpec]],
-    treatment_embedding_units: Optional[int],
-    dropout_rate: float,
-    l1: float,
-    outcome_init: Optional[Mapping[str, float]],
-    treatment_init: Optional[Mapping[str, Any]],
-    max_time: Optional[float],
-) -> _Spec:
-    """Validates every `build_model` argument before any layer is created."""
-    n_states = _positive_int(n_states, "n_states")
-    n_features = _positive_int(n_features, "n_features")
-    if architecture not in _ARCHITECTURES:
-        raise ValueError(f"architecture must be one of {_ARCHITECTURES}, got {architecture!r}")
-    mixture = mixture_lib.StateMixture(outcome_family, treatment_family, n_states=n_states)
-
-    heads = _check_keys(outcome_heads, outcome_family, "outcome_heads")
-    for name, head in heads.items():
-        if not isinstance(head, HeadSpec):
-            raise TypeError(f"outcome_heads[{name!r}] must be a HeadSpec, got {head!r}")
-    heads = {p: heads.get(p, HeadSpec()) for p in outcome_family.param_names}
-
-    inits = _check_keys(outcome_init, outcome_family, "outcome_init")
-    outcome_params = []
-    for p in outcome_family.params:
-        if p.name in inits:
-            p = dataclasses.replace(p, init=float(inits[p.name]))
-        if p.init is not None:
-            p.raw_value(p.init)  # raises outside the support
-        outcome_params.append(p)
-
-    if max_time is not None:
-        if not isinstance(outcome_family, families.SurvivalFamily):
-            raise ValueError("max_time applies to survival outcome families")
-        outcome_family.check_max_time(max_time)
-
-    if treatment_embedding_units is not None:
-        treatment_embedding_units = _positive_int(
-            treatment_embedding_units, "treatment_embedding_units"
-        )
-    if not 0.0 <= dropout_rate < 1.0:
-        raise ValueError(f"dropout_rate must lie in [0, 1), got {dropout_rate!r}")
-    if l1 < 0:
-        raise ValueError(f"l1 must be >= 0, got {l1!r}")
-
-    return _Spec(
-        mixture=mixture,
-        n_features=n_features,
-        outcome_params=tuple(outcome_params),
-        treatment_init=_treatment_init(treatment_family, treatment_init, n_states),
-        architecture=architecture,
-        predictive_state_hidden_layers=_hidden_layers(
-            predictive_state_hidden_layers, "predictive_state_hidden_layers"
-        ),
-        outcome_hidden_layers=_hidden_layers(outcome_hidden_layers, "outcome_hidden_layers"),
-        heads=heads,
-        treatment_embedding_units=treatment_embedding_units,
-        dropout_rate=float(dropout_rate),
-        l1=float(l1),
-    )
+def _make_spec(*args: Any, **kwargs: Any) -> _Spec:
+    """`pypsps.core.spec.make_spec` with the Keras state mixture."""
+    return core_spec.make_spec(mixture_lib.StateMixture, *args, **kwargs)
 
 
 def _treatment_head(spec: _Spec, state_weights: tf.Tensor) -> tf.Tensor:
@@ -277,12 +104,12 @@ def _head(
         if head.hidden_layer is not None:
             x = tfk.layers.Dense(*head.hidden_layer, name=f"{p.name}_hidden_{suffix}")(x)
         raw = tfk.layers.Dense(1, bias_initializer=init, name=f"{p.name}_raw_{suffix}")(x)
-    return p.head_activation(name=f"{p.name}_{suffix}")(raw)
+    return families.head_activation(p, name=f"{p.name}_{suffix}")(raw)
 
 
 def _shared_trunk_outcome(
     spec: _Spec, features_and_treatment: tf.Tensor
-) -> Dict[str, List[tf.Tensor]]:
+) -> dict[str, list[tf.Tensor]]:
     """One outcome trunk with a skip connection; heads are built state by state."""
     trunk = _dense_stack(
         features_and_treatment, spec.outcome_hidden_layers, spec.dropout_rate, spec.l1,
@@ -290,8 +117,8 @@ def _shared_trunk_outcome(
     )  # fmt: skip
     if spec.outcome_hidden_layers:
         trunk = tfk.layers.Concatenate(name="outcome_trunk_skip")([trunk, features_and_treatment])
-    columns: Dict[str, List[tf.Tensor]] = {p.name: [] for p in spec.outcome_params}
-    shared: Dict[str, tf.Tensor] = {}
+    columns: dict[str, list[tf.Tensor]] = {p.name: [] for p in spec.outcome_params}
+    shared: dict[str, tf.Tensor] = {}
     for k in range(spec.n_states):
         for p in spec.outcome_params:
             head = spec.heads[p.name]
@@ -309,10 +136,10 @@ def _gated_outcome(
     features_and_treatment: tf.Tensor,
     treatment_repr: tf.Tensor,
     state_weights: tf.Tensor,
-) -> Dict[str, List[tf.Tensor]]:
+) -> dict[str, list[tf.Tensor]]:
     """One trunk per outcome parameter; each state's head sees the treatment gated by its
     state weight. Heads are built parameter by parameter."""
-    columns: Dict[str, List[tf.Tensor]] = {}
+    columns: dict[str, list[tf.Tensor]] = {}
     for p in spec.outcome_params:
         head = spec.heads[p.name]
         if head.constant:
@@ -399,13 +226,13 @@ def build_model(
     architecture: Architecture = "gated",
     predictive_state_hidden_layers: HiddenLayers = ((16, "relu"),),
     outcome_hidden_layers: HiddenLayers = ((16, "relu"),),
-    outcome_heads: Optional[Mapping[str, HeadSpec]] = None,
-    treatment_embedding_units: Optional[int] = 8,
+    outcome_heads: Mapping[str, HeadSpec] | None = None,
+    treatment_embedding_units: int | None = 8,
     dropout_rate: float = 0.2,
     l1: float = 0.0,
-    outcome_init: Optional[Mapping[str, float]] = None,
-    treatment_init: Optional[Mapping[str, Union[float, Sequence[float]]]] = None,
-    max_time: Optional[float] = None,
+    outcome_init: Mapping[str, float] | None = None,
+    treatment_init: Mapping[str, float | Sequence[float]] | None = None,
+    max_time: float | None = None,
     compile: bool = True,
     **compile_kwargs: Any,
 ) -> tf.keras.Model:
@@ -489,16 +316,14 @@ _DEFAULT_CLIPNORM = 1.0
 def compile_model(
     model: tf.keras.Model,
     *,
-    alpha: Union[float, tf.Variable] = 1.0,
+    alpha: float | tf.Variable = 1.0,
     outcome_loss_weight: float = 1.0,
-    outcome_likelihood: Union[
-        losses.OutcomeLikelihood, str
-    ] = losses.OutcomeLikelihood.INTERVENTIONAL,
-    predictive_states_regularizer: Optional[tf.keras.regularizers.Regularizer] = None,
-    optimizer: Optional[tf.keras.optimizers.Optimizer] = None,
+    outcome_likelihood: losses.OutcomeLikelihood | str = losses.OutcomeLikelihood.INTERVENTIONAL,
+    predictive_states_regularizer: tf.keras.regularizers.Regularizer | None = None,
+    optimizer: tf.keras.optimizers.Optimizer | None = None,
     learning_rate: float = _UNSET,
-    clipnorm: Optional[float] = _UNSET,
-    metrics: Optional[Sequence[tf.keras.metrics.Metric]] = None,
+    clipnorm: float | None = _UNSET,
+    metrics: Sequence[tf.keras.metrics.Metric] | None = None,
     extra_metrics: Sequence[tf.keras.metrics.Metric] = (),
 ) -> tf.keras.Model:
     """Compiles a pypsps model in place with the causal loss of its state mixture.
@@ -551,7 +376,7 @@ def compile_model(
     return model
 
 
-def default_metrics(causal_loss: losses.CausalLoss) -> List[tf.keras.metrics.Metric]:
+def default_metrics(causal_loss: losses.CausalLoss) -> list[tf.keras.metrics.Metric]:
     """The metrics `compile_model` uses by default, chosen by the families.
 
     Always ``causal_loss_metric`` (penalty-free, alpha = 1), ``outcome_nll_metric``,
@@ -563,7 +388,7 @@ def default_metrics(causal_loss: losses.CausalLoss) -> List[tf.keras.metrics.Met
     """
     mixture = causal_loss.mixture
     outcome_loss = causal_loss._outcome_loss
-    chosen: List[tf.keras.metrics.Metric] = [
+    chosen: list[tf.keras.metrics.Metric] = [
         metrics.CausalLossMetric(
             outcome_loss,
             causal_loss._treatment_loss,

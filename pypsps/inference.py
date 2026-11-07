@@ -1,5 +1,8 @@
 """Module for computing causal estimates (UTE & ATE) based on model predictions.
 
+Inference works on any pypsps model: a Keras model from `pypsps.keras.models` or a PyTorch
+model from `pypsps.torch.models`. It needs neither framework installed beyond the model's own.
+
 Inference supports
 
 * binary treatment (i.e., switch between 0 / 1)
@@ -10,28 +13,16 @@ to obtain counterfactual predictions).
 For uncertainty estimates see the bootstrap.py module.
 """
 
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any
 
 import numpy as np
 import pandas as pd
-import tensorflow as tf
 import tqdm
 
-from .keras.mixture import StateMixture
+from . import _backend
 
 
-def _state_means_and_weights(
-    mixture: StateMixture, y_pred: np.ndarray
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Each state's outcome mean E[Y | a, x, s_k] and the state weights, both ``[N, K]``."""
-    means = np.asarray(mixture.outcome_mean(y_pred, per_state=True))
-    weights = np.asarray(mixture.layout.decode_pred(y_pred).state_weights)
-    return means, weights
-
-
-def predict_counterfactual(
-    model: tf.keras.Model, features: Any, treatment: Any
-) -> Union[pd.Series, np.ndarray]:
+def predict_counterfactual(model: Any, features: Any, treatment: Any) -> pd.Series | np.ndarray:
     """Predicts counterfactual estimates given features and model.
 
     Counterfactual predictions can be obtained by setting treatment values
@@ -44,7 +35,7 @@ def predict_counterfactual(
     gets accomplished by setting treatment == 0 (or == 1) for all observations.
 
     Args:
-      model: a trained pypsps model.
+      model: a trained pypsps model (Keras or PyTorch).
       features: features (X) for the causal model. Often a
         pd.DataFrame/np.ndarray, but can also be non-standard
         data structure as long as the pypsps model can use it as
@@ -54,10 +45,10 @@ def predict_counterfactual(
     Returns:
       Model predictions for Pr(Y | X, do(T))
     """
-    return model.predict([features, treatment], verbose=0)
+    return _backend.predict(model, features, treatment)
 
 
-def predict_ute_binary(model: tf.keras.Model, features: Any) -> Union[pd.Series, np.ndarray]:
+def predict_ute_binary(model: Any, features: Any) -> pd.Series | np.ndarray:
     """Predicts unit-level treatment effect for binary treatment.
 
     The outcome family comes from the model (`StateMixture.from_model`), so this also works
@@ -65,7 +56,7 @@ def predict_ute_binary(model: tf.keras.Model, features: Any) -> Union[pd.Series,
     `families.LossFamily`) raises `NotImplementedError`.
 
     Args:
-      model: a trained pypsps model.
+      model: a trained pypsps model (Keras or PyTorch).
       features: features (X) for the causal model. Often a
         pd.DataFrame/np.ndarray, but can also be non-standard
         data structure as long as the pypsps model can use it as
@@ -75,12 +66,12 @@ def predict_ute_binary(model: tf.keras.Model, features: Any) -> Union[pd.Series,
       A pd.Series (if features is a DataFrame) or a np.ndarray of same number of
       rows as features.
     """
-    y_pred0 = predict_counterfactual(model, features, np.zeros(shape=features.shape[0]))
-    y_pred1 = predict_counterfactual(model, features, np.ones(shape=features.shape[0]))
-
-    mixture = StateMixture.from_model(model)
-    outcome_mean_pred0, weights = _state_means_and_weights(mixture, y_pred0)
-    outcome_mean_pred1, _ = _state_means_and_weights(mixture, y_pred1)
+    outcome_mean_pred0, weights = _backend.state_means_and_weights(
+        model, features, np.zeros(shape=features.shape[0])
+    )
+    outcome_mean_pred1, _ = _backend.state_means_and_weights(
+        model, features, np.ones(shape=features.shape[0])
+    )
 
     utes = outcome_mean_pred1 - outcome_mean_pred0
     weighted_ute = (weights * utes).sum(axis=1)
@@ -89,17 +80,17 @@ def predict_ute_binary(model: tf.keras.Model, features: Any) -> Union[pd.Series,
     return weighted_ute
 
 
-def predict_ate_binary(model: tf.keras.Model, features: pd.DataFrame) -> float:
+def predict_ate_binary(model: Any, features: pd.DataFrame) -> float:
     """Computes average treatment effect as averaging UTE estimates."""
     return predict_ute_binary(model, features).mean()
 
 
 def predict_ute_continuous(
-    model: tf.keras.Model,
+    model: Any,
     features: Any,
-    treatment_grid: List[float],
-    baseline_treatment: Optional[float] = None,
-) -> Union[pd.DataFrame, np.ndarray]:
+    treatment_grid: list[float],
+    baseline_treatment: float | None = None,
+) -> pd.DataFrame | np.ndarray:
     """Predicts unit-level treatment effect for continuous treatment.
 
     The outcome family comes from the model (`StateMixture.from_model`), so this also works
@@ -107,7 +98,7 @@ def predict_ute_continuous(
     `families.LossFamily`) raises `NotImplementedError`.
 
     Args:
-      model: a trained pypsps model.
+      model: a trained pypsps model (Keras or PyTorch).
       features: features (X) for the causal model. Often a
         pd.DataFrame/np.ndarray, but can also be non-standard
         data structure as long as the pypsps model can use it as
@@ -127,15 +118,12 @@ def predict_ute_continuous(
     n_samples = features.shape[0]
     base_treatment = np.full((n_samples, 1), baseline_treatment)
 
-    mixture = StateMixture.from_model(model)
-    base_preds = predict_counterfactual(model, features, base_treatment)
-    mean_base, weights_base = _state_means_and_weights(mixture, base_preds)
+    mean_base, weights_base = _backend.state_means_and_weights(model, features, base_treatment)
 
     utes = []
     for c in tqdm.tqdm(treatment_grid):
         c_treatment = np.full((n_samples, 1), c)
-        c_preds = predict_counterfactual(model, features, c_treatment)
-        mean_c, _ = _state_means_and_weights(mixture, c_preds)
+        mean_c, _ = _backend.state_means_and_weights(model, features, c_treatment)
         c_ute = mean_c - mean_base
         # Weighted average across states.
         c_ute_weighted = (weights_base * c_ute).sum(axis=1)
@@ -148,15 +136,15 @@ def predict_ute_continuous(
 
 
 def predict_ate_continuous(
-    model: tf.keras.Model,
+    model: Any,
     features: Any,
-    treatment_grid: List[float],
-    baseline_treatment: Optional[float] = None,
-) -> Union[pd.Series, np.ndarray]:
+    treatment_grid: list[float],
+    baseline_treatment: float | None = None,
+) -> pd.Series | np.ndarray:
     """Computes the average treatment effect (ATE) for continuous treatment.
 
     Args:
-      model: a trained pypsps model.
+      model: a trained pypsps model (Keras or PyTorch).
       features: features (X) for the causal model. Often a
         pd.DataFrame/np.ndarray, but can also be non-standard
         data structure as long as the pypsps model can use it as
