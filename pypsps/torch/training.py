@@ -138,11 +138,21 @@ def _total_loss(
     return total
 
 
-def _batches(n: int, batch_size: int, order: Optional[torch.Tensor]):
-    """Index tensors of the batches over ``order`` (or ``arange(n)``)."""
+def _batches(
+    n: int, batch_size: int, order: Optional[torch.Tensor], merge_single_tail: bool = False
+):
+    """Index tensors of the batches over ``order`` (or ``arange(n)``).
+
+    With ``merge_single_tail`` a trailing batch of one unit is folded into the previous batch,
+    since batch normalization cannot train on a single unit.
+    """
     index = torch.arange(n) if order is None else order
-    for start in range(0, n, batch_size):
-        yield index[start : start + batch_size]
+    starts = list(range(0, n, batch_size))
+    if merge_single_tail and len(starts) > 1 and n - starts[-1] == 1:
+        starts.pop()
+    for i, start in enumerate(starts):
+        stop = starts[i + 1] if i + 1 < len(starts) else n
+        yield index[start:stop]
 
 
 def _evaluate(
@@ -311,7 +321,7 @@ def fit(
             metric.reset()
         order = torch.randperm(n, generator=generator) if shuffle else None
         total, count = 0.0, 0
-        for idx in _batches(n, batch_size, order):
+        for idx in _batches(n, batch_size, order, merge_single_tail=True):
             xb, ab, yb = x[idx].to(dev), a[idx].to(dev), y[idx].to(dev)
             wb = None if weight is None else weight[idx].to(dev)
             optimizer.zero_grad(set_to_none=True)

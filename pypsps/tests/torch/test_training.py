@@ -60,6 +60,20 @@ def test_fit_is_reproducible_with_a_seed_and_leaves_the_model_in_eval_mode():
         assert torch.equal(p, q)
 
 
+def test_fit_merges_a_trailing_single_unit_batch():
+    """n = k * batch_size + 1 trains: the last unit joins the previous batch, not a batch of one."""
+    x, a, y = _data()
+    n = 4 * 32 + 1
+    model = _model()
+    seen = []
+    model.features_bn.register_forward_pre_hook(
+        lambda module, inputs: seen.append(inputs[0].shape[0]) if module.training else None
+    )
+    history = training.fit(model, x[:n], a[:n], y[:n], epochs=2, batch_size=32, seed=0)
+    assert seen == [32, 32, 32, 33] * 2
+    assert np.all(np.isfinite(history.history["loss"]))
+
+
 def test_validation_split_takes_the_last_rows():
     """validation_split=0.25 validates on the last quarter, as Keras does."""
     x, a, y = _data()
