@@ -1,16 +1,15 @@
 """Module for bootstrapping causal effect estiamtes (UTE & ATE)."""
 
-from typing import List, Optional, Union
+from typing import Any
 
 import numpy as np
 import pandas as pd
-import tensorflow as tf
 
 from . import inference
 
 
 def bootstrap_ute_binary(
-    model: tf.keras.Model,
+    model: Any,
     features: pd.DataFrame,
     n_bootstraps: int = 100,
     random_state: int = 0,
@@ -46,8 +45,8 @@ def bootstrap_ute_binary(
 
 
 def bootstrap_ate_binary(
-    model: tf.keras.Model,
-    features: Union[pd.DataFrame, np.ndarray],
+    model: Any,
+    features: pd.DataFrame | np.ndarray,
     n_bootstraps: int = 100,
     random_state: int = 0,
 ) -> pd.Series:
@@ -82,10 +81,10 @@ def bootstrap_ate_binary(
 
 
 def bootstrap_ate_continuous(
-    model: tf.keras.Model,
-    features: Union[pd.DataFrame, np.ndarray],
-    treatment_grid: List[float],
-    baseline_treatment: Optional[float] = None,
+    model: Any,
+    features: pd.DataFrame | np.ndarray,
+    treatment_grid: list[float],
+    baseline_treatment: float | None = None,
     n_bootstraps: int = 100,
     random_state: int = 0,
 ) -> pd.DataFrame:

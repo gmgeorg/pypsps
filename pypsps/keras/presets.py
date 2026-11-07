@@ -12,36 +12,36 @@ With ``compile=False`` a preset leaves out the compile keywords, which `build_mo
 without compiling.
 """
 
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from collections.abc import Sequence
+from typing import Any
 
-import numpy as np
 import pypress.keras.regularizers
 import tensorflow as tf
 
+from ..core import presets as core_presets
 from . import families, losses
-from .models import HeadSpec
 
-_SURVIVAL_DISTRIBUTIONS = ("exponential", "weibull")
+_SURVIVAL_DISTRIBUTIONS = core_presets.SURVIVAL_DISTRIBUTIONS
+
+_BACKEND = core_presets.Backend(
+    families,
+    degrees_of_freedom=pypress.keras.regularizers.DegreesOfFreedom,
+    uniform=pypress.keras.regularizers.Uniform,
+)
 
 
-def _with_compile(arguments: Dict[str, Any], compile: bool, **compile_kwargs: Any) -> dict:
-    """``arguments`` plus the compile keywords, or ``compile=False`` without them."""
+def _with_compile(parts: core_presets.Parts, compile: bool) -> dict:
+    """The ``build_model`` arguments plus the compile keywords, or ``compile=False`` without."""
+    arguments, compile_kwargs = parts
     if compile:
         return {**arguments, **compile_kwargs}
     return {**arguments, "compile": False}
 
 
 def _df_regularizer(n_states: int, df_penalty_l2: float) -> tf.keras.regularizers.Regularizer:
-    """The degrees-of-freedom penalty of the toy and binary-normal models.
-
-    The target ``max(1, log(n_states / 2))`` is 1.0 for K <= 5 and 1.6 for K = 10. At
-    initialization the degrees of freedom are exactly 1 for any K and grow as the states
-    differentiate, so a target well below K limits that from the first step. It is a starting
-    point: tune ``target`` and ``l2`` for the data by passing your own regularizer.
-    """
-    return pypress.keras.regularizers.DegreesOfFreedom(
-        l2=df_penalty_l2, target=max(1, np.log(0.5 * n_states))
-    )
+    """The degrees-of-freedom penalty of the toy and binary-normal models; see
+    `pypsps.core.presets.df_regularizer`."""
+    return core_presets.df_regularizer(_BACKEND, n_states, df_penalty_l2)
 
 
 def toy(
@@ -51,40 +51,32 @@ def toy(
     alpha: float = 1.0,
     df_penalty_l2: float = 1.0,
     learning_rate: float = 0.01,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """The toy model: binary treatment, Normal outcome, small fixed layers.
 
     A demo model. Same as `binary_normal` with state layers ``[(10, "relu"), (10, "selu")]``,
     outcome layers ``[(10, "tanh")]``, a ``(5, "selu")`` location head and a constant scale.
     The degrees-of-freedom penalty is described in `binary_normal`.
     """
-    return binary_normal(
-        n_states,
-        n_features,
-        predictive_state_hidden_layers=[(10, "relu"), (10, "selu")],
-        outcome_hidden_layers=[(10, "tanh")],
-        loc_layer=(5, "selu"),
-        scale_layer=None,
-        compile=compile,
-        alpha=alpha,
-        df_penalty_l2=df_penalty_l2,
-        learning_rate=learning_rate,
+    return _with_compile(
+        core_presets.toy(_BACKEND, n_states, n_features, alpha, df_penalty_l2, learning_rate),
+        compile,
     )
 
 
 def binary_normal(
     n_states: int,
     n_features: int,
-    predictive_state_hidden_layers: List[Tuple[int, str]],
-    outcome_hidden_layers: List[Tuple[int, str]],
-    loc_layer: Optional[Tuple[int, str]] = None,
-    scale_layer: Optional[Tuple[int, str]] = None,
+    predictive_state_hidden_layers: list[tuple[int, str]],
+    outcome_hidden_layers: list[tuple[int, str]],
+    loc_layer: tuple[int, str] | None = None,
+    scale_layer: tuple[int, str] | None = None,
     compile: bool = True,
     alpha: float = 1.0,
     df_penalty_l2: float = 1.0,
     learning_rate: float = 0.01,
     dropout_rate: float = 0.2,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Binary treatment and Normal outcome, on a shared outcome trunk.
 
     Warning: a binary model's ``.weights.h5`` file saved before v0.4.0 does not load into this
@@ -112,41 +104,37 @@ def binary_normal(
     Returns:
       `models.build_model` keyword arguments.
     """
-    scale = HeadSpec(constant=True) if scale_layer is None else HeadSpec(hidden_layer=scale_layer)
     return _with_compile(
-        dict(
-            n_states=n_states,
-            n_features=n_features,
-            outcome_family=families.Normal(),
-            treatment_family=families.Bernoulli(),
-            architecture="shared_trunk",
-            predictive_state_hidden_layers=predictive_state_hidden_layers,
-            outcome_hidden_layers=outcome_hidden_layers,
-            outcome_heads={"loc": HeadSpec(hidden_layer=loc_layer), "scale": scale},
-            treatment_embedding_units=None,
+        core_presets.binary_normal(
+            _BACKEND,
+            n_states,
+            n_features,
+            predictive_state_hidden_layers,
+            outcome_hidden_layers,
+            loc_layer=loc_layer,
+            scale_layer=scale_layer,
+            alpha=alpha,
+            df_penalty_l2=df_penalty_l2,
+            learning_rate=learning_rate,
             dropout_rate=dropout_rate,
         ),
         compile,
-        alpha=alpha,
-        learning_rate=learning_rate,
-        clipnorm=None,
-        predictive_states_regularizer=_df_regularizer(n_states, df_penalty_l2),
     )
 
 
 def binary_exponential(
     n_states: int,
     n_features: int,
-    predictive_state_hidden_layers: List[Tuple[int, str]],
-    outcome_hidden_layers: List[Tuple[int, str]],
-    log_rate_layer: Optional[Tuple[int, str]] = None,
+    predictive_state_hidden_layers: list[tuple[int, str]],
+    outcome_hidden_layers: list[tuple[int, str]],
+    log_rate_layer: tuple[int, str] | None = None,
     compile: bool = True,
     alpha: float = 1.0,
     outcome_loss_weight: float = 1.0,
     df_penalty_l2: float = 1.0,
     learning_rate: float = 0.01,
     dropout_rate: float = 0.2,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Binary treatment and an exponential (log-rate) time-to-event outcome.
 
     Warning: a binary model's ``.weights.h5`` file saved before v0.4.0 does not load into this
@@ -170,24 +158,20 @@ def binary_exponential(
       `models.build_model` keyword arguments.
     """
     return _with_compile(
-        dict(
-            n_states=n_states,
-            n_features=n_features,
-            outcome_family=families.Exponential(parameterization="log_rate", bounds=None),
-            treatment_family=families.Bernoulli(),
-            architecture="shared_trunk",
-            predictive_state_hidden_layers=predictive_state_hidden_layers,
-            outcome_hidden_layers=outcome_hidden_layers,
-            outcome_heads={"log_rate": HeadSpec(hidden_layer=log_rate_layer)},
-            treatment_embedding_units=None,
+        core_presets.binary_exponential(
+            _BACKEND,
+            n_states,
+            n_features,
+            predictive_state_hidden_layers,
+            outcome_hidden_layers,
+            log_rate_layer=log_rate_layer,
+            alpha=alpha,
+            outcome_loss_weight=outcome_loss_weight,
+            df_penalty_l2=df_penalty_l2,
+            learning_rate=learning_rate,
             dropout_rate=dropout_rate,
         ),
         compile,
-        alpha=alpha,
-        outcome_loss_weight=outcome_loss_weight,
-        learning_rate=learning_rate,
-        clipnorm=None,
-        predictive_states_regularizer=pypress.keras.regularizers.Uniform(l2=df_penalty_l2),
     )
 
 
@@ -195,28 +179,26 @@ def continuous_survival(
     distribution: str,
     n_states: int,
     n_features: int,
-    predictive_state_hidden_layers: List[Tuple[int, str]],
-    outcome_hidden_layers: List[Tuple[int, str]],
-    log_scale_bounds: Tuple[float, float],
-    log_shape_bounds: Optional[Tuple[float, float]] = None,
-    max_time: Optional[float] = None,
-    state_hidden_layer: Tuple[int, str] = (16, "swish"),
+    predictive_state_hidden_layers: list[tuple[int, str]],
+    outcome_hidden_layers: list[tuple[int, str]],
+    log_scale_bounds: tuple[float, float],
+    log_shape_bounds: tuple[float, float] | None = None,
+    max_time: float | None = None,
+    state_hidden_layer: tuple[int, str] = (16, "swish"),
     treatment_embedding_units: int = 8,
     separate_shape_per_state: bool = True,
-    init_scale: Optional[float] = None,
-    treatment_init_values: Optional[Sequence[Union[float, Sequence[float]]]] = None,
+    init_scale: float | None = None,
+    treatment_init_values: Sequence[float | Sequence[float]] | None = None,
     compile: bool = True,
-    alpha: Union[float, tf.Variable] = 1.0,
+    alpha: float | tf.Variable = 1.0,
     outcome_loss_weight: float = 1.0,
-    outcome_likelihood: Union[
-        losses.OutcomeLikelihood, str
-    ] = losses.OutcomeLikelihood.INTERVENTIONAL,
-    predictive_states_regularizer: Optional[tf.keras.regularizers.Regularizer] = None,
+    outcome_likelihood: losses.OutcomeLikelihood | str = losses.OutcomeLikelihood.INTERVENTIONAL,
+    predictive_states_regularizer: tf.keras.regularizers.Regularizer | None = None,
     learning_rate: float = 0.01,
-    clipnorm: Optional[float] = 1.0,
+    clipnorm: float | None = 1.0,
     dropout_rate: float = 0.2,
     l1: float = 0.0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Continuous (Normal) treatment and an exponential or Weibull time-to-event outcome.
 
     The ``"gated"`` architecture: each outcome parameter (``log_scale``, and ``log_shape`` for
@@ -254,72 +236,43 @@ def continuous_survival(
     Returns:
       `models.build_model` keyword arguments.
     """
-    if distribution not in _SURVIVAL_DISTRIBUTIONS:
-        raise ValueError(
-            f"distribution must be one of {_SURVIVAL_DISTRIBUTIONS}, got {distribution!r}"
-        )
-    # The families allow unbounded parameters; these models require bounds.
-    log_scale_bounds = families._check_bounds("log_scale_bounds", log_scale_bounds)
-    heads = {"log_scale": HeadSpec(hidden_layer=state_hidden_layer)}
-    if distribution == "weibull":
-        log_shape_bounds = families._check_bounds("log_shape_bounds", log_shape_bounds)
-        outcome_family = families.Weibull(log_scale_bounds, log_shape_bounds)
-        heads["log_shape"] = HeadSpec(
-            hidden_layer=state_hidden_layer, per_state=separate_shape_per_state
-        )
-    elif log_shape_bounds is not None:
-        raise ValueError("log_shape_bounds applies to distribution='weibull' only")
-    else:
-        outcome_family = families.Exponential("log_scale", bounds=log_scale_bounds)
-
-    outcome_init = None
-    if init_scale is not None:
-        if not init_scale > 0:
-            raise ValueError(f"init_scale must be > 0, got {init_scale!r}")
-        outcome_init = {"log_scale": float(np.log(init_scale))}
-    treatment_init = None
-    if treatment_init_values is not None:
-        if len(treatment_init_values) != 2:
-            raise ValueError(
-                f"treatment_init_values must be (loc, scale), got {treatment_init_values!r}"
-            )
-        treatment_init = dict(zip(("loc", "scale"), treatment_init_values))
-
     return _with_compile(
-        dict(
-            n_states=n_states,
-            n_features=n_features,
-            outcome_family=outcome_family,
-            treatment_family=families.Normal(),
-            architecture="gated",
-            predictive_state_hidden_layers=predictive_state_hidden_layers,
-            outcome_hidden_layers=outcome_hidden_layers,
-            outcome_heads=heads,
+        core_presets.continuous_survival(
+            _BACKEND,
+            distribution,
+            n_states,
+            n_features,
+            predictive_state_hidden_layers,
+            outcome_hidden_layers,
+            log_scale_bounds,
+            log_shape_bounds=log_shape_bounds,
+            max_time=max_time,
+            state_hidden_layer=state_hidden_layer,
             treatment_embedding_units=treatment_embedding_units,
+            separate_shape_per_state=separate_shape_per_state,
+            init_scale=init_scale,
+            treatment_init_values=treatment_init_values,
+            alpha=alpha,
+            outcome_loss_weight=outcome_loss_weight,
+            outcome_likelihood=outcome_likelihood,
+            predictive_states_regularizer=predictive_states_regularizer,
+            learning_rate=learning_rate,
+            clipnorm=clipnorm,
             dropout_rate=dropout_rate,
             l1=l1,
-            outcome_init=outcome_init,
-            treatment_init=treatment_init,
-            max_time=max_time,
         ),
         compile,
-        alpha=alpha,
-        outcome_loss_weight=outcome_loss_weight,
-        outcome_likelihood=outcome_likelihood,
-        predictive_states_regularizer=predictive_states_regularizer,
-        learning_rate=learning_rate,
-        clipnorm=clipnorm,
     )
 
 
 def continuous_exponential(
     n_states: int,
     n_features: int,
-    predictive_state_hidden_layers: List[Tuple[int, str]],
-    outcome_hidden_layers: List[Tuple[int, str]],
-    log_scale_bounds: Tuple[float, float],
+    predictive_state_hidden_layers: list[tuple[int, str]],
+    outcome_hidden_layers: list[tuple[int, str]],
+    log_scale_bounds: tuple[float, float],
     **kwargs: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """`continuous_survival` with an exponential outcome (``log_scale = log mean``)."""
     return continuous_survival(
         "exponential",
@@ -335,12 +288,12 @@ def continuous_exponential(
 def continuous_weibull(
     n_states: int,
     n_features: int,
-    predictive_state_hidden_layers: List[Tuple[int, str]],
-    outcome_hidden_layers: List[Tuple[int, str]],
-    log_scale_bounds: Tuple[float, float],
-    log_shape_bounds: Tuple[float, float],
+    predictive_state_hidden_layers: list[tuple[int, str]],
+    outcome_hidden_layers: list[tuple[int, str]],
+    log_scale_bounds: tuple[float, float],
+    log_shape_bounds: tuple[float, float],
     **kwargs: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """`continuous_survival` with a Weibull outcome (``log_scale``, ``log_shape``)."""
     return continuous_survival(
         "weibull",

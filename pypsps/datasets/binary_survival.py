@@ -5,7 +5,6 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from scipy.special import expit  # logistic sigmoid
 
 from . import base
 
@@ -57,7 +56,7 @@ class CancerSurvivalSimulator(base.BaseSimulator):
         # Logistic model: more likely if cancer_severity is high and age is low.
         # We'll use: lp = -0.6 + 0.1 * cancer_severity - 0.015 * age.
         lp = 1.0 + 0.5 * cancer_severity - 0.05 * ages
-        p_chemo = expit(lp)
+        p_chemo = 1.0 / (1.0 + np.exp(-lp))  # logistic sigmoid
         chemo = self._rng.binomial(1, p_chemo, size=n_samples)
 
         # 3. Simulate true recovery time from exponential distribution.

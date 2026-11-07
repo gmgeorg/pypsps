@@ -14,32 +14,18 @@ column layout, and computes from ``(y_true, y_pred)``:
 The losses in `pypsps.keras.losses` are thin wrappers that call it and reduce.
 """
 
-import enum
-from typing import NamedTuple, Optional, Union
+from typing import NamedTuple
 
 import tensorflow as tf
 
-from .. import utils
+from ..core import mixture as core_mixture
+from ..core.likelihood import OutcomeLikelihood
 from . import families as families_lib
+from . import utils
 from .layout import Array, ColumnLayout, PredParts
 
 _ser = tf.keras.utils.serialize_keras_object
 _deser = tf.keras.utils.deserialize_keras_object
-
-
-class OutcomeLikelihood(str, enum.Enum):
-    """Which outcome likelihood the outcome mixture NLL evaluates.
-
-    ``INTERVENTIONAL`` (the default in `OutcomeLoss`): -log p(Y | do(A), X), mixing the
-    per-state outcome likelihoods with the prior state weights P(S | X) = P(S | X, do(A)),
-    since the states precede treatment; these are the same weights the ATE estimates use.
-    ``OBSERVATIONAL``: -log p(Y | A, X), mixing the per-state outcome likelihoods with the
-    posterior state weights P(S | X, A); together with `TreatmentLoss` this is the exact
-    joint likelihood of (Y, A | X).
-    """
-
-    OBSERVATIONAL = "observational"
-    INTERVENTIONAL = "interventional"
 
 
 class PerStateNLL(NamedTuple):
@@ -49,21 +35,14 @@ class PerStateNLL(NamedTuple):
     treatment: tf.Tensor  # -log p(a | s_k)
 
 
-_REDUCTIONS = ("none", "sum", "sum_over_batch_size")
-
-
-def reduce(values: tf.Tensor, reduction: Optional[str]) -> tf.Tensor:
+def reduce(values: tf.Tensor, reduction: str | None) -> tf.Tensor:
     """Reduces per-unit ``[N]`` values: ``"none"``, ``"sum"`` or ``"sum_over_batch_size"``.
 
     ``None`` means ``"none"``; the legacy ``"auto"`` means ``"sum_over_batch_size"``.
     """
-    key = "none" if reduction is None else str(getattr(reduction, "value", reduction)).lower()
-    if key == "auto":
-        key = "sum_over_batch_size"
+    key = core_mixture.reduction_key(reduction)
     if key == "none":
         return values
-    if key not in _REDUCTIONS:
-        raise ValueError(f"reduction must be one of {_REDUCTIONS}, got {reduction!r}")
     total = tf.reduce_sum(values)
     if key == "sum":
         return total
@@ -82,7 +61,7 @@ def _mixture_nll(gamma: tf.Tensor, nll_per_state: tf.Tensor) -> tf.Tensor:
 
 
 @tf.keras.utils.register_keras_serializable(package="pypsps")
-class StateMixture:
+class StateMixture(core_mixture.MixtureSpec):
     """The outcome and treatment families of a pypsps model, mixed over predictive states.
 
     Args:
@@ -92,47 +71,8 @@ class StateMixture:
       n_states: K, the number of predictive states.
     """
 
-    def __init__(
-        self,
-        outcome_family: families_lib.Family,
-        treatment_family: families_lib.Family,
-        n_states: int,
-    ):
-        """Validates the families and derives the column layout."""
-        for name, family in (
-            ("outcome_family", outcome_family),
-            ("treatment_family", treatment_family),
-        ):
-            if not isinstance(family, families_lib.Family):
-                raise TypeError(f"{name} must be a pypsps Family, got {type(family).__name__}")
-        if treatment_family.n_true_cols != 1:
-            raise ValueError(
-                "treatment_family must read exactly one y_true column, got "
-                f"{type(treatment_family).__name__} with n_true_cols={treatment_family.n_true_cols}"
-            )
-        self._outcome_family = outcome_family
-        self._treatment_family = treatment_family
-        self._layout = ColumnLayout.from_families(n_states, outcome_family, treatment_family)
-
-    @property
-    def outcome_family(self) -> families_lib.Family:
-        """The outcome family."""
-        return self._outcome_family
-
-    @property
-    def treatment_family(self) -> families_lib.Family:
-        """The treatment family."""
-        return self._treatment_family
-
-    @property
-    def n_states(self) -> int:
-        """K, the number of predictive states."""
-        return self._layout.n_states
-
-    @property
-    def layout(self) -> ColumnLayout:
-        """The column layout of ``y_pred`` and ``y_true``."""
-        return self._layout
+    _family_base = families_lib.Family
+    _layout_cls = ColumnLayout
 
     # --- per-state quantities ---
 
@@ -164,7 +104,7 @@ class StateMixture:
         self,
         y_true: Array,
         y_pred: Array,
-        likelihood: Union[OutcomeLikelihood, str] = OutcomeLikelihood.INTERVENTIONAL,
+        likelihood: OutcomeLikelihood | str = OutcomeLikelihood.INTERVENTIONAL,
     ) -> tf.Tensor:
         """``-log sum_k gamma_k p(y | a, x, s_k)`` per unit, ``[N]``.
 
@@ -189,7 +129,7 @@ class StateMixture:
         self,
         y_true: Array,
         y_pred: Array,
-        likelihood: Union[OutcomeLikelihood, str] = OutcomeLikelihood.INTERVENTIONAL,
+        likelihood: OutcomeLikelihood | str = OutcomeLikelihood.INTERVENTIONAL,
         outcome_loss_weight: float = 1.0,
     ) -> tf.Tensor:
         """``outcome_loss_weight * outcome_nll + treatment_nll`` per unit, ``[N]``.
@@ -263,7 +203,7 @@ class StateMixture:
             )
         return layer_mixture
 
-    # --- serialization and equality ---
+    # --- serialization ---
 
     def get_config(self) -> dict:
         """The two serialized families and ``n_states``."""
@@ -291,24 +231,4 @@ class StateMixture:
             outcome_family=_deser(config["outcome_family"]),
             treatment_family=_deser(config["treatment_family"]),
             n_states=config["n_states"],
-        )
-
-    def __eq__(self, other: object) -> bool:
-        """Equal families and ``n_states``."""
-        return (
-            isinstance(other, StateMixture)
-            and self._outcome_family == other._outcome_family
-            and self._treatment_family == other._treatment_family
-            and self.n_states == other.n_states
-        )
-
-    def __hash__(self):
-        """Consistent with `__eq__`."""
-        return hash((self._outcome_family, self._treatment_family, self.n_states))
-
-    def __repr__(self) -> str:
-        """Shows the families and K."""
-        return (
-            f"StateMixture({self._outcome_family!r}, {self._treatment_family!r}, "
-            f"n_states={self.n_states})"
         )

@@ -1,4 +1,4 @@
-# This workflow will install Python dependencies, run tests and lint with a single version of Python
+# Installs pypsps with each backend extra (TensorFlow, PyTorch, both), lints, and runs the tests.
 # For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
 
 name: Python application
@@ -17,33 +17,52 @@ permissions:
   contents: read
 
 jobs:
-  build:
-
+  test:
+    name: test (${{ matrix.extras }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The core needs neither framework; each backend's tests are skipped when it is
+        # missing, and the cross-backend parity tests need both.
+        extras: ["tf", "torch", "tf,torch"]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
+
     - name: Set up Python 3.12
-      uses: actions/setup-python@v3
+      uses: actions/setup-python@v5
       with:
         python-version: "3.12"
 
-    - name: Install poetry
-      uses: snok/install-poetry@v1
-      with:
-        version: 1.8.2
-        virtualenvs-create: true
-        virtualenvs-in-project: true
+    - name: Install pypsps with the ${{ matrix.extras }} extra(s)
+      # CPU-only torch wheels: the default Linux (CUDA) wheels pull in triton, whose native
+      # library aborts the process when loaded after TensorFlow (torch.optim imports it lazily).
+      run: >-
+        pip install -e ".[${{ matrix.extras }}]" pytest flake8 scikit-learn seaborn
+        matplotlib scipy --extra-index-url https://download.pytorch.org/whl/cpu
 
-    - name: Install dependencies
-      run: poetry install --with dev
+    - name: Install TensorFlow Probability (reference likelihoods in the Keras tests)
+      if: contains(matrix.extras, 'tf')
+      run: pip install "tensorflow-probability[tf]>=0.24"
 
     - name: Lint with flake8
       run: |
         # stop the build if there are Python syntax errors or undefined names
-        poetry run flake8 pypsps --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 pypsps --count --select=E9,F63,F7,F82 --show-source --statistics
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        poetry run flake8 pypsps --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics --ignore=F401,F403,W503,E203
+        flake8 pypsps --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics --ignore=F401,F403,W503,E203
+
     - name: Test with pytest
-      run: |
-        poetry run pytest
+      run: python -m pytest pypsps -rs
+
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - uses: pre-commit/action@v3.0.1
