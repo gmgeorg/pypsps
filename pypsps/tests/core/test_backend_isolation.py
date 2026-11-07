@@ -74,3 +74,17 @@ def test_torch_backend_without_torch_explains_the_extra():
     )
     assert result.returncode != 0
     assert "pypsps[torch]" in result.stderr
+
+
+def test_datasets_work_without_scipy():
+    """``pypsps.datasets`` needs only declared dependencies: scipy is not one of them."""
+    out = _run(
+        """
+        import sys
+        sys.modules["scipy"] = None  # make `import scipy` fail, as on a clean install
+        from pypsps import datasets
+        df = datasets.CancerSurvivalSimulator(seed=1).sample(n_samples=50).to_data_frame()
+        print(len(df))
+        """
+    )
+    assert out == "50"
