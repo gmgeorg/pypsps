@@ -100,6 +100,15 @@ A time-to-event `y_true` is `[time, event indicator, treatment]`; otherwise it i
   parameters cannot take an init.
 * **`compile=False`** returns the model uncompiled; it then takes no compile keywords.
 
+**Hidden-layer activations.** The `(units, activation)` entries of `predictive_state_hidden_layers`,
+`outcome_hidden_layers` and `HeadSpec.hidden_layer` take any Keras activation name. The ones that
+`pypsps.torch` builds alike are `pypsps.core.spec.HIDDEN_ACTIVATIONS`: `elu`, `gelu`, `linear`,
+`relu`, `selu`, `sigmoid`, `silu`, `softplus`, `swish` and `tanh`. Any other Keras name (say
+`leaky_relu`) builds and trains, but `build_model` warns with
+`pypsps.core.spec.NonPortableActivationWarning` (once per name) because
+`PSPSModel.from_keras` can't convert the model; filter the warning if you never convert. A name
+Keras does not know raises a `ValueError` before any layer is created.
+
 Every model has one treatment head, `treatment_params` (`layers.PredictiveStateParams`): one
 treatment distribution per state, independent of the features. For a binary treatment it
 holds each state's propensity logit.
@@ -425,6 +434,11 @@ model = tf.keras.models.load_model("model.keras")
   and `StateMixture.from_model(model)` and `ColumnLayout.from_model(model)` read it. Models
   built before v0.3.4 have no such layer and, since v0.5.0, load only with `compile=False`;
   see [Models saved before v0.5.0](#models-saved-before-v050).
+* The same layer carries the model's build arguments, `pypsps.core.spec.Spec.get_config`
+  (including `max_time`), and `models.spec_of(model)` returns the `Spec`. `PSPSModel.from_keras`
+  reads it. Models saved before v0.6.3 have none (`spec_of` gives `None`); they still load and
+  convert, with the build arguments read from the layer names. A `.keras` file saved by v0.6.3
+  or later can't be loaded by an older pypsps.
 * A custom elementwise NLL must be registered with
   `tf.keras.utils.register_keras_serializable` to load. `neglogliks.NegloglikLoss`, which
   holds a distribution constructor, isn't serializable.
