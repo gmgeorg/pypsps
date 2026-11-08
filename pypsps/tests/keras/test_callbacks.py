@@ -209,6 +209,16 @@ def test_errors_are_the_core_classes():
     assert callbacks.MidFitResumeError is core_alpha_schedule.MidFitResumeError
 
 
+def test_default_early_stopping_is_the_pypsps_one():
+    """The default early stopping fails fast instead of warning and carrying on."""
+    default = callbacks.get_default_callbacks("val_m", patience=2)[0]
+    assert type(default) is callbacks.EarlyStopping
+    with pytest.raises(KeyError, match="val_m"):
+        _drive(default, [1.0], logs={"loss": 1.0})
+    with pytest.raises(callbacks.NoEligibleCheckpointError):
+        _drive(callbacks.get_default_callbacks("val_m", patience=2)[0], [float("nan")] * 2)
+
+
 def test_lr_plateau_is_inactive_before_start_from_epoch():
     """No reduction during warmup even on a worsening monitor; the LR is still logged."""
 

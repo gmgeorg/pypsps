@@ -377,16 +377,17 @@ def get_default_callbacks(
       verbose: whether to print callback output.
       alpha_start, alpha_end, half_life_epoch, steepness: the `AlphaScheduleCallback` schedule.
     """
+    args = checkpoint.default_callback_args(
+        monitor,
+        patience,
+        verbose=verbose,
+        alpha_start=alpha_start,
+        alpha_end=alpha_end,
+        half_life_epoch=half_life_epoch,
+        steepness=steepness,
+    )
     return [
-        EarlyStopping(monitor, patience, verbose=int(verbose)),
-        ReduceLROnPlateau(
-            monitor, factor=0.2, patience=int(patience // 2), min_lr=1e-6, verbose=int(verbose)
-        ),
-        AlphaScheduleCallback(
-            alpha_start=alpha_start,
-            alpha_end=alpha_end,
-            half_life_epoch=half_life_epoch,
-            steepness=steepness,
-            verbose=verbose,
-        ),
+        EarlyStopping(**args["early_stopping"]),
+        ReduceLROnPlateau(**args["reduce_lr"]),
+        AlphaScheduleCallback(**args["alpha_schedule"]),
     ]

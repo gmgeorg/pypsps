@@ -434,12 +434,12 @@ def default_metrics(causal_loss: losses.CausalLoss) -> list[tf.keras.metrics.Met
     ``outcome_mean_squared_error`` (over units with an event, for survival families).
     """
     mixture = causal_loss.mixture
-    outcome_loss = causal_loss._outcome_loss
+    outcome_loss = causal_loss.outcome_loss
     chosen: list[tf.keras.metrics.Metric] = [
         metrics.CausalLossMetric(
             outcome_loss,
-            causal_loss._treatment_loss,
-            outcome_loss_weight=causal_loss._outcome_loss_weight,
+            causal_loss.treatment_loss,
+            outcome_loss_weight=causal_loss.outcome_loss_weight,
         ),
         metrics.outcome_nll_metric_gen(outcome_loss),
         metrics.predictive_state_df_gen(mixture.layout),

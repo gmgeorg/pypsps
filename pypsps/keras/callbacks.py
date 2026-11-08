@@ -391,7 +391,10 @@ def get_default_callbacks(
         steepness: Controls steepness of sigmoid curve (default: 0.1)
 
     Returns:
-        List of callbacks
+        ``[EarlyStopping, ReduceLROnPlateau, AlphaScheduleCallback]``. The early stopping is
+        pypsps's own `EarlyStopping`: it raises `KeyError` if ``monitor`` is not in the epoch
+        logs (e.g. a ``val_`` metric without validation data) and `NoEligibleCheckpointError`
+        if it is never finite, instead of carrying on.
 
     The alpha schedule moves the training loss only. ``causal_loss_metric`` is fixed at alpha
     1 and has no penalties, so during the alpha warm-up it can stall, or briefly rise, while
@@ -399,28 +402,17 @@ def get_default_callbacks(
     ``half_life_epoch + 1 / steepness``, 20 epochs at the defaults). A model trained at a
     constant alpha other than 1 is still selected at alpha 1.
     """
-    callbacks = [
-        tf.keras.callbacks.EarlyStopping(
-            monitor=monitor,
-            patience=patience,
-            restore_best_weights=True,
-            mode="min",
-        ),
-        tf.keras.callbacks.ReduceLROnPlateau(
-            monitor=monitor,
-            factor=0.2,
-            patience=int(patience // 2),
-            min_lr=1e-6,
-            mode="min",
-        ),
-    ]
-
-    alpha_schedule = AlphaScheduleCallback(
+    args = checkpoint.default_callback_args(
+        monitor,
+        patience,
+        verbose=verbose,
         alpha_start=alpha_start,
         alpha_end=alpha_end,
         half_life_epoch=half_life_epoch,
         steepness=steepness,
-        verbose=verbose,
     )
-
-    return callbacks + [alpha_schedule]
+    return [
+        EarlyStopping(**args["early_stopping"]),
+        tf.keras.callbacks.ReduceLROnPlateau(mode="min", **args["reduce_lr"]),
+        AlphaScheduleCallback(**args["alpha_schedule"]),
+    ]
