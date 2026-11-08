@@ -1,6 +1,5 @@
 """Tests for the outcome and treatment families."""
 
-import dataclasses
 import math
 
 import numpy as np
@@ -139,30 +138,20 @@ def test_mean_matches_closed_form(family):
     np.testing.assert_allclose(np.asarray(family.mean(p)), _closed_form_mean(family, p), rtol=1e-5)
 
 
-def test_response_column_and_event_indicator():
-    """Survival families predict the time and mask on the event; the others do neither."""
+def test_event_indicator_masks_survival_families():
+    """Survival families mask on the event column as a float32 tensor; the others do not mask.
+
+    The column order (``response``) is tested in ``tests/core/test_families.py``.
+    """
     y2 = tf.constant([[3.0, 1.0, 7.0], [4.0, 0.0, 7.0]])
     for family in _ALL:
         if isinstance(family, families.SurvivalFamily):
-            np.testing.assert_array_equal(family.response(y2), [[3.0], [4.0]])
             mask = family.event_indicator(y2)
             assert mask.dtype == tf.float32
             np.testing.assert_array_equal(mask, [[1.0], [0.0]])
         else:
-            np.testing.assert_array_equal(family.response(y2), [[3.0], [4.0]])
             assert family.event_indicator(y2) is None
     assert families.LossFamily(lambda y, p: p[:, 0], 1).event_indicator(y2) is None
-
-
-def test_survival_family_and_is_binary():
-    """SurvivalFamily is exactly Exponential and Weibull; only Bernoulli is binary."""
-    for name, family in _FAMILIES.items():
-        assert isinstance(family, families.SurvivalFamily) == name.startswith(
-            ("exponential", "weibull")
-        )
-        assert family.n_true_cols == (2 if isinstance(family, families.SurvivalFamily) else 1)
-        assert family.is_binary == (name == "bernoulli")
-    assert not families.LossFamily(lambda y, p: p[:, 0], 1).is_binary
 
 
 @pytest.mark.parametrize("family", _ALL, ids=_IDS)
@@ -185,88 +174,27 @@ def test_param_specs_and_head_activation_ranges(family):
 
 @pytest.mark.parametrize("family", _ALL, ids=_IDS)
 def test_raw_value_inverts_head_activation(family):
-    """head_activation(raw_value(v)) == v inside the support; outside it raises."""
+    """head_activation(raw_value(v)) == v inside the support (outside it raises, see core)."""
     for p in family.params:
         if p.bounds is not None:
             low, high = p.bounds
-            grid, outside = np.linspace(low, high, 9)[1:-1], [low, high, high + 1.0]
+            grid = np.linspace(low, high, 9)[1:-1]
         elif p.activation == "softplus":
-            grid, outside = [0.01, 0.5, 1.0, 5.0], [0.0, -1.0]
+            grid = [0.01, 0.5, 1.0, 5.0]
         elif p.activation == "sigmoid":
-            grid, outside = [0.01, 0.3, 0.5, 0.99], [0.0, 1.0]
+            grid = [0.01, 0.3, 0.5, 0.99]
         else:
-            grid, outside = [-5.0, 0.0, 3.0], []
+            grid = [-5.0, 0.0, 3.0]
         raw = tf.constant([[p.raw_value(v)] for v in grid], tf.float32)
         np.testing.assert_allclose(
             family.head_activation(p.name)(raw).numpy()[:, 0], grid, rtol=1e-5, atol=1e-6
         )
-        for v in outside:
-            with pytest.raises(ValueError, match=p.name):
-                p.raw_value(v)
-
-
-def test_default_inits():
-    """The Group C init table: midpoints for bounded survival params, 0.5 for prob."""
-    inits = lambda f: {p.name: p.init for p in f.params}  # noqa: E731
-    assert inits(families.Normal()) == {"loc": None, "scale": None}
-    assert inits(families.Bernoulli()) == {"prob": 0.5}
-    assert inits(families.Exponential(bounds=(0.0, 4.0))) == {"log_scale": 2.0}
-    assert inits(families.Exponential()) == {"log_scale": None}
-    assert inits(families.Exponential("rate")) == {"rate": None}
-    assert inits(families.Weibull((0.0, 4.0), (-1.0, 2.0))) == {"log_scale": 2.0, "log_shape": 0.0}
-    assert inits(families.Weibull((0.0, 4.0), (0.5, 1.5))) == {"log_scale": 2.0, "log_shape": 1.0}
-    assert inits(families.Weibull((0.0, 4.0), (0.0, 1.0)))["log_shape"] == 0.5  # 0 not inside
-    assert inits(families.Weibull()) == {"log_scale": None, "log_shape": None}
-
-
-def test_init_not_in_config_or_equality():
-    """An init is a training default: replace(p, init=...) changes neither eq nor config."""
-    spec = families.Bernoulli().params[0]
-    assert dataclasses.replace(spec, init=0.9) == spec
-    assert "init" not in families.Weibull((0.0, 4.0), (-1.0, 1.0)).get_config()
-
-
-def test_bounds_validation():
-    """Bounds are a finite (min, max) pair with min < max; rate takes none."""
-    with pytest.raises(ValueError, match=r"must be a \(min, max\) pair"):
-        families.Weibull(log_scale_bounds=(1.0,))
-    with pytest.raises(ValueError, match="must be finite with min < max"):
-        families.Weibull(log_shape_bounds=(1.0, -1.0))
-    with pytest.raises(ValueError, match="must be finite with min < max"):
-        families.Exponential(bounds=(0.0, np.inf))
-    with pytest.raises(ValueError, match="log_scale' or 'log_rate"):
-        families.Exponential("rate", bounds=(0.0, 1.0))
-    with pytest.raises(ValueError, match="activation must be one of"):
-        families.ParamSpec("x", activation="relu")
-    assert families.Exponential(bounds=[0, 1]).bounds == (0.0, 1.0)
-
-
-def test_survival_family_check_max_time():
-    """check_max_time raises on overflow and when a bound it needs is None."""
-    weibull = families.Weibull(log_scale_bounds=(-3.0, 5.0), log_shape_bounds=(-1.0, 1.0))
-    weibull.check_max_time(100.0)  # exponent e * (log 100 + 3) = 20.7
-    with pytest.raises(ValueError, match="overflow"):
-        families.Weibull((-8.0, 5.0), (-1.0, 1.5)).check_max_time(100.0)  # exponent 56
-    with pytest.raises(ValueError, match="must be positive"):
-        weibull.check_max_time(0.0)
-    with pytest.raises(ValueError, match="needs"):
-        families.Weibull(log_scale_bounds=(-3.0, 5.0)).check_max_time(100.0)
-
-    families.Exponential(bounds=(-40.0, 5.0)).check_max_time(100.0)  # 4.6 + 40
-    with pytest.raises(ValueError, match="overflow"):
-        families.Exponential(bounds=(-50.0, 5.0)).check_max_time(100.0)
-    families.Exponential("log_rate", bounds=(-5.0, 40.0)).check_max_time(100.0)
-    with pytest.raises(ValueError, match="overflow"):
-        families.Exponential("log_rate", bounds=(-5.0, 50.0)).check_max_time(100.0)
-    for unbounded in (families.Exponential(), families.Exponential("rate")):
-        with pytest.raises(ValueError, match="needs"):
-            unbounded.check_max_time(100.0)
-    assert not hasattr(families.Normal(), "check_max_time")
 
 
 @pytest.mark.parametrize("family", _ALL, ids=_IDS)
 def test_config_round_trip_and_equality(family):
-    """Families serialize through Keras to JSON-able configs and rebuild equal."""
+    """Families serialize through Keras to configs and rebuild equal (the core config round
+    trip is tested in ``tests/core/test_families.py``)."""
     config = tf.keras.utils.serialize_keras_object(family)
     rebuilt = tf.keras.utils.deserialize_keras_object(config)
     assert type(rebuilt) is type(family) and rebuilt == family

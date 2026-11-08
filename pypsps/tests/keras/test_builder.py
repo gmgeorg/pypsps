@@ -369,29 +369,17 @@ _NORMAL, _BERNOULLI = families.Normal(), families.Bernoulli()
     "kwargs,error,match",
     [
         (dict(n_states=0), ValueError, "n_states"),
-        (dict(n_features=0), ValueError, "n_features"),
-        (dict(n_states=2.5), ValueError, "n_states"),
-        (dict(architecture="deep"), ValueError, "shared_trunk"),
-        (dict(outcome_heads={"rate": models.HeadSpec()}), KeyError, "loc"),
-        (dict(outcome_heads={"loc": (16, "relu")}), TypeError, "HeadSpec"),
-        (dict(outcome_init={"mean": 0.0}), KeyError, "scale"),
-        (dict(treatment_init={"loc": 0.0}), KeyError, "prob"),
-        (dict(outcome_init={"scale": -1.0}), ValueError, "scale"),
-        (dict(treatment_init={"prob": 1.5}), ValueError, "prob"),
-        (dict(max_time=10.0), ValueError, "survival"),
-        (dict(treatment_family=families.Weibull()), ValueError, ""),
-        (dict(predictive_state_hidden_layers=[(0, "relu")]), ValueError, "units"),
-        (dict(outcome_hidden_layers=[16]), ValueError, "pair"),
-        (dict(outcome_hidden_layers=[(16, None)]), ValueError, "activation"),
         (dict(dropout_rate=1.0), ValueError, "dropout"),
-        (dict(l1=-0.1), ValueError, "l1"),
-        (dict(treatment_embedding_units=0), ValueError, "treatment_embedding_units"),
         (dict(compile=False, alpha=2.0), TypeError, "compile=False"),
         (dict(learning_rte=0.1), TypeError, "learning_rte"),
     ],
 )
 def test_build_model_validates_arguments(kwargs, error, match):
-    """Bad arguments raise before any layer is created."""
+    """Bad arguments raise before any layer is created.
+
+    The shared checks (``make_spec``) are tested in ``tests/core/test_spec.py``; here are
+    the Keras-only ones and the proof that no layer exists when one fails.
+    """
     args = dict(n_states=2, n_features=F, outcome_family=_NORMAL, treatment_family=_BERNOULLI)
     args.update(kwargs)
     before = tf.keras.backend.get_uid("dense")
