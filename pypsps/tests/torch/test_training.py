@@ -312,6 +312,19 @@ def test_inference_and_bootstrap_run_on_a_torch_model():
     assert samples.notna().all()
 
 
+def test_bootstrap_ute_binary_with_dataframe_features_matches_ndarray():
+    """DataFrame features resample with duplicated row labels; the table equals the ndarray one."""
+    x, a, y = _data()
+    model = _model()
+    training.fit(model, x, a, y, epochs=2, seed=0)
+    features = pd.DataFrame(x, columns=list("abcd"), index=np.arange(_N) + 100)
+    from_frame = bootstrap.bootstrap_ute_binary(model, features, n_bootstraps=3, random_state=0)
+    from_array = bootstrap.bootstrap_ute_binary(model, x, n_bootstraps=3, random_state=0)
+    assert from_frame.index.name == "bootstrap_id"
+    assert from_frame.shape == (3, _N)
+    pd.testing.assert_frame_equal(from_frame, from_array)
+
+
 def test_predict_batches_and_restores_the_mode():
     x, a, y = _data()
     model = _model().train()

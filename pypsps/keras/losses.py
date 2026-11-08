@@ -237,12 +237,10 @@ class CausalLoss(tf.keras.losses.Loss):
     for details (in paper lambda == alpha).
 
     Note on alpha=0: this zeroes only the explicit `loglik(T; X)` term (`treatment_loss`).
-    It is "dose-likelihood-off", not "dose-head-off": `outcome_loss` mixes per-state outcome
-    predictions with the posterior gamma = P(state | X, T) (see `OutcomeLoss`,
-    `StateMixture.state_posterior`), which is a differentiable function of the
-    treatment/dose head's own predictions. So even at alpha=0, gradients from the outcome loss
-    still reach the dose head through gamma -- setting alpha=0 does not isolate the outcome model
-    from the dose head. Do not describe alpha=0 as an "outcome-only" ablation.
+    The outcome loss still mixes with the posterior state weights under
+    `outcome_likelihood="observational"`, which depend on the treatment/dose head (see
+    `OutcomeLoss`, `StateMixture.state_posterior`), so alpha=0 is not an "outcome-only"
+    ablation.
     """
 
     def __init__(
