@@ -37,7 +37,8 @@ def bootstrap_ute_binary(
         else:
             feat_bs = features[idx]
         ute_bs = inference.predict_ute_binary(model, feat_bs)
-        ute_samples.append(ute_bs)
+        # Drop the row labels: a resample repeats them, and each replicate is one row.
+        ute_samples.append(np.asarray(ute_bs))
 
     df = pd.DataFrame(ute_samples)
     df.index.name = "bootstrap_id"
@@ -89,19 +90,23 @@ def bootstrap_ate_continuous(
     random_state: int = 0,
 ) -> pd.DataFrame:
     """
-    Estimate confidence intervals for ATE over a treatment grid via bootstrapping.
+    Bootstrap the ATE of a continuous treatment over a treatment grid.
+
+    Each replicate resamples the rows of ``features`` with replacement and computes the ATE at
+    every grid value relative to the baseline. The raw replicates are returned, so take
+    quantiles of each column for confidence intervals.
 
     Args:
       model: Trained pypsps model supporting continuous treatment.
       features: Feature matrix (DataFrame or ndarray).
       treatment_grid: Treatment values to compute ATE for.
-      n_bootstrap: Number of bootstrap samples.
-      alpha: Significance level for two-sided intervals.
       baseline_treatment: Baseline value for comparison (defaults to grid mean).
+      n_bootstraps: Number of bootstrap replicates.
       random_state: seed for the resampling RNG.
 
     Returns:
-      ci_df: DataFrame with index=treatment_grid and columns ["lower", "upper"].
+      DataFrame of shape (n_bootstraps, len(treatment_grid)): one row per bootstrap draw
+      (index named ``bootstrap_id``) and one column per treatment grid value.
     """
     n_samples = features.shape[0]
     rng = np.random.RandomState(random_state)
@@ -117,7 +122,7 @@ def bootstrap_ate_continuous(
             model, feat_bs, treatment_grid, baseline_treatment
         )
         ate_samples.append(ate_bs)
-    ate_arr = np.array(ate_samples)  # shape (n_bootstrap, len(treatment_grid))
+    ate_arr = np.array(ate_samples)  # shape (n_bootstraps, len(treatment_grid))
     out = pd.DataFrame(ate_arr, columns=treatment_grid)
     out.index.name = "bootstrap_id"
     return out

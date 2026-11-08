@@ -34,6 +34,24 @@ def test_bootstrap_ute_binary():
     assert not boot_df.isna().any().any()
 
 
+def test_bootstrap_ute_binary_with_dataframe_features_matches_ndarray():
+    """DataFrame features resample with duplicated row labels; the table equals the ndarray one."""
+    np.random.seed(3)
+    ks_data = datasets.KangSchafer(true_ate=5).sample(n_samples=50)
+    inputs, _ = ks_data.to_keras_inputs_outputs()
+    tf.random.set_seed(3)
+    model = models.build_model(
+        **presets.toy(n_states=2, n_features=ks_data.n_features, compile=True)
+    )
+    array = np.asarray(inputs[0])
+    features = pd.DataFrame(array, index=np.arange(array.shape[0]) + 100)
+    from_frame = bootstrap.bootstrap_ute_binary(model, features, n_bootstraps=3)
+    from_array = bootstrap.bootstrap_ute_binary(model, array, n_bootstraps=3)
+    assert from_frame.index.name == "bootstrap_id"
+    assert from_frame.shape == (3, array.shape[0])
+    pd.testing.assert_frame_equal(from_frame, from_array)
+
+
 def test_bootstrap_ate_binary():
     """Test that bootstrap_ate_binary returns finite CI bounds with lower <= upper."""
     # Prepare data

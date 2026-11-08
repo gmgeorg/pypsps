@@ -5,6 +5,21 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.7.1 - Nov 7, 2026
+
+### Fixed
+
+* `bootstrap_ute_binary` no longer raises `InvalidIndexError` when `features` is a pandas
+  DataFrame: the duplicated row labels of each resample are dropped, so the result is the same
+  `(n_bootstraps, n_units)` table (index `bootstrap_id`) as with an ndarray, for Keras and
+  PyTorch models.
+* The `bootstrap_ate_continuous` docstring now describes the function: the argument is
+  `n_bootstraps` (there is no `alpha`), and it returns the raw bootstrap samples, one row per
+  draw (index `bootstrap_id`) and one column per treatment grid value, not lower/upper bounds.
+* The Keras `CausalLoss` docstring note on `alpha=0` now says the outcome loss mixes with the
+  posterior state weights only under `outcome_likelihood="observational"`, as in the PyTorch
+  losses.
+
 ## pypsps v0.7.0 - Nov 7, 2026
 
 ### Breaking
