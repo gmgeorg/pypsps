@@ -727,11 +727,12 @@ def test_spec_of_a_pre_spec_model_is_none(tmp_path):
     assert "spec" not in reloaded.get_layer("output_tensor").get_config()
 
 
-def test_spec_of_warns_again_for_a_keras_only_activation(tmp_path):
-    """Loading a model with a Keras-only activation warns, as building it did."""
+def test_spec_of_does_not_warn_for_a_keras_only_activation():
+    """Only building warns about a Keras-only activation; reading the Spec does not."""
     with pytest.warns(NonPortableActivationWarning):
         model = _build("bernoulli", "normal", predictive_state_hidden_layers=[(4, "leaky_relu")])
-    with pytest.warns(NonPortableActivationWarning):
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", NonPortableActivationWarning)
         assert models.spec_of(model).predictive_state_hidden_layers == ((4, "leaky_relu"),)
 
 

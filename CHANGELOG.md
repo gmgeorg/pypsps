@@ -15,8 +15,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   carries its Spec on `CausalOutput` (`pypsps.keras.models.spec_of(model)`), and a PyTorch
   model saves it, `max_time` included.
 * `core.spec.NonPortableActivationWarning`.
-* `pypsps.torch.convert.copy_weights(keras_model, model)`, the by-name weight copy that
-  `PSPSModel.from_keras` uses.
 
 ### Changed
 

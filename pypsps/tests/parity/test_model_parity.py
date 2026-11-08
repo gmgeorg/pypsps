@@ -244,7 +244,7 @@ def test_native_models_from_one_spec_match(architecture):
         3, 5, [(8, "relu")], [(8, "relu")], log_scale_bounds=(-2.0, 4.0), log_shape_bounds=(-1, 1)
     )
     torch_model = tmodels.build_model(**{**torch_args, "architecture": architecture})
-    convert.copy_weights(keras_model, torch_model)
+    convert._copy_weights(keras_model, torch_model)
     with torch.no_grad():
         actual = torch_model.eval()(torch.tensor(x), torch.tensor(a)).numpy()
     np.testing.assert_allclose(actual, keras_model.predict([x, a], verbose=0), rtol=1e-4, atol=1e-5)

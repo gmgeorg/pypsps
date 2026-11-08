@@ -150,15 +150,7 @@ def _copy_bn(layer: Any, module: torch.nn.BatchNorm1d) -> None:
     module.running_var.copy_(torch.as_tensor(var))
 
 
-def _carried_spec_config(keras_model: Any) -> Dict[str, Any] | None:
-    """The `Spec.get_config` stored on the model's output layer, or None (older models)."""
-    for layer in keras_model.layers:
-        if hasattr(layer, "spec_config"):
-            return layer.spec_config
-    return None
-
-
-def copy_weights(keras_model: Any, model: "models.PSPSModel") -> None:
+def _copy_weights(keras_model: Any, model: "models.PSPSModel") -> None:
     """Copies every weight of ``keras_model`` into ``model`` by layer name.
 
     ``model`` must have the architecture of ``keras_model`` (as `from_keras` builds it, or
@@ -197,10 +189,12 @@ def from_keras(keras_model: Any) -> "models.PSPSModel":
       ValueError: before anything is built, if a hidden layer uses an activation that is not
         in `pypsps.core.spec.HIDDEN_ACTIVATIONS`.
     """
-    config = _carried_spec_config(keras_model)
-    if config is None:
+    from ..keras.models import spec_of
+
+    carried = spec_of(keras_model)
+    if carried is None:
         model = models.build_model(**infer_build_args(keras_model))
     else:
-        model = models.PSPSModel(Spec.from_config(config, _mixture(keras_model)))
-    copy_weights(keras_model, model)
+        model = models.PSPSModel(Spec.from_config(carried.get_config(), _mixture(keras_model)))
+    _copy_weights(keras_model, model)
     return model.eval()

@@ -106,16 +106,16 @@ def spec_of(model: tf.keras.Model) -> _Spec | None:
     """The `pypsps.core.spec.Spec` a model was built from, or None.
 
     `build_model` stores the Spec config on the model's `layers.CausalOutput`, so the Spec
-    survives ``save`` and ``load_model`` (also with ``compile=False``). It is validated again
-    on the way out, so a Keras-only activation warns again. Models saved before v0.6.3, and
-    networks without a `CausalOutput`, have no Spec and give None.
+    survives ``save`` and ``load_model`` (also with ``compile=False``). The activations were
+    checked when the model was built, so a Keras-only one does not warn here. Models saved
+    before v0.6.3, and networks without a `CausalOutput`, have no Spec and give None.
     """
     for layer in model.layers:
         if isinstance(layer, layers.CausalOutput):
             config = layer.spec_config
             if config is None:
                 return None
-            return _Spec.from_config(config, layer.mixture, _keras_activation_check())
+            return _Spec.from_config(config, layer.mixture, lambda name, what: None)
     return None
 
 
