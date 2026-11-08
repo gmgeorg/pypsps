@@ -96,26 +96,34 @@ def test_outcome_init_sets_the_starting_value():
     np.testing.assert_allclose(scale.detach().numpy(), 2.0, rtol=1e-4)
 
 
-@pytest.mark.parametrize(
-    "kwargs, error",
-    [
-        ({"n_states": 0}, ValueError),
-        ({"architecture": "nope"}, ValueError),
-        ({"dropout_rate": 1.5}, ValueError),
-        ({"predictive_state_hidden_layers": [(8, "nope")]}, ValueError),
-        ({"outcome_heads": {"nope": HeadSpec()}}, (KeyError, ValueError)),
-    ],
-)
-def test_invalid_arguments_raise_before_building(kwargs, error):
-    """The shared validation rejects bad arguments."""
-    args = {"n_states": 2, "n_features": 5, **kwargs}
-    with pytest.raises(error):
+def test_invalid_arguments_raise_before_any_layer_is_built(monkeypatch):
+    """The shared checks (``tests/core/test_spec.py``) run before the first layer is created."""
+
+    def fail(*args, **kwargs):
+        raise AssertionError("a layer was created")
+
+    monkeypatch.setattr(layers.Dense, "__init__", fail)
+    for kwargs in ({"n_states": 0}, {"architecture": "nope"}, {"dropout_rate": 1.5}):
+        args = {"n_states": 2, "n_features": 5, **kwargs}
+        with pytest.raises(ValueError):
+            models.build_model(
+                args.pop("n_states"),
+                args.pop("n_features"),
+                families.Normal(),
+                families.Bernoulli(),
+                **args,
+            )
+
+
+def test_unknown_activation_in_a_hidden_layer_raises():
+    """An unknown activation name is rejected (while the layer is built, for now)."""
+    with pytest.raises(ValueError, match="nope"):
         models.build_model(
-            args.pop("n_states"),
-            args.pop("n_features"),
+            2,
+            5,
             families.Normal(),
             families.Bernoulli(),
-            **args,
+            predictive_state_hidden_layers=[(8, "nope")],
         )
 
 

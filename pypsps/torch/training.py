@@ -23,6 +23,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
 import torch
 
+from ..core.layout import ColumnLayout
 from ..core.likelihood import OutcomeLikelihood
 from . import callbacks as callbacks_lib
 from . import losses as losses_lib
@@ -68,25 +69,13 @@ def _tensor(x: Array, name: str) -> torch.Tensor:
     return torch.from_numpy(np.ascontiguousarray(array))
 
 
-def _y_true(outcome: Array, treatment: torch.Tensor, n_outcome_cols: int) -> torch.Tensor:
-    """``[outcome (C columns) | treatment]`` as the loss reads it."""
-    y = _tensor(outcome, "outcome")
-    if y.ndim == 1:
-        y = y[:, None]
-    if y.shape[1] != n_outcome_cols:
-        raise ValueError(
-            f"outcome has {y.shape[1]} column(s) but the outcome family reads {n_outcome_cols}"
-        )
-    return torch.cat([y, treatment.reshape(-1, 1)], dim=1)
-
-
 def _prepare(
     features: Array,
     treatment: Array,
     outcome: Array,
     sample_weight: Optional[Array],
     n_features: int,
-    n_outcome_cols: int,
+    layout: ColumnLayout,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
     """Validated float32 tensors: features ``[N, F]``, treatment ``[N]``, y_true, weights."""
     x = _tensor(features, "features")
@@ -95,7 +84,7 @@ def _prepare(
     a = _tensor(treatment, "treatment").reshape(-1)
     if a.shape[0] != x.shape[0]:
         raise ValueError(f"features has {x.shape[0]} rows but treatment has {a.shape[0]}")
-    y = _y_true(outcome, a, n_outcome_cols)
+    y = layout.encode_true(_tensor(outcome, "outcome"), a)
     if y.shape[0] != x.shape[0]:
         raise ValueError(f"features has {x.shape[0]} rows but outcome has {y.shape[0]}")
     weight = None
@@ -262,14 +251,12 @@ def fit(
     dev = torch.device(device) if device is not None else next(model.parameters()).device
     model.to(dev)
     mixture = model.mixture
-    n_outcome_cols = mixture.layout.n_outcome_true_cols
-    train = _prepare(
-        features, treatment, outcome, sample_weight, model.spec.n_features, n_outcome_cols
-    )
+    layout = mixture.layout
+    train = _prepare(features, treatment, outcome, sample_weight, model.spec.n_features, layout)
     val = None
     if validation_data is not None:
         vf, vt, vo, *vw = validation_data
-        val = _prepare(vf, vt, vo, vw[0] if vw else None, model.spec.n_features, n_outcome_cols)
+        val = _prepare(vf, vt, vo, vw[0] if vw else None, model.spec.n_features, layout)
     elif validation_split > 0.0:
         n_total = train[0].shape[0]
         cut = int(n_total * (1.0 - validation_split))
@@ -385,7 +372,7 @@ def evaluate(
         outcome,
         sample_weight,
         model.spec.n_features,
-        model.mixture.layout.n_outcome_true_cols,
+        model.mixture.layout,
     )
     loss = losses_lib.CausalLoss(
         model.mixture,

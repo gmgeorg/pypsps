@@ -45,7 +45,7 @@ def _data(layout, outcome_name, seed=0):
     if outcome_name == "bernoulli":
         outcome = rng.randint(0, 2, (_N, c)).astype("f4")
     treatment = rng.randint(0, 2, (_N, 1)).astype("f4")
-    y_true = np.concatenate([outcome, treatment], axis=1)
+    y_true = layout.encode_true(outcome, treatment)
     return y_true, y_pred
 
 

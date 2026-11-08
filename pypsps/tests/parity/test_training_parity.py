@@ -9,6 +9,7 @@ pytest.importorskip("torch")
 
 from ...keras import families as kf  # noqa: E402
 from ...keras import models as kmodels  # noqa: E402
+from ...keras.layout import ColumnLayout  # noqa: E402
 from ...torch import models as tmodels  # noqa: E402
 from ...torch import training  # noqa: E402
 
@@ -50,7 +51,7 @@ def test_evaluate_matches_keras(case, likelihood, weighted):
     kmodels.compile_model(
         keras_model, alpha=1.5, outcome_loss_weight=0.7, outcome_likelihood=likelihood
     )
-    y_true = np.concatenate([outcome, a[:, None]], 1)
+    y_true = ColumnLayout.from_model(keras_model).encode_true(outcome, a)
     expected = keras_model.evaluate(
         [x, a], y_true, sample_weight=sw, batch_size=64, verbose=0, return_dict=True
     )
@@ -85,7 +86,7 @@ def test_same_fit_reaches_a_similar_loss_as_keras():
         3, 5, kf.Normal(), kf.Bernoulli(), compile=False, dropout_rate=0.0
     )
     kmodels.compile_model(keras_model, learning_rate=0.01)
-    y_true = np.concatenate([outcome, a[:, None]], 1)
+    y_true = ColumnLayout.from_model(keras_model).encode_true(outcome, a)
     model = tmodels.PSPSModel.from_keras(keras_model)
     initial = training.evaluate(model, x, a, outcome)["causal_loss_metric"]
     keras_model.fit([x, a], y_true, epochs=40, batch_size=32, verbose=0)

@@ -8,7 +8,8 @@ where each parameter block holds one column per predictive state (K columns), pa
 parameter: ``[p0_s0, ..., p0_s{K-1}, p1_s0, ..., p1_s{K-1}, ...]``. So
 ``y_pred`` has ``K * (P_o + 1 + P_t)`` columns for ``P_o`` outcome and ``P_t`` treatment
 parameters per state. ``y_true`` is ``[outcome (C columns) | treatment (1 column) | ...]``;
-trailing columns are ignored.
+`ColumnLayout.decode_true` ignores trailing columns, and `ColumnLayout.encode_true` builds
+``y_true`` with exactly C + 1 columns.
 
 `ColumnLayout` is the one module that knows this order. It decodes a tensor into named
 ``[N, K]`` blocks and encodes them back. It knows nothing about distributions: the families
@@ -82,6 +83,25 @@ def _concat(blocks: list[Array]) -> Array:
     import tensorflow as tf
 
     return tf.concat(blocks, axis=-1)
+
+
+def _as_array(x: Array) -> Array:
+    """Returns ``x`` as a NumPy array if it is a pandas object or a list; tensors pass through."""
+    if hasattr(x, "to_numpy"):
+        return x.to_numpy()
+    if isinstance(x, (list, tuple)):
+        return np.asarray(x)
+    return x
+
+
+def _as_columns(y: Array, what: str) -> Array:
+    """``y`` as ``[N, C]``: a 1-D ``[N]`` becomes one column; any other rank raises."""
+    ndim = len(y.shape)
+    if ndim == 1:
+        return y[:, None]
+    if ndim != 2:
+        raise ValueError(f"{what} must be [N] or [N, C], got shape {tuple(y.shape)}")
+    return y
 
 
 def _check_names(names: Iterable[str], what: str) -> tuple[str, ...]:
@@ -203,6 +223,47 @@ class ColumnLayout:
                 f"({c} outcome + 1 treatment)"
             )
         return TrueParts(outcome=y_true[:, :c], treatment=y_true[:, c : c + 1])
+
+    def encode_true(self, outcome: Array, treatment: Array) -> Array:
+        """Inverse of `decode_true`: ``[outcome (C columns) | treatment (1 column)]``.
+
+        This is the one place that builds ``y_true`` and checks its width. ``decode_true``
+        ignores trailing columns, because a Keras model gets ``y_true`` as the caller made it;
+        this method does not, so an outcome of the wrong width (a ``[time, event]`` survival
+        outcome for a Normal family, say) raises here instead of being read as an outcome and
+        a treatment.
+
+        Args:
+          outcome: ``[N, C]``, or ``[N]`` when C == 1. C is the outcome family's number of
+            ``y_true`` columns.
+          treatment: ``[N]`` or ``[N, 1]``.
+
+        Returns:
+          ``y_true`` with ``C + 1`` columns. pandas objects and lists are converted to NumPy;
+          a NumPy array in gives a NumPy array out, and a tensor in gives a tensor out. The
+          dtypes are not changed, so tensors must already share one.
+
+        Raises:
+          ValueError: if the outcome does not have exactly C columns, the treatment has more
+            than one column, either has a rank above 2, or the row counts differ.
+        """
+        outcome = _as_columns(_as_array(outcome), "outcome")
+        treatment = _as_columns(_as_array(treatment), "treatment")
+        width = _static_width(outcome, "outcome")
+        if width != self.n_outcome_true_cols:
+            raise ValueError(
+                f"outcome has {width} column(s) but the outcome family reads "
+                f"{self.n_outcome_true_cols}"
+            )
+        treatment_width = _static_width(treatment, "treatment")
+        if treatment_width != 1:
+            raise ValueError(
+                f"treatment has {treatment_width} column(s); y_true has exactly one treatment column"
+            )
+        n_outcome, n_treatment = outcome.shape[0], treatment.shape[0]
+        if n_outcome is not None and n_treatment is not None and n_outcome != n_treatment:
+            raise ValueError(f"outcome has {n_outcome} rows but treatment has {n_treatment}")
+        return _concat([outcome, treatment])
 
     def encode(
         self,

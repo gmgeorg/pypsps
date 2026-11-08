@@ -1,5 +1,6 @@
 """The core, inference and each backend import only the framework they need."""
 
+import pathlib
 import subprocess
 import sys
 import textwrap
@@ -88,3 +89,36 @@ def test_datasets_work_without_scipy():
         """
     )
     assert out == "50"
+
+
+def test_core_suite_runs_without_any_framework():
+    """Every other test in ``tests/core`` passes with TensorFlow and PyTorch unimportable.
+
+    This keeps the core suite framework-free, so a test that needs a framework belongs in
+    ``tests/keras``, ``tests/torch`` or ``tests/parity``.
+    """
+    # A finder rather than ``sys.modules[name] = None``: libraries such as scipy probe for a
+    # framework by name, and a None entry breaks them in a way a missing package does not.
+    code = """
+        import sys
+
+        class Missing:
+            def find_spec(self, name, path=None, target=None):
+                if name.split(".")[0] in ("tensorflow", "keras", "torch"):
+                    raise ModuleNotFoundError(f"No module named {name!r}")
+
+        sys.meta_path.insert(0, Missing())
+        import pytest
+        sys.exit(pytest.main([
+            "pypsps/tests/core", "-k", "not backend_isolation", "-q", "-p", "no:cacheprovider",
+        ]))
+    """
+    root = pathlib.Path(__file__).resolve().parents[3]
+    result = subprocess.run(
+        [sys.executable, "-c", textwrap.dedent(code)],
+        capture_output=True,
+        text=True,
+        cwd=root,
+        check=False,
+    )
+    assert result.returncode == 0, (result.stdout + result.stderr)[-3000:]

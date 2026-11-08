@@ -144,7 +144,7 @@ def test_fit_rejects_mismatched_or_non_finite_data():
     x, a, y = _data()
     with pytest.raises(ValueError, match="rows"):
         training.fit(_model(), x, a[:-1], y)
-    with pytest.raises(ValueError, match="column"):
+    with pytest.raises(ValueError, match=r"outcome has 2 column.*reads 1"):
         training.fit(_model(), x, a, np.stack([y, y], 1))
     x_bad = x.copy()
     x_bad[0, 0] = np.nan
@@ -356,3 +356,18 @@ def test_fit_and_evaluate_with_metrics_on_an_accelerator():
     assert np.isfinite(history.history["val_propensity_score_auroc"][-1])
     logs = training.evaluate(model, x, a, y, sample_weight=w, weighted_metrics=True)
     assert np.isfinite(logs["outcome_mean_squared_error"])
+
+
+def test_encode_true_keeps_torch_tensors():
+    """A tensor outcome and treatment give a tensor y_true on the same device and dtype."""
+    layout = models.build_model(2, 4, families.Weibull(), families.Bernoulli()).layout
+    outcome = torch.tensor([[1.0, 1.0], [2.0, 0.0], [3.0, 1.0]])
+    treatment = torch.tensor([0.0, 1.0, 1.0])
+
+    y = layout.encode_true(outcome, treatment)
+
+    assert isinstance(y, torch.Tensor) and y.shape == (3, 3)
+    assert y.device == outcome.device and y.dtype == torch.float32
+    np.testing.assert_array_equal(y.numpy(), [[1, 1, 0], [2, 0, 1], [3, 1, 1]])
+    with pytest.raises(ValueError, match=r"outcome has 1 column.*reads 2"):
+        layout.encode_true(outcome[:, :1], treatment)

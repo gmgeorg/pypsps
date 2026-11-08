@@ -1,10 +1,13 @@
 """Base module for all (simulated) datasets."""
 
 import abc
-from typing import Any, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
+
+if TYPE_CHECKING:  # annotation only
+    from ..core.layout import ColumnLayout
 
 
 def expit(x: Union[float, np.ndarray]):
@@ -56,11 +59,22 @@ class CausalDataset(object):
         return pd.concat(list_dfs, axis=1)
 
     def to_keras_inputs_outputs(
-        self,
+        self, layout: Optional["ColumnLayout"] = None
     ) -> Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray]:
-        """Returns (inputs, outputs) for a .fit() method for keras model."""
+        """Returns (inputs, outputs) for a .fit() method for keras model.
+
+        Args:
+          layout: optional `ColumnLayout` (Keras: ``ColumnLayout.from_model(model)``;
+            torch: ``model.mixture.layout``). If given, the outputs are built with
+            ``layout.encode_true``, which raises if the outcome does not have the outcome
+            family's number of columns. Without it the outputs are the outcome columns
+            followed by the treatment, with no check.
+        """
         input_data = [self.features.values, self.treatments.values]
-        output_data = np.hstack([self.outcomes.values, self.treatments.values])
+        if layout is None:
+            output_data = np.hstack([self.outcomes.values, self.treatments.values])
+        else:
+            output_data = layout.encode_true(self.outcomes.values, self.treatments.values)
         return (
             input_data,
             output_data,

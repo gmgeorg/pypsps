@@ -23,7 +23,9 @@ All components are fully compatible with the standard `tf.keras` API.
 * **`layout`**: `ColumnLayout`, the one place that knows the column order of `y_pred`
   (`[outcome params | state weights | treatment params]`, each block one column per state)
   and `y_true` (`[outcome | treatment | ignored]`). `decode_pred` splits a prediction into
-  named `[N, K]` blocks and `encode` puts them back together.
+  named `[N, K]` blocks and `encode` puts them back together. `decode_true` splits `y_true`
+  and `encode_true(outcome, treatment)` builds it, checking that the outcome has exactly the
+  number of columns the outcome family reads.
 * **`layers.CausalOutput(mixture)`**: the output layer of every builder. It encodes the heads
   (`{"outcome": ..., "state_weights": ..., "treatment": ...}`) into `y_pred` and stores the
   mixture in the saved model.
