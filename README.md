@@ -156,6 +156,8 @@ datasets, wrap them into a `datasets.base.CausalDataset()` class. Learn more in
 
 * [`notebooks/pypsps_minimal_working_example.ipynb`](notebooks/pypsps_minimal_working_example.ipynb):
   Minimal workflow for ATE estimation on Kang-Schafer.
+* [`notebooks/pypsps_minimal_working_example_torch.ipynb`](notebooks/pypsps_minimal_working_example_torch.ipynb):
+  The same minimal workflow with the PyTorch backend (`pypsps[torch]`, no TensorFlow needed).
 * [`notebooks/pypsps_demo.ipynb`](notebooks/pypsps_demo.ipynb): Comprehensive
   usage examples on simulated and real-world datasets.
 
