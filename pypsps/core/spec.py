@@ -113,11 +113,97 @@ class Spec:
     treatment_embedding_units: int | None
     dropout_rate: float
     l1: float
+    max_time: float | None = None  # largest time in the data (survival families), or None
 
     @property
     def n_states(self) -> int:
         """K."""
         return self.mixture.n_states
+
+    def get_config(self) -> dict:
+        """The build arguments as JSON-friendly values, without the mixture.
+
+        Each backend serializes its own mixture beside this config (Keras on `CausalOutput`,
+        PyTorch in the model config), so the config is the same dict in both. `from_config`
+        inverts it.
+        """
+        return {
+            "n_features": self.n_features,
+            "architecture": self.architecture,
+            "predictive_state_hidden_layers": [
+                list(h) for h in self.predictive_state_hidden_layers
+            ],
+            "outcome_hidden_layers": [list(h) for h in self.outcome_hidden_layers],
+            "outcome_heads": {
+                name: {
+                    "hidden_layer": None if h.hidden_layer is None else list(h.hidden_layer),
+                    "constant": h.constant,
+                    "per_state": h.per_state,
+                }
+                for name, h in self.heads.items()
+            },
+            "treatment_embedding_units": self.treatment_embedding_units,
+            "dropout_rate": self.dropout_rate,
+            "l1": self.l1,
+            "outcome_init": {
+                p.name: float(p.init) for p in self.outcome_params if p.init is not None
+            },
+            "treatment_init": (
+                None if self.treatment_init is None else np.asarray(self.treatment_init).tolist()
+            ),
+            "max_time": None if self.max_time is None else float(self.max_time),
+        }
+
+    @classmethod
+    def from_config(
+        cls,
+        config: Mapping[str, Any],
+        mixture: MixtureSpec,
+        check_activation: ActivationCheck = require_portable,
+    ) -> "Spec":
+        """Rebuilds a Spec from `get_config` and the model's mixture.
+
+        The config goes through `make_spec`, so it is validated exactly like `build_model`
+        arguments (a hand-edited config can't skip a check). A missing ``max_time`` reads as
+        None. The returned Spec holds ``mixture`` itself.
+
+        Args:
+          config: a `get_config` dict (a missing ``max_time`` key is allowed).
+          mixture: the model's state mixture (its families and K).
+          check_activation: see `make_spec`.
+        """
+        treatment_init = config.get("treatment_init")
+        heads = {
+            name: HeadSpec(
+                hidden_layer=None if h["hidden_layer"] is None else tuple(h["hidden_layer"]),
+                constant=h["constant"],
+                per_state=h["per_state"],
+            )
+            for name, h in config["outcome_heads"].items()
+        }
+        spec = make_spec(
+            type(mixture),
+            mixture.n_states,
+            config["n_features"],
+            mixture.outcome_family,
+            mixture.treatment_family,
+            config["architecture"],
+            [tuple(h) for h in config["predictive_state_hidden_layers"]],
+            [tuple(h) for h in config["outcome_hidden_layers"]],
+            heads,
+            config["treatment_embedding_units"],
+            config["dropout_rate"],
+            config["l1"],
+            config.get("outcome_init") or None,
+            (
+                None
+                if treatment_init is None
+                else dict(zip(mixture.treatment_family.param_names, treatment_init))
+            ),
+            config.get("max_time"),
+            check_activation=check_activation,
+        )
+        return dataclasses.replace(spec, mixture=mixture)
 
 
 def positive_int(value: Any, what: str) -> int:
@@ -256,4 +342,5 @@ def make_spec(
         treatment_embedding_units=treatment_embedding_units,
         dropout_rate=float(dropout_rate),
         l1=float(l1),
+        max_time=None if max_time is None else float(max_time),
     )

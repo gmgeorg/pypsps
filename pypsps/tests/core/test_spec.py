@@ -1,5 +1,7 @@
 """Tests for `core.spec.make_spec`: every build argument is checked before any layer exists."""
 
+import json
+
 import numpy as np
 import pytest
 
@@ -9,6 +11,7 @@ from ...core.spec import (
     HIDDEN_ACTIVATIONS,
     HeadSpec,
     NonPortableActivationWarning,
+    Spec,
     make_spec,
     require_portable,
 )
@@ -155,3 +158,83 @@ def test_require_portable_names_what_and_the_portable_names():
 def test_the_non_portable_warning_is_a_user_warning():
     """Users can filter `NonPortableActivationWarning` by class."""
     assert issubclass(NonPortableActivationWarning, UserWarning)
+
+
+_WEIBULL = families.Weibull(log_scale_bounds=(-2.0, 4.0), log_shape_bounds=(-1.0, 1.0))
+_HEADS = {
+    "normal": [None, {"loc": HeadSpec(None), "scale": HeadSpec(constant=True, per_state=False)}],
+    "weibull": [
+        None,
+        {"log_scale": HeadSpec((3, "tanh"), per_state=False), "log_shape": HeadSpec(None)},
+    ],
+}
+
+
+@pytest.mark.parametrize("architecture", ["shared_trunk", "gated"])
+@pytest.mark.parametrize("hidden", [[], [(4, "relu"), (3, "swish")]], ids=["flat", "deep"])
+@pytest.mark.parametrize("outcome", ["normal", "weibull"])
+@pytest.mark.parametrize("heads", [0, 1], ids=["default-heads", "custom-heads"])
+@pytest.mark.parametrize("treatment_init", [None, {"prob": [0.3, 0.7]}], ids=["no-init", "init"])
+def test_spec_config_round_trips(architecture, hidden, outcome, heads, treatment_init):
+    """``get_config`` is JSON, leaves out the mixture, and ``from_config`` inverts it."""
+    spec = _spec(
+        outcome_family=_WEIBULL if outcome == "weibull" else _NORMAL,
+        architecture=architecture,
+        predictive_state_hidden_layers=hidden,
+        outcome_hidden_layers=hidden,
+        outcome_heads=_HEADS[outcome][heads],
+        treatment_embedding_units=None if heads else 8,
+        dropout_rate=0.1,
+        l1=0.01,
+        treatment_init=treatment_init,
+        max_time=50.0 if outcome == "weibull" else None,
+    )
+    config = spec.get_config()
+    assert "mixture" not in config
+    assert json.loads(json.dumps(config)) == config
+    rebuilt = Spec.from_config(json.loads(json.dumps(config)), spec.mixture)
+    assert rebuilt.get_config() == config
+    assert rebuilt.mixture is spec.mixture
+    assert rebuilt.max_time == spec.max_time
+    assert rebuilt.heads == spec.heads
+    assert rebuilt.architecture == architecture
+    np.testing.assert_array_equal(rebuilt.treatment_init, spec.treatment_init)
+
+
+def test_spec_from_config_validates_like_arguments():
+    """A config is checked as ``make_spec`` checks arguments, so an edited one can't skip it."""
+    spec = _spec(outcome_hidden_layers=[(4, "relu")])
+    config = spec.get_config()
+    for edit, match in (
+        ({"dropout_rate": 1.0}, "dropout"),
+        ({"architecture": "deep"}, "shared_trunk"),
+        ({"outcome_hidden_layers": [[4, "leaky_relu"]]}, "leaky_relu"),
+        ({"predictive_state_hidden_layers": [[0, "relu"]]}, "units"),
+    ):
+        with pytest.raises(ValueError, match=match):
+            Spec.from_config({**config, **edit}, spec.mixture)
+
+
+def test_spec_from_config_uses_the_given_activation_check():
+    """The check of the backend that loads the config replaces the default."""
+    spec = _spec(outcome_hidden_layers=[(4, "relu")])
+    config = {**spec.get_config(), "outcome_hidden_layers": [[4, "leaky_relu"]]}
+    seen = []
+    rebuilt = Spec.from_config(
+        config, spec.mixture, check_activation=lambda name, what: seen.append(name)
+    )
+    assert seen.count("leaky_relu") == 1
+    assert rebuilt.outcome_hidden_layers == ((4, "leaky_relu"),)
+
+
+def test_spec_keeps_max_time():
+    """``max_time`` is validated and kept; a config without the key reads as None."""
+    spec = _spec(outcome_family=_WEIBULL, max_time=50.0)
+    assert spec.max_time == 50.0
+    assert spec.get_config()["max_time"] == 50.0
+    assert _spec().max_time is None
+    config = spec.get_config()
+    del config["max_time"]
+    assert Spec.from_config(config, spec.mixture).max_time is None
+    with pytest.raises(ValueError, match="overflow|max_time"):
+        Spec.from_config({**spec.get_config(), "max_time": 1e30}, spec.mixture)

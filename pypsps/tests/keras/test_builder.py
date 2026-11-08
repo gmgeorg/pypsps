@@ -667,3 +667,75 @@ def test_propensity_means_need_a_mixture():
     model = tf.keras.Model(features, tf.keras.layers.Dense(2)(features))
     with pytest.raises(RuntimeError, match="CausalOutput"):
         models.get_propensity_state_conditional_means(model)
+
+
+# --- the Spec carried on CausalOutput ---
+
+
+def _spec_args(**kwargs):
+    """`build_model` arguments for a Weibull model with several non-default settings."""
+    return dict(
+        n_states=3,
+        n_features=F,
+        outcome_family=families.Weibull(_LS_BOUNDS, _SHAPE_BOUNDS),
+        treatment_family=_BERNOULLI,
+        architecture="shared_trunk",
+        predictive_state_hidden_layers=[(5, "relu"), (4, "tanh")],
+        outcome_hidden_layers=[(6, "swish")],
+        outcome_heads={"log_shape": models.HeadSpec(hidden_layer=None, per_state=False)},
+        treatment_embedding_units=None,
+        dropout_rate=0.1,
+        l1=0.01,
+        treatment_init={"prob": [0.3, 0.5, 0.7]},
+        max_time=50.0,
+        **kwargs,
+    )
+
+
+@pytest.mark.parametrize("compile_on_load", [True, False])
+def test_causal_output_carries_the_spec(tmp_path, compile_on_load):
+    """``spec_of`` returns the build Spec, also after ``save`` and ``load_model``."""
+    model = models.build_model(**_spec_args())
+    expected = model.get_layer("output_tensor").spec_config
+    assert expected is not None and expected["max_time"] == 50.0
+    assert models.spec_of(model).get_config() == expected
+    assert models.spec_of(model).mixture is model.get_layer("output_tensor").mixture
+
+    path = str(tmp_path / "model.keras")
+    model.save(path)
+    reloaded = tf.keras.models.load_model(path, compile=compile_on_load)
+    spec = models.spec_of(reloaded)
+    assert spec.get_config() == expected
+    assert spec.max_time == 50.0
+    assert spec.n_states == 3
+
+
+def test_spec_of_a_pre_spec_model_is_none(tmp_path):
+    """A ``CausalOutput`` without ``spec`` (the 0.6.x config) gives None, and the model loads."""
+    model = _build("bernoulli", "normal", compile=False)
+    config = model.get_config()
+    for layer in config["layers"]:
+        if layer["class_name"].endswith("CausalOutput"):
+            assert layer["config"].pop("spec") is not None
+    old = tf.keras.Model.from_config(config)
+    assert models.spec_of(old) is None
+    assert old.get_layer("output_tensor").spec_config is None
+    path = str(tmp_path / "old.keras")
+    old.save(path)
+    reloaded = tf.keras.models.load_model(path, compile=False)
+    assert models.spec_of(reloaded) is None
+    assert "spec" not in reloaded.get_layer("output_tensor").get_config()
+
+
+def test_spec_of_warns_again_for_a_keras_only_activation(tmp_path):
+    """Loading a model with a Keras-only activation warns, as building it did."""
+    with pytest.warns(NonPortableActivationWarning):
+        model = _build("bernoulli", "normal", predictive_state_hidden_layers=[(4, "leaky_relu")])
+    with pytest.warns(NonPortableActivationWarning):
+        assert models.spec_of(model).predictive_state_hidden_layers == ((4, "leaky_relu"),)
+
+
+def test_spec_of_a_model_without_causal_output_is_none():
+    """A network without a ``CausalOutput`` has no Spec."""
+    plain = tf.keras.Sequential([tf.keras.Input((F,)), tf.keras.layers.Dense(1)])
+    assert models.spec_of(plain) is None

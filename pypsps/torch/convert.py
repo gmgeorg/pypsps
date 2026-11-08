@@ -1,7 +1,9 @@
 """Copy a trained `pypsps.keras` model into a `pypsps.torch.models.PSPSModel`.
 
-The build arguments are inferred from the Keras model's layer names and configs, which
-`pypsps.keras.models.build_model` fixes; every weight is then copied by layer name:
+The build arguments are read from the `pypsps.core.spec.Spec` the Keras model carries on its
+`CausalOutput` layer (v0.6.3 and later). A model saved before that has no Spec; its build
+arguments are then inferred from the layer names and configs, which
+`pypsps.keras.models.build_model` fixes. Every weight is copied by layer name:
 
 * dense kernels are transposed (Keras ``[in, out]``, torch ``[out, in]``);
 * batch normalization maps ``gamma, beta, moving_mean, moving_variance`` to
@@ -18,7 +20,7 @@ from typing import Any, Dict, List, Tuple
 import numpy as np
 import torch
 
-from ..core.spec import HeadSpec, require_portable
+from ..core.spec import HeadSpec, Spec
 from . import families as torch_families
 from . import mixture as torch_mixture
 from . import models
@@ -148,26 +150,20 @@ def _copy_bn(layer: Any, module: torch.nn.BatchNorm1d) -> None:
     module.running_var.copy_(torch.as_tensor(var))
 
 
-def _require_portable_args(args: Dict[str, Any]) -> None:
-    """Raises ValueError for a hidden-layer activation PyTorch can't build, naming the field."""
-    for field in ("predictive_state_hidden_layers", "outcome_hidden_layers"):
-        for i, (_, activation) in enumerate(args[field]):
-            require_portable(activation, f"{field}[{i}]")
-    for name, head in args["outcome_heads"].items():
-        if head.hidden_layer is not None and not head.constant:
-            require_portable(head.hidden_layer[1], f"outcome_heads[{name!r}].hidden_layer")
+def _carried_spec_config(keras_model: Any) -> Dict[str, Any] | None:
+    """The `Spec.get_config` stored on the model's output layer, or None (older models)."""
+    for layer in keras_model.layers:
+        if hasattr(layer, "spec_config"):
+            return layer.spec_config
+    return None
 
 
-def from_keras(keras_model: Any) -> "models.PSPSModel":
-    """A `PSPSModel` with the architecture and weights of ``keras_model``, in eval mode.
+def copy_weights(keras_model: Any, model: "models.PSPSModel") -> None:
+    """Copies every weight of ``keras_model`` into ``model`` by layer name.
 
-    Raises:
-      ValueError: before anything is built, if a hidden layer uses an activation that is not
-        in `pypsps.core.spec.HIDDEN_ACTIVATIONS`.
+    ``model`` must have the architecture of ``keras_model`` (as `from_keras` builds it, or
+    `pypsps.torch.models.build_model` with the same arguments).
     """
-    args = infer_build_args(keras_model)
-    _require_portable_args(args)
-    model = models.build_model(**args)
     for layer in keras_model.layers:
         name, kind = layer.name, type(layer).__name__
         weights = layer.get_weights()
@@ -188,4 +184,23 @@ def from_keras(keras_model: Any) -> "models.PSPSModel":
             )
         else:
             raise ValueError(f"cannot copy the weights of layer {name!r} ({kind})")
+
+
+def from_keras(keras_model: Any) -> "models.PSPSModel":
+    """A `PSPSModel` with the architecture and weights of ``keras_model``, in eval mode.
+
+    The architecture is the model's carried `Spec`; a model without one (saved before v0.6.3)
+    is read from its layer names (`infer_build_args`).
+
+    Raises:
+      NotImplementedError: for a model with a `LossFamily`.
+      ValueError: before anything is built, if a hidden layer uses an activation that is not
+        in `pypsps.core.spec.HIDDEN_ACTIVATIONS`.
+    """
+    config = _carried_spec_config(keras_model)
+    if config is None:
+        model = models.build_model(**infer_build_args(keras_model))
+    else:
+        model = models.PSPSModel(Spec.from_config(config, _mixture(keras_model)))
+    copy_weights(keras_model, model)
     return model.eval()

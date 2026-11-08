@@ -102,6 +102,23 @@ def _make_spec(*args: Any, **kwargs: Any) -> _Spec:
     return core_spec.make_spec(mixture_lib.StateMixture, *args, **kwargs)
 
 
+def spec_of(model: tf.keras.Model) -> _Spec | None:
+    """The `pypsps.core.spec.Spec` a model was built from, or None.
+
+    `build_model` stores the Spec config on the model's `layers.CausalOutput`, so the Spec
+    survives ``save`` and ``load_model`` (also with ``compile=False``). It is validated again
+    on the way out, so a Keras-only activation warns again. Models saved before v0.6.3, and
+    networks without a `CausalOutput`, have no Spec and give None.
+    """
+    for layer in model.layers:
+        if isinstance(layer, layers.CausalOutput):
+            config = layer.spec_config
+            if config is None:
+                return None
+            return _Spec.from_config(config, layer.mixture, _keras_activation_check())
+    return None
+
+
 def _treatment_head(spec: _Spec, state_weights: tf.Tensor) -> tf.Tensor:
     """One feature-independent constant per state and treatment parameter, ``[N, P * K]``."""
     params = spec.mixture.treatment_family.params
@@ -241,7 +258,7 @@ def _assemble(spec: _Spec) -> tf.keras.Model:
         name: tfk.layers.Concatenate(name=f"{name}_all_states")(values)
         for name, values in columns.items()
     }
-    output = layers.CausalOutput(spec.mixture, name="output_tensor")(
+    output = layers.CausalOutput(spec.mixture, spec=spec.get_config(), name="output_tensor")(
         {"outcome": outcome, "state_weights": state_weights, "treatment": treatment_params}
     )
     return tfk.models.Model(inputs=[features, treatment], outputs=output)

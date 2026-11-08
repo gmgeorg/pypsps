@@ -201,6 +201,18 @@ def test_config_round_trip():
     assert [k for k in rebuilt.state_dict()] == [k for k in model.state_dict()]
 
 
+def test_get_config_is_the_mixture_plus_the_spec_config():
+    """The model config is the Spec config and the mixture, and keeps ``max_time``."""
+    weibull = families.Weibull(log_scale_bounds=(-2.0, 4.0), log_shape_bounds=(-1.0, 1.0))
+    model = models.build_model(2, 5, weibull, families.Bernoulli(), max_time=50.0)
+    config = model.get_config()
+    assert config == {"mixture": model.mixture.get_config(), **model.spec.get_config()}
+    assert config["max_time"] == 50.0
+    rebuilt = models.PSPSModel.from_config(config)
+    assert rebuilt.spec.max_time == 50.0
+    assert rebuilt.get_config() == config
+
+
 @pytest.mark.parametrize(
     "name, make",
     [
