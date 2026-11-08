@@ -13,8 +13,9 @@ All datasets in `pypsps.datasets` inherit from `CausalDataset` defined in
   `model.mixture.layout` for a torch `PSPSModel`) as `layout=` to build them with
   `ColumnLayout.encode_true`, which raises if the outcome does not have the number of
   columns the outcome family reads (for example, a `[time, event]` outcome for a Normal
-  model). Without a layout, nothing is checked. `pypsps.utils.prepare_keras_inputs_outputs(features, treatments, outcomes,
-  layout=None)` does the same for DataFrames or arrays.
+  model). Without a layout, nothing is checked.
+  `pypsps.utils.prepare_keras_inputs_outputs(features, treatments, outcomes, layout=None)`
+  does the same for DataFrames or arrays.
 * `naive_ate()`: Computes the unadjusted observational ATE for baseline
   evaluation.
 
