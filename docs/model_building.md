@@ -435,9 +435,10 @@ model = tf.keras.models.load_model("model.keras")
   built before v0.3.4 have no such layer and, since v0.5.0, load only with `compile=False`;
   see [Models saved before v0.5.0](#models-saved-before-v050).
 * The same layer carries the model's build arguments, `pypsps.core.spec.Spec.get_config`
-  (including `max_time`), and `models.spec_of(model)` returns the `Spec` (without warning again about a Keras-only
-  activation). `PSPSModel.from_keras` reads it. Models saved before v0.6.3 have none (`spec_of` gives `None`); they still load and
-  convert, with the build arguments read from the layer names. A `.keras` file saved by v0.6.3
+  (including `max_time`), and `models.spec_of(model)` returns the `Spec` (without warning
+  again about a Keras-only activation). `PSPSModel.from_keras` reads it. Models saved before
+  v0.6.3 have none (`spec_of` gives `None`); they still load and convert, with the build
+  arguments read from the layer names. A `.keras` file saved by v0.6.3
   or later can't be loaded by an older pypsps.
 * A custom elementwise NLL must be registered with
   `tf.keras.utils.register_keras_serializable` to load. `neglogliks.NegloglikLoss`, which
