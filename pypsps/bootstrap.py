@@ -122,7 +122,7 @@ def bootstrap_ate_continuous(
             model, feat_bs, treatment_grid, baseline_treatment
         )
         ate_samples.append(ate_bs)
-    ate_arr = np.array(ate_samples)  # shape (n_bootstrap, len(treatment_grid))
+    ate_arr = np.array(ate_samples)  # shape (n_bootstraps, len(treatment_grid))
     out = pd.DataFrame(ate_arr, columns=treatment_grid)
     out.index.name = "bootstrap_id"
     return out
