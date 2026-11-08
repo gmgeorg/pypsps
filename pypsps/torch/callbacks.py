@@ -8,12 +8,12 @@ training, set ``self.model.stop_training = True``.
 
 import copy
 import math
-from typing import Any
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
 
-from ..core import alpha_schedule
+from ..core import alpha_schedule, checkpoint
 
 
 class Callback:
@@ -27,16 +27,16 @@ class Callback:
         """Called by ``fit`` before training."""
         self.model, self.loss, self.optimizer = model, loss, optimizer
 
-    def on_train_begin(self, logs: dict | None = None) -> None:
+    def on_train_begin(self, logs: Optional[dict] = None) -> None:
         """Called once, before the first epoch."""
 
-    def on_epoch_begin(self, epoch: int, logs: dict | None = None) -> None:
+    def on_epoch_begin(self, epoch: int, logs: Optional[dict] = None) -> None:
         """Called at the start of each (zero-based) epoch."""
 
-    def on_epoch_end(self, epoch: int, logs: dict | None = None) -> None:
+    def on_epoch_end(self, epoch: int, logs: Optional[dict] = None) -> None:
         """Called at the end of each epoch with the epoch's logs (``logs`` may be modified)."""
 
-    def on_train_end(self, logs: dict | None = None) -> None:
+    def on_train_end(self, logs: Optional[dict] = None) -> None:
         """Called once, after the last epoch."""
 
 
@@ -47,7 +47,7 @@ class VerboseNEpochs(Callback):
         """``n`` is the number of epochs between prints."""
         self.n = n
 
-    def on_epoch_end(self, epoch: int, logs: dict | None = None) -> None:
+    def on_epoch_end(self, epoch: int, logs: Optional[dict] = None) -> None:
         """Prints the logs."""
         if epoch == 0 or (epoch + 1) % self.n == 0:
             logs = logs or {}
@@ -78,7 +78,7 @@ class AlphaScheduleCallback(Callback):
         alpha_end: float = 1.0,
         half_life_epoch: int = 10,
         steepness: float = 0.1,
-        clamp_threshold: float | None = None,
+        clamp_threshold: Optional[float] = None,
         verbose: bool = True,
     ):
         """Validates the schedule; ``clamp_threshold`` defaults to 10% of the alpha range."""
@@ -125,7 +125,7 @@ class AlphaScheduleCallback(Callback):
         return self.schedule.clamp_threshold
 
     @property
-    def alpha_history(self) -> list[float]:
+    def alpha_history(self) -> List[float]:
         """The alphas set so far."""
         return self._run.history
 
@@ -133,11 +133,11 @@ class AlphaScheduleCallback(Callback):
         """Alpha for the zero-based ``epoch``."""
         return self.schedule.alpha(int(epoch))
 
-    def on_train_begin(self, logs: dict | None = None) -> None:
+    def on_train_begin(self, logs: Optional[dict] = None) -> None:
         """Starts the run (a Gaussian schedule resets its history here)."""
         self._run.begin()
 
-    def on_epoch_begin(self, epoch: int, logs: dict | None = None) -> None:
+    def on_epoch_begin(self, epoch: int, logs: Optional[dict] = None) -> None:
         """Sets the loss's alpha for this epoch."""
         _check_causal_loss(self.loss)
         new_alpha = self._run.alpha_for(epoch)
@@ -147,12 +147,12 @@ class AlphaScheduleCallback(Callback):
             direction = "↓" if self.is_decay else "↑"
             print(f"\n[Epoch {epoch}] Alpha: {old_alpha:.4f} {direction} {new_alpha:.4f}")
 
-    def on_train_end(self, logs: dict | None = None) -> None:
+    def on_train_end(self, logs: Optional[dict] = None) -> None:
         """Prints the final alpha."""
         if self.verbose and self.alpha_history:
             print(f"\n[Training Complete] Final Alpha: {self.alpha_history[-1]:.4f}")
 
-    def plot_schedule(self, max_epochs: int = 200, figsize: tuple[float, float] = (10, 6)) -> Any:
+    def plot_schedule(self, max_epochs: int = 200, figsize: Tuple[float, float] = (10, 6)) -> Any:
         """The schedule over ``max_epochs`` as a matplotlib figure."""
         return alpha_schedule.plot_schedule(self.schedule, max_epochs, figsize)
 
@@ -173,10 +173,7 @@ class AlphaScheduleCallback(Callback):
 
 
 MidFitResumeError = alpha_schedule.MidFitResumeError
-
-
-class NoEligibleCheckpointError(RuntimeError):
-    """No epoch at or after ``start_from_epoch`` produced a finite monitored value."""
+NoEligibleCheckpointError = checkpoint.NoEligibleCheckpointError
 
 
 class GaussianAlphaSchedule(AlphaScheduleCallback):
@@ -220,11 +217,12 @@ class GaussianAlphaSchedule(AlphaScheduleCallback):
 class EligibleBestCheckpoint(Callback):
     """Early stopping that restores the best epoch at or after ``start_from_epoch``.
 
-    An epoch is eligible if it is at or after ``start_from_epoch`` and its monitored value is
-    finite. Ties go to the earliest epoch. Raises `NoEligibleCheckpointError` at the end of
-    training if no epoch was eligible. ``trace`` records each epoch; ``selected_epoch`` and
-    ``selected_value`` are what was restored (the model's ``state_dict`` is restored,
-    including batch-norm statistics).
+    An adapter over `pypsps.core.checkpoint.CheckpointSelector`, which owns the rules: an epoch
+    is eligible if it is at or after ``start_from_epoch`` and its monitored value is finite. Ties
+    go to the earliest epoch. Raises `NoEligibleCheckpointError` at the end of training if no
+    epoch was eligible. ``trace`` records each epoch; ``selected_epoch`` and ``selected_value``
+    are what was restored (the model's ``state_dict`` is restored, including batch-norm
+    statistics).
     """
 
     def __init__(
@@ -236,72 +234,46 @@ class EligibleBestCheckpoint(Callback):
         verbose: int = 0,
     ):
         """Minimizes ``monitor``; stops after ``patience`` eligible epochs without improvement."""
-        if patience < 1:
-            raise ValueError(f"patience must be >= 1, got {patience}")
-        if start_from_epoch < 0:
-            raise ValueError(f"start_from_epoch must be >= 0, got {start_from_epoch}")
-        self.monitor = monitor
-        self.patience = int(patience)
-        self.start_from_epoch = int(start_from_epoch)
-        self.min_delta = abs(float(min_delta))
-        self.verbose = verbose
-        self._reset()
-
-    def _reset(self) -> None:
-        """Clears all per-fit state."""
-        self.trace: list[dict[str, Any]] = []
-        self.wait = 0
-        self.best: float | None = None
-        self.best_epoch: int | None = None
-        self.best_weights: dict[str, torch.Tensor] | None = None
-        self.stopped_epoch = 0
-        self.selected_epoch: int | None = None
-        self.selected_value: float | None = None
-
-    def on_train_begin(self, logs: dict | None = None) -> None:
-        """Resets the per-fit state."""
-        self._reset()
-
-    def on_epoch_end(self, epoch: int, logs: dict | None = None) -> None:
-        """Records the epoch and updates the best eligible epoch."""
-        logs = logs or {}
-        if self.monitor not in logs:
-            raise KeyError(f"monitor {self.monitor!r} is not in the epoch logs: {sorted(logs)}")
-        current = float(logs[self.monitor])
-        eligible = epoch >= self.start_from_epoch and math.isfinite(current)
-        self.trace.append(
-            {
-                "epoch": int(epoch),
-                "monitored": current,
-                "eligible": bool(eligible),
-                "alpha": None if self.loss is None else float(getattr(self.loss, "alpha", np.nan)),
-            }
+        self._selector = checkpoint.CheckpointSelector(
+            monitor, patience, start_from_epoch=start_from_epoch, min_delta=min_delta
         )
-        if epoch < self.start_from_epoch:
-            return
-        if eligible and (self.best is None or current < self.best - self.min_delta):
-            self.best = current
-            self.best_epoch = int(epoch)
+        self.verbose = verbose
+        self.best_weights: Optional[Dict[str, torch.Tensor]] = None
+
+    monitor = property(lambda self: self._selector.monitor)
+    patience = property(lambda self: self._selector.patience)
+    start_from_epoch = property(lambda self: self._selector.start_from_epoch)
+    min_delta = property(lambda self: self._selector.min_delta)
+    trace = property(lambda self: self._selector.trace)
+    wait = property(lambda self: self._selector.wait)
+    best = property(lambda self: self._selector.best)
+    best_epoch = property(lambda self: self._selector.best_epoch)
+    stopped_epoch = property(lambda self: self._selector.stopped_epoch)
+    selected_epoch = property(lambda self: self._selector.selected_epoch)
+    selected_value = property(lambda self: self._selector.selected_value)
+
+    def on_train_begin(self, logs: Optional[dict] = None) -> None:
+        """Resets the per-fit state."""
+        self._selector.begin()
+        self.best_weights = None
+
+    def on_epoch_end(self, epoch: int, logs: Optional[dict] = None) -> None:
+        """Records the epoch; snapshots the weights if it improved; stops if patience ran out."""
+        alpha = None if self.loss is None else float(getattr(self.loss, "alpha", np.nan))
+        step = self._selector.observe(epoch, logs, alpha=alpha)
+        if step.improved:
             self.best_weights = copy.deepcopy(self.model.state_dict())
-            self.wait = 0
-            return
-        self.wait += 1
-        if self.wait >= self.patience:
-            self.stopped_epoch = int(epoch)
+        if step.stop:
             self.model.stop_training = True
 
-    def on_train_end(self, logs: dict | None = None) -> None:
+    def on_train_end(self, logs: Optional[dict] = None) -> None:
         """Restores the best eligible weights, or raises if no epoch was eligible."""
-        if self.best_weights is None:
-            raise NoEligibleCheckpointError(
-                f"no epoch >= {self.start_from_epoch} produced a finite {self.monitor!r}; "
-                f"monitored values: {[t['monitored'] for t in self.trace]}"
-            )
+        self._selector.finish()
         self.model.load_state_dict(self.best_weights)
-        self.selected_epoch = self.best_epoch
-        self.selected_value = self.best
         if self.verbose:
-            print(f"\nRestored epoch {self.selected_epoch} ({self.monitor}={self.best:.4f})")
+            print(
+                f"\nRestored epoch {self.selected_epoch} ({self.monitor}={self.selected_value:.4f})"
+            )
 
 
 class EarlyStopping(EligibleBestCheckpoint):
@@ -351,14 +323,14 @@ class ReduceLROnPlateau(Callback):
         self.wait = 0
         self.cooldown_counter = 0
 
-    def on_train_begin(self, logs: dict | None = None) -> None:
+    def on_train_begin(self, logs: Optional[dict] = None) -> None:
         """Resets the plateau state."""
         self._reset()
 
     def _learning_rate(self) -> float:
         return float(self.optimizer.param_groups[0]["lr"])
 
-    def on_epoch_end(self, epoch: int, logs: dict | None = None) -> None:
+    def on_epoch_end(self, epoch: int, logs: Optional[dict] = None) -> None:
         """Checks for a plateau and reduces the learning rate."""
         if logs is None:
             logs = {}
@@ -393,7 +365,7 @@ def get_default_callbacks(
     alpha_end: float = 1.0,
     half_life_epoch: int = 10,
     steepness: float = 0.1,
-) -> list[Callback]:
+) -> List[Callback]:
     """Default callbacks: early stopping with best weights, LR reduction and an alpha schedule.
 
     Args:

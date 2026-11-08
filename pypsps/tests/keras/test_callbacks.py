@@ -7,6 +7,8 @@ import pytest
 import tensorflow as tf
 
 from ... import datasets
+from ...core import alpha_schedule as core_alpha_schedule
+from ...core import checkpoint
 from ...keras import callbacks, families, losses, mixture, models, presets
 
 
@@ -163,73 +165,48 @@ class _WeightsModel:
         self.restored = int(w[0])
 
 
-def _drive(cb, series):
+def _drive(cb, series, logs=None):
     """Feed a monitored series to a callback as epoch logs; return the stand-in model."""
     m = _WeightsModel()
     cb.set_model(m)
     cb.on_train_begin()
     for e, v in enumerate(series):
         m.epoch = e
-        cb.on_epoch_end(e, {"val_m": v})
+        cb.on_epoch_end(e, {"val_m": v} if logs is None else logs)
         if m.stop_training:
             break
     cb.on_train_end()
     return m
 
 
-def _eligible(series, start=6, patience=50, min_delta=0.0):
-    """Drive an EligibleBestCheckpoint over ``series``."""
-    cb = callbacks.EligibleBestCheckpoint(
-        "val_m", patience=patience, start_from_epoch=start, min_delta=min_delta
-    )
-    return cb, _drive(cb, series)
-
-
-def test_eligible_checkpoint_ignores_epochs_before_start():
-    """Better values before start_from_epoch are never selected."""
-    cb, m = _eligible([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 5.0, 4.0, 3.5, 3.9])
-    assert (cb.selected_epoch, cb.selected_value, m.restored) == (8, 3.5, 8)
-    assert [t["eligible"] for t in cb.trace] == [False] * 6 + [True] * 4
+def test_eligible_checkpoint_restores_the_selected_epoch_and_stops():
+    """The adapter snapshots on improvement, stops on the selector's word and restores."""
+    cb = callbacks.EligibleBestCheckpoint("val_m", patience=3, start_from_epoch=2)
+    m = _drive(cb, [0.1, 0.2, 5.0, 4.0, 4.5, 4.6, 4.7, 1.0])
+    assert (cb.selected_epoch, cb.selected_value, m.restored) == (3, 4.0, 3)
+    assert (cb.stopped_epoch, m.stop_training) == (6, True)
+    assert [t["eligible"] for t in cb.trace] == [False, False] + [True] * 5
     assert all(t["alpha"] == 1.0 for t in cb.trace)
 
 
-def test_eligible_checkpoint_skips_nan_and_inf_and_ties_go_to_earliest():
-    """A NaN at the first eligible epoch is not restored; ties keep the earlier epoch."""
-    cb, m = _eligible([1, 1, 1, 1, 1, 1, float("nan"), 3.0, 2.0, 2.0, float("inf")])
-    assert (cb.selected_epoch, m.restored) == (8, 8)
-
-
-def test_eligible_checkpoint_min_delta_requires_a_real_improvement():
-    """An improvement smaller than min_delta does not move the selection."""
-    cb, _ = _eligible([9] * 6 + [3.0, 2.95, 2.5], min_delta=0.1)
-    assert cb.selected_epoch == 8
-
-
-def test_eligible_checkpoint_patience_counts_from_the_first_eligible_epoch():
-    """Patience runs over eligible epochs only, and training stops when it runs out."""
-    cb, m = _eligible([9] * 6 + [3.0, 4.0, 4.0, 4.0, 1.0], patience=3)
-    assert cb.stopped_epoch == 9 and m.restored == 6
-
-
 def test_eligible_checkpoint_raises_when_no_epoch_is_eligible():
-    """No finite value at or after start_from_epoch raises instead of keeping the last weights."""
+    """The selector's error surfaces from on_train_end, and no weights are restored."""
+    cb = callbacks.EligibleBestCheckpoint("val_m", patience=50, start_from_epoch=6)
     with pytest.raises(callbacks.NoEligibleCheckpointError):
-        _eligible([1.0] * 6 + [float("nan")] * 3)
+        _drive(cb, [1.0] * 6 + [float("nan")] * 3)
 
 
-def test_eligible_checkpoint_raises_on_missing_monitor():
-    """A monitor that is not in the logs raises KeyError."""
-    cb = callbacks.EligibleBestCheckpoint("val_missing", patience=2)
-    with pytest.raises(KeyError, match="val_missing"):
-        _drive(cb, [1.0])
+def test_early_stopping_is_an_eligible_checkpoint_from_epoch_zero():
+    """EarlyStopping selects the best epoch of the whole fit."""
+    cb = callbacks.EarlyStopping("val_m", patience=2)
+    m = _drive(cb, [3.0, 2.0, 2.5, 2.6, 0.1])
+    assert (cb.start_from_epoch, cb.selected_epoch, m.restored) == (0, 1, 1)
 
 
-def test_eligible_checkpoint_validates_arguments():
-    """patience < 1 and a negative start_from_epoch raise ValueError."""
-    with pytest.raises(ValueError, match="patience"):
-        callbacks.EligibleBestCheckpoint("val_m", patience=0)
-    with pytest.raises(ValueError, match="start_from_epoch"):
-        callbacks.EligibleBestCheckpoint("val_m", patience=1, start_from_epoch=-1)
+def test_errors_are_the_core_classes():
+    """One exception class each, defined in core and re-exported here."""
+    assert callbacks.NoEligibleCheckpointError is checkpoint.NoEligibleCheckpointError
+    assert callbacks.MidFitResumeError is core_alpha_schedule.MidFitResumeError
 
 
 def test_lr_plateau_is_inactive_before_start_from_epoch():

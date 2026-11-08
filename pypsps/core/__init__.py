@@ -6,12 +6,22 @@
   mixture builds on.
 * `spec`: the validated arguments of ``build_model``.
 * `likelihood`: `OutcomeLikelihood`.
-* `alpha_schedule`: the schedule of the treatment-loss weight.
+* `alpha_schedule`: the schedules of the treatment-loss weight.
+* `checkpoint`: best-epoch selection for early stopping, and the default callback arguments.
 * `presets`: the named ``build_model`` argument sets, shared by the backends.
 
 `pypsps.keras` and `pypsps.torch` subclass these and add the tensor math.
 """
 
-from . import alpha_schedule, families, layout, likelihood, mixture, presets, spec
+from . import alpha_schedule, checkpoint, families, layout, likelihood, mixture, presets, spec
 
-__all__ = ["alpha_schedule", "families", "layout", "likelihood", "mixture", "presets", "spec"]
+__all__ = [
+    "alpha_schedule",
+    "checkpoint",
+    "families",
+    "layout",
+    "likelihood",
+    "mixture",
+    "presets",
+    "spec",
+]

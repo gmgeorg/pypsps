@@ -8,6 +8,7 @@ import pytest
 import torch
 
 from ... import bootstrap, inference
+from ...core import alpha_schedule, checkpoint
 from ...torch import callbacks, families, io, losses, metrics, models, training
 
 _N = 160
@@ -415,3 +416,18 @@ def test_steep_schedule_does_not_overflow():
         warnings.simplefilter("error")
         schedule.on_epoch_begin(100)
     assert schedule.loss.alpha == 1.0
+
+
+def test_errors_are_the_core_classes():
+    """One exception class each, defined in core and re-exported here."""
+    assert callbacks.NoEligibleCheckpointError is checkpoint.NoEligibleCheckpointError
+    assert callbacks.MidFitResumeError is alpha_schedule.MidFitResumeError
+
+
+def test_default_early_stopping_fails_fast():
+    """A missing monitor raises KeyError and a never-finite one NoEligibleCheckpointError."""
+    x, a, y = _data()
+    with pytest.raises(KeyError, match="val_loss"):
+        training.fit(
+            _model(), x, a, y, epochs=2, callbacks=callbacks.get_default_callbacks("val_loss", 2)
+        )

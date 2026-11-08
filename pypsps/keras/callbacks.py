@@ -1,11 +1,11 @@
 """Module for pypsps training callbacks."""
 
-import math
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 import tensorflow as tf
 
+from pypsps.core import checkpoint
 from pypsps.keras import alpha_schedule, losses
 
 
@@ -30,7 +30,7 @@ class VerboseNEpochs(tf.keras.callbacks.Callback):
         super().__init__()
         self.n = n
 
-    def on_epoch_end(self, epoch: int, logs: dict | None = None):
+    def on_epoch_end(self, epoch: int, logs: Optional[dict] = None):
         """call at end of epoch"""
         # logs is a dictionary containing metric names and values.
         if (epoch == 0) or ((epoch + 1) % self.n == 0):
@@ -171,11 +171,11 @@ class AlphaScheduleCallback(tf.keras.callbacks.Callback):
         """Alpha for the zero-based ``epoch``."""
         return self.schedule.alpha(int(epoch))
 
-    def on_train_begin(self, logs: dict | None = None):
+    def on_train_begin(self, logs: Optional[dict] = None):
         """Start the run (a Gaussian schedule resets its history here)."""
         self._run.begin()
 
-    def on_epoch_begin(self, epoch: int, logs: dict | None = None):
+    def on_epoch_begin(self, epoch: int, logs: Optional[dict] = None):
         """Update alpha at the beginning of each epoch."""
         alpha = _alpha_variable(self.model)
         if alpha is None:
@@ -194,7 +194,7 @@ class AlphaScheduleCallback(tf.keras.callbacks.Callback):
             direction = "↓" if self.is_decay else "↑"
             print(f"\n[Epoch {epoch}] Alpha: {old_alpha:.4f} {direction} {new_alpha:.4f}")
 
-    def on_train_end(self, logs: dict | None = None):
+    def on_train_end(self, logs: Optional[dict] = None):
         """Print final alpha value at the end of training."""
         if self.verbose and len(self.alpha_history) > 0:
             print(f"\n[Training Complete] Final Alpha: {self.alpha_history[-1]:.4f}")
@@ -229,10 +229,7 @@ class AlphaScheduleCallback(tf.keras.callbacks.Callback):
 
 
 MidFitResumeError = alpha_schedule.MidFitResumeError
-
-
-class NoEligibleCheckpointError(RuntimeError):
-    """No epoch at or after ``start_from_epoch`` produced a finite monitored value."""
+NoEligibleCheckpointError = checkpoint.NoEligibleCheckpointError
 
 
 class GaussianAlphaSchedule(AlphaScheduleCallback):
@@ -282,10 +279,11 @@ def _live_alpha(model: tf.keras.Model) -> float | None:
 class EligibleBestCheckpoint(tf.keras.callbacks.Callback):
     """Early stopping that restores the best epoch at or after ``start_from_epoch``.
 
-    An epoch is eligible if it is at or after ``start_from_epoch`` and its monitored value is
-    finite. Ties go to the earliest epoch. Raises `NoEligibleCheckpointError` at the end of
-    training if no epoch was eligible. ``trace`` records each epoch; ``selected_epoch`` and
-    ``selected_value`` are what was restored.
+    An adapter over `pypsps.core.checkpoint.CheckpointSelector`, which owns the rules: an epoch
+    is eligible if it is at or after ``start_from_epoch`` and its monitored value is finite. Ties
+    go to the earliest epoch. Raises `NoEligibleCheckpointError` at the end of training if no
+    epoch was eligible. ``trace`` records each epoch; ``selected_epoch`` and ``selected_value``
+    are what was restored.
     """
 
     def __init__(
@@ -298,72 +296,58 @@ class EligibleBestCheckpoint(tf.keras.callbacks.Callback):
     ):
         """Minimise ``monitor``; stop after ``patience`` eligible epochs without improvement."""
         super().__init__()
-        if patience < 1:
-            raise ValueError(f"patience must be >= 1, got {patience}")
-        if start_from_epoch < 0:
-            raise ValueError(f"start_from_epoch must be >= 0, got {start_from_epoch}")
-        self.monitor = monitor
-        self.patience = int(patience)
-        self.start_from_epoch = int(start_from_epoch)
-        self.min_delta = abs(float(min_delta))
-        self.verbose = verbose
-        self._reset()
-
-    def _reset(self):
-        """Clear all per-fit state."""
-        self.trace: list[dict] = []
-        self.wait = 0
-        self.best: float | None = None
-        self.best_epoch: int | None = None
-        self.best_weights = None
-        self.stopped_epoch = 0
-        self.selected_epoch: int | None = None
-        self.selected_value: float | None = None
-
-    def on_train_begin(self, logs: dict | None = None):
-        """Reset the per-fit state."""
-        self._reset()
-
-    def on_epoch_end(self, epoch: int, logs: dict | None = None):
-        """Record the epoch and update the best eligible epoch."""
-        logs = logs or {}
-        if self.monitor not in logs:
-            raise KeyError(f"monitor {self.monitor!r} is not in the epoch logs: {sorted(logs)}")
-        current = float(logs[self.monitor])
-        eligible = epoch >= self.start_from_epoch and math.isfinite(current)
-        self.trace.append(
-            {
-                "epoch": int(epoch),
-                "monitored": current,
-                "eligible": bool(eligible),
-                "alpha": _live_alpha(self.model),
-            }
+        self._selector = checkpoint.CheckpointSelector(
+            monitor, patience, start_from_epoch=start_from_epoch, min_delta=min_delta
         )
-        if epoch < self.start_from_epoch:
-            return
-        if eligible and (self.best is None or current < self.best - self.min_delta):
-            self.best = current
-            self.best_epoch = int(epoch)
+        self.verbose = verbose
+        self.best_weights = None
+
+    monitor = property(lambda self: self._selector.monitor)
+    patience = property(lambda self: self._selector.patience)
+    start_from_epoch = property(lambda self: self._selector.start_from_epoch)
+    min_delta = property(lambda self: self._selector.min_delta)
+    trace = property(lambda self: self._selector.trace)
+    wait = property(lambda self: self._selector.wait)
+    best = property(lambda self: self._selector.best)
+    best_epoch = property(lambda self: self._selector.best_epoch)
+    stopped_epoch = property(lambda self: self._selector.stopped_epoch)
+    selected_epoch = property(lambda self: self._selector.selected_epoch)
+    selected_value = property(lambda self: self._selector.selected_value)
+
+    def on_train_begin(self, logs: Optional[dict] = None):
+        """Reset the per-fit state."""
+        self._selector.begin()
+        self.best_weights = None
+
+    def on_epoch_end(self, epoch: int, logs: Optional[dict] = None):
+        """Record the epoch; snapshot the weights if it improved; stop if patience ran out."""
+        step = self._selector.observe(epoch, logs, alpha=_live_alpha(self.model))
+        if step.improved:
             self.best_weights = self.model.get_weights()
-            self.wait = 0
-            return
-        self.wait += 1
-        if self.wait >= self.patience:
-            self.stopped_epoch = int(epoch)
+        if step.stop:
             self.model.stop_training = True
 
-    def on_train_end(self, logs: dict | None = None):
+    def on_train_end(self, logs: Optional[dict] = None):
         """Restore the best eligible weights, or raise if no epoch was eligible."""
-        if self.best_weights is None:
-            raise NoEligibleCheckpointError(
-                f"no epoch >= {self.start_from_epoch} produced a finite {self.monitor!r}; "
-                f"monitored values: {[t['monitored'] for t in self.trace]}"
-            )
+        self._selector.finish()
         self.model.set_weights(self.best_weights)
-        self.selected_epoch = self.best_epoch
-        self.selected_value = self.best
         if self.verbose:
-            print(f"\nRestored epoch {self.selected_epoch} ({self.monitor}={self.best:.4f})")
+            print(
+                f"\nRestored epoch {self.selected_epoch} ({self.monitor}={self.selected_value:.4f})"
+            )
+
+
+class EarlyStopping(EligibleBestCheckpoint):
+    """Stops after ``patience`` epochs without improvement of ``monitor`` and restores the best.
+
+    `EligibleBestCheckpoint` with ``start_from_epoch=0``. Unlike
+    ``tf.keras.callbacks.EarlyStopping`` it raises `KeyError` if ``monitor`` is not in the epoch
+    logs and `NoEligibleCheckpointError` if it is never finite.
+    """
+
+    def __init__(self, monitor: str, patience: int, min_delta: float = 0.0, verbose: int = 0):
+        """Minimise ``monitor``."""
+        super().__init__(monitor, patience, 0, min_delta, verbose)
 
 
 class WarmupReduceLROnPlateau(tf.keras.callbacks.ReduceLROnPlateau):
@@ -374,7 +358,7 @@ class WarmupReduceLROnPlateau(tf.keras.callbacks.ReduceLROnPlateau):
         super().__init__(*args, **kwargs)
         self.start_from_epoch = int(start_from_epoch)
 
-    def on_epoch_end(self, epoch: int, logs: dict | None = None):
+    def on_epoch_end(self, epoch: int, logs: Optional[dict] = None):
         """Skip the plateau check before ``start_from_epoch``; still log the learning rate."""
         if epoch < self.start_from_epoch:
             if logs is not None:
