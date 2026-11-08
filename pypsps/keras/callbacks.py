@@ -1,7 +1,7 @@
 """Module for pypsps training callbacks."""
 
 import math
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import tensorflow as tf
@@ -30,7 +30,7 @@ class VerboseNEpochs(tf.keras.callbacks.Callback):
         super().__init__()
         self.n = n
 
-    def on_epoch_end(self, epoch: int, logs: Optional[dict] = None):
+    def on_epoch_end(self, epoch: int, logs: dict | None = None):
         """call at end of epoch"""
         # logs is a dictionary containing metric names and values.
         if (epoch == 0) or ((epoch + 1) % self.n == 0):
@@ -120,79 +120,81 @@ class AlphaScheduleCallback(tf.keras.callbacks.Callback):
             ValueError: If steepness is not positive or half_life_epoch is negative
         """
         super().__init__()
-
-        # Validation
-        if steepness <= 0:
-            raise ValueError(f"steepness must be positive, got {steepness}")
-        if half_life_epoch < 0:
-            raise ValueError(f"half_life_epoch must be non-negative, got {half_life_epoch}")
-
-        self.alpha_start = alpha_start
-        self.alpha_end = alpha_end
-        self.half_life_epoch = half_life_epoch
-        self.steepness = steepness
+        self._init_run(
+            alpha_schedule.SigmoidAlphaSchedule(
+                alpha_start=alpha_start,
+                alpha_end=alpha_end,
+                half_life_epoch=half_life_epoch,
+                steepness=steepness,
+                clamp_threshold=clamp_threshold,
+            ),
+            require_start_at_zero=False,
+        )
         self.verbose = verbose
-        self.alpha_history = []
 
-        # Determine direction: decay (start > end), increase (start < end), or constant
-        self._is_constant = alpha_start == alpha_end
-        self._is_decay = alpha_start > alpha_end
-        self._alpha_range = abs(alpha_start - alpha_end)
+    def _init_run(self, schedule: Any, require_start_at_zero: bool) -> None:
+        """Set the schedule and the run that drives it (shared with `GaussianAlphaSchedule`)."""
+        self.schedule = schedule
+        self._run = alpha_schedule.ScheduleRun(schedule, require_start_at_zero)
 
-        # Auto-compute clamp threshold if not provided (10% of range, or 0 if constant)
-        if clamp_threshold is None:
-            self.clamp_threshold = 0.1 * self._alpha_range if self._alpha_range > 0 else 0.0
-        else:
-            if clamp_threshold < 0:
-                raise ValueError(f"clamp_threshold must be non-negative, got {clamp_threshold}")
-            self.clamp_threshold = clamp_threshold
+    @property
+    def alpha_start(self) -> float:
+        """Alpha at the start of the schedule."""
+        return self.schedule.alpha_start
 
-    def _compute_alpha(self, epoch: int):
-        """
-        Compute alpha value for the current epoch using sigmoid schedule.
+    @property
+    def alpha_end(self) -> float:
+        """Alpha the schedule approaches."""
+        return self.schedule.alpha_end
 
-        The sigmoid function provides smooth transition from alpha_start to alpha_end,
-        with the half_life_epoch determining the center of the transition.
-        Works for both decay (start > end) and increase (start < end) schedules.
-        """
-        # Sigmoid factor: 1 / (1 + exp(steepness * (epoch - half_life)))
-        # This gives 1.0 at epoch 0 (for small steepness) and approaches 0.0 as epoch -> inf
-        sigmoid_factor = 1.0 / (1.0 + np.exp(self.steepness * (epoch - self.half_life_epoch)))
+    @property
+    def half_life_epoch(self) -> int:
+        """Epoch at which alpha is midway between start and end."""
+        return self.schedule.half_life_epoch
 
-        # Scale: alpha = alpha_end + (alpha_start - alpha_end) * sigmoid_factor
-        # At epoch 0 (sigmoid_factor ≈ high): alpha ≈ alpha_start
-        # At epoch -> inf (sigmoid_factor ≈ 0): alpha ≈ alpha_end
-        alpha = self.alpha_end + (self.alpha_start - self.alpha_end) * sigmoid_factor
+    @property
+    def steepness(self) -> float:
+        """Steepness of the sigmoid."""
+        return self.schedule.steepness
 
-        # Clamp to alpha_end when close enough (works for both decay and increase)
-        if abs(alpha - self.alpha_end) < self.clamp_threshold:
-            alpha = self.alpha_end
+    @property
+    def clamp_threshold(self) -> float:
+        """Distance from alpha_end below which alpha is set to alpha_end."""
+        return self.schedule.clamp_threshold
 
-        return alpha
+    @property
+    def alpha_history(self) -> list[float]:
+        """The alphas assigned so far."""
+        return self._run.history
 
-    def on_epoch_begin(self, epoch: int, logs: Optional[dict] = None):
+    def _compute_alpha(self, epoch: int) -> float:
+        """Alpha for the zero-based ``epoch``."""
+        return self.schedule.alpha(int(epoch))
+
+    def on_train_begin(self, logs: dict | None = None):
+        """Start the run (a Gaussian schedule resets its history here)."""
+        self._run.begin()
+
+    def on_epoch_begin(self, epoch: int, logs: dict | None = None):
         """Update alpha at the beginning of each epoch."""
-        # Compute new alpha value
-        new_alpha = self._compute_alpha(epoch)
-
         alpha = _alpha_variable(self.model)
         if alpha is None:
             loss_type = type(getattr(self.model, "loss", None)).__name__
             raise AttributeError(
                 f"model.loss must be a pypsps CausalLoss with an alpha variable; got {loss_type}"
             )
+        new_alpha = self._run.alpha_for(epoch)
         old_alpha = float(alpha.numpy())
         # ASSIGN, do not rebind: the already-traced training graph (model.fit() runs with
         # run_eagerly=False by default) reads the variable, never a rebound Python attribute.
         alpha.assign(new_alpha)
-        self.alpha_history.append(new_alpha)
 
         # Print update if verbose (skip for constant schedules)
-        if self.verbose and not self._is_constant and (epoch % 10 == 0 or epoch < 5):
-            direction = "↓" if self._is_decay else "↑"
+        if self.verbose and not self.is_constant and (epoch % 10 == 0 or epoch < 5):
+            direction = "↓" if self.is_decay else "↑"
             print(f"\n[Epoch {epoch}] Alpha: {old_alpha:.4f} {direction} {new_alpha:.4f}")
 
-    def on_train_end(self, logs: Optional[dict] = None):
+    def on_train_end(self, logs: dict | None = None):
         """Print final alpha value at the end of training."""
         if self.verbose and len(self.alpha_history) > 0:
             print(f"\n[Training Complete] Final Alpha: {self.alpha_history[-1]:.4f}")
@@ -208,72 +210,25 @@ class AlphaScheduleCallback(tf.keras.callbacks.Callback):
         Returns:
             matplotlib.figure.Figure: The generated figure
         """
-        import matplotlib.pyplot as plt
-
-        epochs = np.arange(max_epochs)
-        alphas = [self._compute_alpha(epoch) for epoch in epochs]
-
-        fig, ax = plt.subplots(figsize=figsize)
-        ax.plot(epochs, alphas, linewidth=2.5, color="#2E86AB")
-        ax.axhline(
-            y=self.alpha_end,
-            color="red",
-            linestyle="--",
-            linewidth=1.5,
-            alpha=0.7,
-            label=f"Target α = {self.alpha_end}",
-        )
-        ax.axhline(
-            y=self.alpha_start,
-            color="green",
-            linestyle="--",
-            linewidth=1.5,
-            alpha=0.7,
-            label=f"Start α = {self.alpha_start}",
-        )
-        ax.axvline(
-            x=self.half_life_epoch,
-            color="orange",
-            linestyle=":",
-            linewidth=1.5,
-            alpha=0.7,
-            label=f"Half-life (epoch {self.half_life_epoch})",
-        )
-
-        if self._is_constant:
-            schedule_type = "Constant"
-        elif self._is_decay:
-            schedule_type = "Decay"
-        else:
-            schedule_type = "Increase"
-        ax.set_title(f"Alpha {schedule_type} Schedule", fontsize=18, fontweight="bold", pad=15)
-        ax.set_xlabel("Epoch", fontsize=14)
-        ax.set_ylabel("Alpha (Treatment Loss Weight)", fontsize=14)
-        ax.grid(True, alpha=0.3, linestyle="--")
-        ax.legend(fontsize=12)
-        ax.tick_params(axis="both", labelsize=12)
-
-        plt.tight_layout()
-        return fig
+        return alpha_schedule.plot_schedule(self.schedule, max_epochs, figsize)
 
     @property
     def is_constant(self) -> bool:
         """Returns True if this is a constant schedule (alpha_start == alpha_end)."""
-        return self._is_constant
+        return self.schedule.is_constant
 
     @property
     def is_decay(self) -> bool:
         """Returns True if this is a decay schedule (alpha_start > alpha_end)."""
-        return self._is_decay
+        return self.schedule.is_decay
 
     @property
     def is_increase(self) -> bool:
         """Returns True if this is an increase schedule (alpha_start < alpha_end)."""
-        return not self._is_decay and not self._is_constant
+        return self.schedule.is_increase
 
 
-class MidFitResumeError(RuntimeError):
-    """A scheduled fit was started at an epoch other than 0."""
+MidFitResumeError = alpha_schedule.MidFitResumeError
 
 
 class NoEligibleCheckpointError(RuntimeError):
@@ -295,44 +250,27 @@ class GaussianAlphaSchedule(AlphaScheduleCallback):
         verbose: bool = True,
     ):
         """Validate the schedule; ``warmup_epochs`` is its first settled epoch."""
-        self.schedule = alpha_schedule.AlphaSchedule(
+        schedule = alpha_schedule.AlphaSchedule(
             alpha_start=alpha_start, alpha_end=alpha_end, decay_const=decay_const, epsilon=epsilon
         )
-        # half_life_epoch only labels plot_schedule: exp(-c * e**2) = 1/2 at sqrt(ln 2 / c).
-        super().__init__(
-            alpha_start=float(alpha_start),
-            alpha_end=float(alpha_end),
-            half_life_epoch=round(math.sqrt(math.log(2.0) / float(decay_const))),
-            clamp_threshold=0.0,
-            verbose=verbose,
-        )
+        super().__init__(verbose=verbose)
+        self._init_run(schedule, require_start_at_zero=True)
         self.decay_const = float(decay_const)
-        self._started = False
+
+    @property
+    def steepness(self) -> None:
+        """Not a sigmoid: None."""
+        return None
+
+    @property
+    def clamp_threshold(self) -> float:
+        """A Gaussian schedule is never clamped."""
+        return 0.0
 
     @property
     def warmup_epochs(self) -> int:
         """First zero-based epoch at which alpha has settled."""
         return self.schedule.warmup_epochs
-
-    def _compute_alpha(self, epoch: int):
-        """Alpha for zero-based ``epoch``."""
-        return self.schedule.alpha(int(epoch))
-
-    def on_train_begin(self, logs: Optional[dict] = None):
-        """Reset the alpha history."""
-        self.alpha_history = []
-        self._started = False
-
-    def on_epoch_begin(self, epoch: int, logs: Optional[dict] = None):
-        """Refuse a fit that does not start at epoch 0, then assign the epoch's alpha."""
-        if not self._started:
-            self._started = True
-            if int(epoch) != 0:
-                raise MidFitResumeError(
-                    f"training starts at epoch {epoch}, not 0; the schedule would skip its "
-                    "warmup. Restart the fit from epoch 0."
-                )
-        super().on_epoch_begin(epoch, logs)
 
 
 def _live_alpha(model: tf.keras.Model) -> float | None:
@@ -382,11 +320,11 @@ class EligibleBestCheckpoint(tf.keras.callbacks.Callback):
         self.selected_epoch: int | None = None
         self.selected_value: float | None = None
 
-    def on_train_begin(self, logs: Optional[dict] = None):
+    def on_train_begin(self, logs: dict | None = None):
         """Reset the per-fit state."""
         self._reset()
 
-    def on_epoch_end(self, epoch: int, logs: Optional[dict] = None):
+    def on_epoch_end(self, epoch: int, logs: dict | None = None):
         """Record the epoch and update the best eligible epoch."""
         logs = logs or {}
         if self.monitor not in logs:
@@ -414,7 +352,7 @@ class EligibleBestCheckpoint(tf.keras.callbacks.Callback):
             self.stopped_epoch = int(epoch)
             self.model.stop_training = True
 
-    def on_train_end(self, logs: Optional[dict] = None):
+    def on_train_end(self, logs: dict | None = None):
         """Restore the best eligible weights, or raise if no epoch was eligible."""
         if self.best_weights is None:
             raise NoEligibleCheckpointError(
@@ -436,7 +374,7 @@ class WarmupReduceLROnPlateau(tf.keras.callbacks.ReduceLROnPlateau):
         super().__init__(*args, **kwargs)
         self.start_from_epoch = int(start_from_epoch)
 
-    def on_epoch_end(self, epoch: int, logs: Optional[dict] = None):
+    def on_epoch_end(self, epoch: int, logs: dict | None = None):
         """Skip the plateau check before ``start_from_epoch``; still log the learning rate."""
         if epoch < self.start_from_epoch:
             if logs is not None:

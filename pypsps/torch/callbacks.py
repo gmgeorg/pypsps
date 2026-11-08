@@ -8,7 +8,7 @@ training, set ``self.model.stop_training = True``.
 
 import copy
 import math
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import torch
@@ -27,16 +27,16 @@ class Callback:
         """Called by ``fit`` before training."""
         self.model, self.loss, self.optimizer = model, loss, optimizer
 
-    def on_train_begin(self, logs: Optional[dict] = None) -> None:
+    def on_train_begin(self, logs: dict | None = None) -> None:
         """Called once, before the first epoch."""
 
-    def on_epoch_begin(self, epoch: int, logs: Optional[dict] = None) -> None:
+    def on_epoch_begin(self, epoch: int, logs: dict | None = None) -> None:
         """Called at the start of each (zero-based) epoch."""
 
-    def on_epoch_end(self, epoch: int, logs: Optional[dict] = None) -> None:
+    def on_epoch_end(self, epoch: int, logs: dict | None = None) -> None:
         """Called at the end of each epoch with the epoch's logs (``logs`` may be modified)."""
 
-    def on_train_end(self, logs: Optional[dict] = None) -> None:
+    def on_train_end(self, logs: dict | None = None) -> None:
         """Called once, after the last epoch."""
 
 
@@ -47,7 +47,7 @@ class VerboseNEpochs(Callback):
         """``n`` is the number of epochs between prints."""
         self.n = n
 
-    def on_epoch_end(self, epoch: int, logs: Optional[dict] = None) -> None:
+    def on_epoch_end(self, epoch: int, logs: dict | None = None) -> None:
         """Prints the logs."""
         if epoch == 0 or (epoch + 1) % self.n == 0:
             logs = logs or {}
@@ -78,90 +78,101 @@ class AlphaScheduleCallback(Callback):
         alpha_end: float = 1.0,
         half_life_epoch: int = 10,
         steepness: float = 0.1,
-        clamp_threshold: Optional[float] = None,
+        clamp_threshold: float | None = None,
         verbose: bool = True,
     ):
         """Validates the schedule; ``clamp_threshold`` defaults to 10% of the alpha range."""
-        if steepness <= 0:
-            raise ValueError(f"steepness must be positive, got {steepness}")
-        if half_life_epoch < 0:
-            raise ValueError(f"half_life_epoch must be non-negative, got {half_life_epoch}")
-        self.alpha_start = alpha_start
-        self.alpha_end = alpha_end
-        self.half_life_epoch = half_life_epoch
-        self.steepness = steepness
+        self._init_run(
+            alpha_schedule.SigmoidAlphaSchedule(
+                alpha_start=alpha_start,
+                alpha_end=alpha_end,
+                half_life_epoch=half_life_epoch,
+                steepness=steepness,
+                clamp_threshold=clamp_threshold,
+            ),
+            require_start_at_zero=False,
+        )
         self.verbose = verbose
-        self.alpha_history: List[float] = []
-        self._is_constant = alpha_start == alpha_end
-        self._is_decay = alpha_start > alpha_end
-        alpha_range = abs(alpha_start - alpha_end)
-        if clamp_threshold is None:
-            self.clamp_threshold = 0.1 * alpha_range if alpha_range > 0 else 0.0
-        elif clamp_threshold < 0:
-            raise ValueError(f"clamp_threshold must be non-negative, got {clamp_threshold}")
-        else:
-            self.clamp_threshold = clamp_threshold
+
+    def _init_run(self, schedule: Any, require_start_at_zero: bool) -> None:
+        """Sets the schedule and the run that drives it (shared with `GaussianAlphaSchedule`)."""
+        self.schedule = schedule
+        self._run = alpha_schedule.ScheduleRun(schedule, require_start_at_zero)
+
+    @property
+    def alpha_start(self) -> float:
+        """Alpha at the start of the schedule."""
+        return self.schedule.alpha_start
+
+    @property
+    def alpha_end(self) -> float:
+        """Alpha the schedule approaches."""
+        return self.schedule.alpha_end
+
+    @property
+    def half_life_epoch(self) -> int:
+        """Epoch at which alpha is midway between start and end."""
+        return self.schedule.half_life_epoch
+
+    @property
+    def steepness(self) -> float:
+        """Steepness of the sigmoid."""
+        return self.schedule.steepness
+
+    @property
+    def clamp_threshold(self) -> float:
+        """Distance from alpha_end below which alpha is set to alpha_end."""
+        return self.schedule.clamp_threshold
+
+    @property
+    def alpha_history(self) -> list[float]:
+        """The alphas set so far."""
+        return self._run.history
 
     def _compute_alpha(self, epoch: int) -> float:
         """Alpha for the zero-based ``epoch``."""
-        factor = 1.0 / (1.0 + math.exp(self.steepness * (epoch - self.half_life_epoch)))
-        alpha = self.alpha_end + (self.alpha_start - self.alpha_end) * factor
-        if abs(alpha - self.alpha_end) < self.clamp_threshold:
-            alpha = self.alpha_end
-        return float(alpha)
+        return self.schedule.alpha(int(epoch))
 
-    def on_epoch_begin(self, epoch: int, logs: Optional[dict] = None) -> None:
+    def on_train_begin(self, logs: dict | None = None) -> None:
+        """Starts the run (a Gaussian schedule resets its history here)."""
+        self._run.begin()
+
+    def on_epoch_begin(self, epoch: int, logs: dict | None = None) -> None:
         """Sets the loss's alpha for this epoch."""
         _check_causal_loss(self.loss)
-        new_alpha = self._compute_alpha(epoch)
+        new_alpha = self._run.alpha_for(epoch)
         old_alpha = self.loss.alpha
         self.loss.alpha = new_alpha
-        self.alpha_history.append(new_alpha)
-        if self.verbose and not self._is_constant and (epoch % 10 == 0 or epoch < 5):
-            direction = "↓" if self._is_decay else "↑"
+        if self.verbose and not self.is_constant and (epoch % 10 == 0 or epoch < 5):
+            direction = "↓" if self.is_decay else "↑"
             print(f"\n[Epoch {epoch}] Alpha: {old_alpha:.4f} {direction} {new_alpha:.4f}")
 
-    def on_train_end(self, logs: Optional[dict] = None) -> None:
+    def on_train_end(self, logs: dict | None = None) -> None:
         """Prints the final alpha."""
         if self.verbose and self.alpha_history:
             print(f"\n[Training Complete] Final Alpha: {self.alpha_history[-1]:.4f}")
 
-    def plot_schedule(self, max_epochs: int = 200, figsize: Tuple[float, float] = (10, 6)) -> Any:
+    def plot_schedule(self, max_epochs: int = 200, figsize: tuple[float, float] = (10, 6)) -> Any:
         """The schedule over ``max_epochs`` as a matplotlib figure."""
-        import matplotlib.pyplot as plt
-
-        epochs = np.arange(max_epochs)
-        fig, ax = plt.subplots(figsize=figsize)
-        ax.plot(epochs, [self._compute_alpha(int(e)) for e in epochs], linewidth=2.5)
-        ax.axhline(self.alpha_end, color="red", linestyle="--", label=f"alpha_end={self.alpha_end}")
-        ax.axhline(
-            self.alpha_start, color="green", linestyle="--", label=f"alpha_start={self.alpha_start}"
-        )
-        ax.axvline(self.half_life_epoch, color="orange", linestyle=":", label="half-life")
-        ax.set_xlabel("Epoch")
-        ax.set_ylabel("Alpha (treatment loss weight)")
-        ax.legend()
-        fig.tight_layout()
-        return fig
+        return alpha_schedule.plot_schedule(self.schedule, max_epochs, figsize)
 
     @property
     def is_constant(self) -> bool:
         """True if ``alpha_start == alpha_end``."""
-        return self._is_constant
+        return self.schedule.is_constant
 
     @property
     def is_decay(self) -> bool:
         """True if ``alpha_start > alpha_end``."""
-        return self._is_decay
+        return self.schedule.is_decay
 
     @property
     def is_increase(self) -> bool:
         """True if ``alpha_start < alpha_end``."""
-        return not self._is_decay and not self._is_constant
+        return self.schedule.is_increase
 
 
-class MidFitResumeError(RuntimeError):
-    """A scheduled fit was started at an epoch other than 0."""
+MidFitResumeError = alpha_schedule.MidFitResumeError
 
 
 class NoEligibleCheckpointError(RuntimeError):
@@ -183,43 +194,27 @@ class GaussianAlphaSchedule(AlphaScheduleCallback):
         verbose: bool = True,
     ):
         """Validates the schedule; ``warmup_epochs`` is its first settled epoch."""
-        self.schedule = alpha_schedule.AlphaSchedule(
+        schedule = alpha_schedule.AlphaSchedule(
             alpha_start=alpha_start, alpha_end=alpha_end, decay_const=decay_const, epsilon=epsilon
         )
-        super().__init__(
-            alpha_start=float(alpha_start),
-            alpha_end=float(alpha_end),
-            half_life_epoch=round(math.sqrt(math.log(2.0) / float(decay_const))),
-            clamp_threshold=0.0,
-            verbose=verbose,
-        )
+        self._init_run(schedule, require_start_at_zero=True)
+        self.verbose = verbose
         self.decay_const = float(decay_const)
-        self._started = False
+
+    @property
+    def steepness(self) -> None:
+        """Not a sigmoid: None."""
+        return None
+
+    @property
+    def clamp_threshold(self) -> float:
+        """A Gaussian schedule is never clamped."""
+        return 0.0
 
     @property
     def warmup_epochs(self) -> int:
         """First zero-based epoch at which alpha has settled."""
         return self.schedule.warmup_epochs
-
-    def _compute_alpha(self, epoch: int) -> float:
-        """Alpha for the zero-based ``epoch``."""
-        return self.schedule.alpha(int(epoch))
-
-    def on_train_begin(self, logs: Optional[dict] = None) -> None:
-        """Resets the history."""
-        self.alpha_history = []
-        self._started = False
-
-    def on_epoch_begin(self, epoch: int, logs: Optional[dict] = None) -> None:
-        """Refuses a fit that does not start at epoch 0, then sets the epoch's alpha."""
-        if not self._started:
-            self._started = True
-            if int(epoch) != 0:
-                raise MidFitResumeError(
-                    f"training starts at epoch {epoch}, not 0; the schedule would skip its "
-                    "warmup. Restart the fit from epoch 0."
-                )
-        super().on_epoch_begin(epoch, logs)
 
 
 class EligibleBestCheckpoint(Callback):
@@ -254,20 +249,20 @@ class EligibleBestCheckpoint(Callback):
 
     def _reset(self) -> None:
         """Clears all per-fit state."""
-        self.trace: List[Dict[str, Any]] = []
+        self.trace: list[dict[str, Any]] = []
         self.wait = 0
-        self.best: Optional[float] = None
-        self.best_epoch: Optional[int] = None
-        self.best_weights: Optional[Dict[str, torch.Tensor]] = None
+        self.best: float | None = None
+        self.best_epoch: int | None = None
+        self.best_weights: dict[str, torch.Tensor] | None = None
         self.stopped_epoch = 0
-        self.selected_epoch: Optional[int] = None
-        self.selected_value: Optional[float] = None
+        self.selected_epoch: int | None = None
+        self.selected_value: float | None = None
 
-    def on_train_begin(self, logs: Optional[dict] = None) -> None:
+    def on_train_begin(self, logs: dict | None = None) -> None:
         """Resets the per-fit state."""
         self._reset()
 
-    def on_epoch_end(self, epoch: int, logs: Optional[dict] = None) -> None:
+    def on_epoch_end(self, epoch: int, logs: dict | None = None) -> None:
         """Records the epoch and updates the best eligible epoch."""
         logs = logs or {}
         if self.monitor not in logs:
@@ -295,7 +290,7 @@ class EligibleBestCheckpoint(Callback):
             self.stopped_epoch = int(epoch)
             self.model.stop_training = True
 
-    def on_train_end(self, logs: Optional[dict] = None) -> None:
+    def on_train_end(self, logs: dict | None = None) -> None:
         """Restores the best eligible weights, or raises if no epoch was eligible."""
         if self.best_weights is None:
             raise NoEligibleCheckpointError(
@@ -356,14 +351,14 @@ class ReduceLROnPlateau(Callback):
         self.wait = 0
         self.cooldown_counter = 0
 
-    def on_train_begin(self, logs: Optional[dict] = None) -> None:
+    def on_train_begin(self, logs: dict | None = None) -> None:
         """Resets the plateau state."""
         self._reset()
 
     def _learning_rate(self) -> float:
         return float(self.optimizer.param_groups[0]["lr"])
 
-    def on_epoch_end(self, epoch: int, logs: Optional[dict] = None) -> None:
+    def on_epoch_end(self, epoch: int, logs: dict | None = None) -> None:
         """Checks for a plateau and reduces the learning rate."""
         if logs is None:
             logs = {}
@@ -398,7 +393,7 @@ def get_default_callbacks(
     alpha_end: float = 1.0,
     half_life_epoch: int = 10,
     steepness: float = 0.1,
-) -> List[Callback]:
+) -> list[Callback]:
     """Default callbacks: early stopping with best weights, LR reduction and an alpha schedule.
 
     Args:
