@@ -58,7 +58,7 @@ pypsps/
 ├── bootstrap.py             # Uncertainty and bootstrap estimation (framework-free)
 ├── inference.py             # Causal inference and ATE estimation (framework-free)
 ├── utils.py                 # Shared helper functions (framework-free)
-├── core/                    # Framework-free: layout, family specs, spec, alpha schedule, presets
+├── core/                    # Framework-free: layout, spec, alpha schedule, checkpoint, presets
 ├── datasets/                # Inherit from datasets.base.CausalDataset
 ├── keras/                   # TensorFlow backend (pypsps[tf]): layers, losses, metrics, models
 │   ├── models.py            # build_model, compile_model, default_metrics

@@ -66,6 +66,13 @@ learning-rate reduction should only look at epochs after the warmup:
 `GaussianAlphaSchedule` raises `MidFitResumeError` if a fit does not start at epoch 0,
 because resuming would skip the warmup.
 
+The schedules (`AlphaSchedule` for the half-Gaussian, `SigmoidAlphaSchedule` for
+`AlphaScheduleCallback` and `get_default_callbacks`) are framework-free values in
+`pypsps.core.alpha_schedule`, and `ScheduleRun` applies the resume guard. The checkpoint
+rules above are `pypsps.core.checkpoint.CheckpointSelector`. Both backends' callbacks are thin
+adapters over them, so the Keras and PyTorch callbacks select the same epoch from the same
+logs.
+
 ## 3. Selecting on the Outcome Term
 
 Even after the warmup, the total loss depends on alpha and on any predictive-state

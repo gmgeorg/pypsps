@@ -5,6 +5,38 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.7.0 - Nov 7, 2026
+
+### Breaking
+
+* `pypsps.keras.callbacks.get_default_callbacks` uses pypsps's own `EarlyStopping` (the
+  `EligibleBestCheckpoint` rules, as `pypsps.torch` already did) instead of
+  `tf.keras.callbacks.EarlyStopping`. A monitor missing from the epoch logs now raises
+  `KeyError` (it used to warn and never stop), and a monitor that is never finite raises
+  `NoEligibleCheckpointError` (it used to restore the epoch-0 weights silently). To keep the
+  old behaviour, build the callbacks yourself with `tf.keras.callbacks.EarlyStopping`.
+
+### Added
+
+* `core.alpha_schedule.SigmoidAlphaSchedule`, `ScheduleRun` and `plot_schedule`;
+  `core.checkpoint.CheckpointSelector` and `default_callback_args`. Both backends' callbacks
+  are thin adapters over them, so they select the same epoch and assign the same alphas from
+  the same logs.
+* `pypsps.keras.callbacks.EarlyStopping`.
+* Keras `CausalLoss.outcome_loss`, `.treatment_loss` and `.outcome_loss_weight` (read-only).
+
+### Changed
+
+* `MidFitResumeError` and `NoEligibleCheckpointError` are each one class, defined in
+  `pypsps.core` and re-exported by both backends.
+* The Keras `AlphaScheduleCallback` records `float` values in `alpha_history` (they were
+  `numpy.float64`).
+
+### Fixed
+
+* The PyTorch sigmoid alpha schedule no longer raises `OverflowError` for steep schedules
+  late in training; both backends return `alpha_end` without a warning.
+
 ## pypsps v0.6.3 - Nov 7, 2026
 
 ### Added

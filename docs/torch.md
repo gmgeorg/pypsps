@@ -144,9 +144,11 @@ training.
   `propensity_score_aupr` is the average precision. They agree with Keras closely.
 * `alpha` is a plain float on the loss (`loss.alpha = x`), and the `callbacks` change it
   between epochs. There is no graph-tracing caveat.
-* `callbacks.EarlyStopping` and `callbacks.ReduceLROnPlateau` are part of the package (Keras
-  has its own); `EarlyStopping` restores the best weights like
-  `restore_best_weights=True`.
+* `callbacks.ReduceLROnPlateau` is part of the package (Keras has its own, and
+  `tests/parity/test_callback_parity.py` pins that the learning rates agree). Early stopping,
+  the alpha schedules and the default callbacks are the same in both backends: they are
+  defined in `pypsps.core`, and each backend only writes alpha or snapshots and restores
+  weights.
 * The Keras `get_propensity_state_conditional_means(model)` is
   `model.propensity_state_conditional_means()`.
 
