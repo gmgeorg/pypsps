@@ -64,10 +64,11 @@ class CausalDataset(object):
         """Returns (inputs, outputs) for a .fit() method for keras model.
 
         Args:
-          layout: optional `ColumnLayout` (``model.mixture.layout``). If given, the outputs
-            are built with ``layout.encode_true``, which raises if the outcome does not have
-            the outcome family's number of columns. Without it the outputs are the outcome
-            columns followed by the treatment, with no check.
+          layout: optional `ColumnLayout` (Keras: ``ColumnLayout.from_model(model)``;
+            torch: ``model.mixture.layout``). If given, the outputs are built with
+            ``layout.encode_true``, which raises if the outcome does not have the outcome
+            family's number of columns. Without it the outputs are the outcome columns
+            followed by the treatment, with no check.
         """
         input_data = [self.features.values, self.treatments.values]
         if layout is None:

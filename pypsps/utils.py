@@ -33,10 +33,11 @@ def prepare_keras_inputs_outputs(
       features: ``[N, F]``; the inputs are cast to float32.
       treatments: ``[N, 1]``.
       outcomes: ``[N, C]``, or None when only predicting.
-      layout: optional `ColumnLayout` (``model.mixture.layout``). If given, the targets are
-        built with ``layout.encode_true``, which raises if ``outcomes`` does not have the
-        outcome family's number of columns. Without it the targets are ``[outcomes |
-        treatments]`` with no check.
+      layout: optional `ColumnLayout` (Keras: ``ColumnLayout.from_model(model)``;
+        torch: ``model.mixture.layout``). If given, the targets are built with
+        ``layout.encode_true``, which raises if ``outcomes`` does not have the outcome
+        family's number of columns. Without it the targets are ``[outcomes | treatments]``
+        with no check.
 
     Returns:
       ``([features, treatments], targets)``; ``targets`` is None if ``outcomes`` is None.
