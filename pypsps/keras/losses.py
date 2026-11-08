@@ -333,6 +333,21 @@ class CausalLoss(tf.keras.losses.Loss):
         return self.mixture.layout
 
     @property
+    def outcome_loss(self) -> OutcomeLoss:
+        """The outcome loss (read-only)."""
+        return self._outcome_loss
+
+    @property
+    def treatment_loss(self) -> TreatmentLoss:
+        """The treatment loss (read-only)."""
+        return self._treatment_loss
+
+    @property
+    def outcome_loss_weight(self) -> float:
+        """The weight of the outcome loss (read-only)."""
+        return self._outcome_loss_weight
+
+    @property
     def alpha(self) -> tf.Variable:
         """The float32 variable holding alpha.
 

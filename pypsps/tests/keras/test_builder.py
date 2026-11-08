@@ -740,3 +740,20 @@ def test_spec_of_a_model_without_causal_output_is_none():
     """A network without a ``CausalOutput`` has no Spec."""
     plain = tf.keras.Sequential([tf.keras.Input((F,)), tf.keras.layers.Dense(1)])
     assert models.spec_of(plain) is None
+
+
+def test_causal_loss_exposes_its_parts():
+    """The outcome loss, treatment loss and outcome weight are public, and feed the metrics."""
+    model = models.build_model(
+        2, F, families.Normal(), families.Bernoulli(), compile=True, outcome_loss_weight=0.5
+    )
+    loss = model.loss
+    assert loss.outcome_loss is loss._outcome_loss
+    assert loss.treatment_loss is loss._treatment_loss
+    assert loss.outcome_loss_weight == 0.5
+    for name in ("outcome_loss", "treatment_loss", "outcome_loss_weight"):
+        with pytest.raises(AttributeError):
+            setattr(loss, name, None)
+    metrics = models.default_metrics(loss)
+    assert metrics[0].get_config()["outcome_loss_weight"] == 0.5
+    assert [m.name for m in metrics][:2] == ["causal_loss_metric", "outcome_nll_metric"]

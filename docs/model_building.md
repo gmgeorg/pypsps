@@ -277,6 +277,21 @@ callbacks = get_default_callbacks(monitor="val_causal_loss_metric", patience=25)
 model.fit(X, y, validation_split=0.2, callbacks=callbacks)
 ```
 
+`get_default_callbacks` returns `[EarlyStopping, ReduceLROnPlateau, AlphaScheduleCallback]`.
+`EarlyStopping` is pypsps's own (`callbacks.EarlyStopping`, the `EligibleBestCheckpoint` rules
+with `start_from_epoch=0`), not `tf.keras.callbacks.EarlyStopping`, and it is the same
+callback that `pypsps.torch` uses. It fails fast:
+
+* A `monitor` that is not in the epoch logs raises `KeyError` listing the available keys. The
+  usual cause is a `val_` metric without `validation_data` or `validation_split`.
+* NaN and infinite epochs are never selected. If no epoch has a finite `monitor`,
+  `NoEligibleCheckpointError` is raised when training ends, rather than restoring the
+  untrained weights.
+
+The schedules, the checkpoint rules and the default callback arguments are defined once, in
+`pypsps.core.alpha_schedule` and `pypsps.core.checkpoint`. The Keras callbacks only write alpha
+into the loss and snapshot or restore the weights.
+
 ## Half-Gaussian Alpha Schedule
 
 `GaussianAlphaSchedule` (in `callbacks`) moves the treatment-loss weight alpha along
@@ -330,9 +345,11 @@ For a time-to-event outcome, the outcome MSE and MAE use only units with an obse
 event. A censored unit's time is only a lower bound, so it adds no error and no weight. A
 batch without events therefore leaves the metric unchanged. If no event has been seen since
 the last reset, the metric reports `NaN`, not 0. Don't monitor `val_outcome_mean_squared_error`
-on a heavily censored validation set: if the first epoch is `NaN`, `EarlyStopping` keeps it
-as the best value and stops after `patience` epochs. `TerminateOnNaN` reads only the loss,
-so it is not affected.
+on a heavily censored validation set. `callbacks.EarlyStopping` (the default) never selects a
+`NaN` epoch, but it raises `NoEligibleCheckpointError` if every epoch is `NaN`, and it stops
+after `patience` epochs without a finite improvement. `tf.keras.callbacks.EarlyStopping`
+would keep a `NaN` first epoch as the best value. `TerminateOnNaN` reads only the loss, so it
+is not affected.
 
 ## Per-State Column Selection
 

@@ -1,10 +1,14 @@
 """Test module for callbacks."""
 
+import warnings
+
 import numpy as np
 import pytest
 import tensorflow as tf
 
 from ... import datasets
+from ...core import alpha_schedule as core_alpha_schedule
+from ...core import checkpoint
 from ...keras import callbacks, families, losses, mixture, models, presets
 
 
@@ -25,98 +29,31 @@ class _FakeModel:
         self.loss = _causal_loss(alpha)
 
 
-def test_constructor_validates_steepness():
-    """Test that non-positive steepness raises ValueError."""
-    with pytest.raises(ValueError, match="steepness"):
-        callbacks.AlphaScheduleCallback(steepness=0.0)
-    with pytest.raises(ValueError, match="steepness"):
-        callbacks.AlphaScheduleCallback(steepness=-1.0)
-
-
-def test_constructor_validates_half_life_epoch():
-    """Test that a negative half_life_epoch raises ValueError."""
-    with pytest.raises(ValueError, match="half_life_epoch"):
-        callbacks.AlphaScheduleCallback(half_life_epoch=-1)
-
-
-def test_constructor_validates_clamp_threshold():
-    """Test that a negative clamp_threshold raises ValueError."""
-    with pytest.raises(ValueError, match="clamp_threshold"):
-        callbacks.AlphaScheduleCallback(clamp_threshold=-0.1)
-
-
-def test_schedule_type_properties():
-    """Test is_decay/is_increase/is_constant reflect alpha_start vs alpha_end."""
-    decay = callbacks.AlphaScheduleCallback(alpha_start=10.0, alpha_end=1.0)
-    assert decay.is_decay
-    assert not decay.is_increase
-    assert not decay.is_constant
-
-    increase = callbacks.AlphaScheduleCallback(alpha_start=1.0, alpha_end=10.0)
-    assert increase.is_increase
-    assert not increase.is_decay
-    assert not increase.is_constant
-
-    constant = callbacks.AlphaScheduleCallback(alpha_start=5.0, alpha_end=5.0)
-    assert constant.is_constant
-    assert not constant.is_decay
-    assert not constant.is_increase
-
-
-def test_decay_schedule_starts_high_ends_low_and_monotonic():
-    """Test a decay schedule moves from alpha_start down to alpha_end monotonically."""
+def test_schedule_is_assigned_to_the_loss_and_recorded():
+    """The adapter writes the core schedule's alpha into the loss variable each epoch."""
     cb = callbacks.AlphaScheduleCallback(
         alpha_start=10.0, alpha_end=1.0, half_life_epoch=10, steepness=0.5, verbose=False
     )
     cb.set_model(_FakeModel())
-
-    alphas = []
     for epoch in range(40):
         cb.on_epoch_begin(epoch)
-        alphas.append(float(cb.model.loss.alpha))
+        assert float(cb.model.loss.alpha) == pytest.approx(cb.schedule.alpha(epoch), rel=1e-6)
+    assert cb.alpha_history == [cb.schedule.alpha(e) for e in range(40)]
+    assert (cb.alpha_start, cb.alpha_end, cb.half_life_epoch) == (10.0, 1.0, 10)
+    assert (cb.steepness, cb.clamp_threshold) == (0.5, pytest.approx(0.9))
+    assert cb.is_decay and not cb.is_increase and not cb.is_constant
 
-    assert alphas[0] == pytest.approx(10.0, abs=0.5)
-    assert alphas[-1] == pytest.approx(1.0, abs=1e-6)
-    assert all(a >= b - 1e-9 for a, b in zip(alphas, alphas[1:]))
-    assert cb.alpha_history == pytest.approx(alphas, rel=1e-6)
 
-
-def test_increase_schedule_starts_low_ends_high_and_monotonic():
-    """Test an increase schedule moves from alpha_start up to alpha_end monotonically."""
+def test_steep_schedule_does_not_overflow():
+    """A late epoch of a steep schedule is alpha_end, with no warning."""
     cb = callbacks.AlphaScheduleCallback(
-        alpha_start=1.0, alpha_end=10.0, half_life_epoch=10, steepness=0.5, verbose=False
+        alpha_start=10.0, alpha_end=1.0, half_life_epoch=10, steepness=10.0, verbose=False
     )
     cb.set_model(_FakeModel())
-
-    alphas = []
-    for epoch in range(40):
-        cb.on_epoch_begin(epoch)
-        alphas.append(float(cb.model.loss.alpha))
-
-    assert alphas[0] == pytest.approx(1.0, abs=0.5)
-    assert alphas[-1] == pytest.approx(10.0, abs=1e-6)
-    assert all(a <= b + 1e-9 for a, b in zip(alphas, alphas[1:]))
-
-
-def test_constant_schedule_keeps_alpha_fixed():
-    """Test that alpha_start == alpha_end keeps alpha fixed across epochs."""
-    cb = callbacks.AlphaScheduleCallback(alpha_start=5.0, alpha_end=5.0, verbose=False)
-    cb.set_model(_FakeModel())
-
-    for epoch in range(5):
-        cb.on_epoch_begin(epoch)
-        assert float(cb.model.loss.alpha) == 5.0
-
-
-def test_clamps_to_alpha_end_near_convergence():
-    """Test alpha snaps exactly to alpha_end once within clamp_threshold."""
-    cb = callbacks.AlphaScheduleCallback(
-        alpha_start=10.0, alpha_end=1.0, half_life_epoch=5, steepness=1.0, verbose=False
-    )
-    cb.set_model(_FakeModel())
-
-    cb.on_epoch_begin(100)
-    assert float(cb.model.loss.alpha) == pytest.approx(cb.alpha_end)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        cb.on_epoch_begin(100)
+    assert float(cb.model.loss.alpha) == 1.0
 
 
 def test_raises_if_model_has_no_loss_with_alpha_attribute():
@@ -228,73 +165,58 @@ class _WeightsModel:
         self.restored = int(w[0])
 
 
-def _drive(cb, series):
+def _drive(cb, series, logs=None):
     """Feed a monitored series to a callback as epoch logs; return the stand-in model."""
     m = _WeightsModel()
     cb.set_model(m)
     cb.on_train_begin()
     for e, v in enumerate(series):
         m.epoch = e
-        cb.on_epoch_end(e, {"val_m": v})
+        cb.on_epoch_end(e, {"val_m": v} if logs is None else logs)
         if m.stop_training:
             break
     cb.on_train_end()
     return m
 
 
-def _eligible(series, start=6, patience=50, min_delta=0.0):
-    """Drive an EligibleBestCheckpoint over ``series``."""
-    cb = callbacks.EligibleBestCheckpoint(
-        "val_m", patience=patience, start_from_epoch=start, min_delta=min_delta
-    )
-    return cb, _drive(cb, series)
-
-
-def test_eligible_checkpoint_ignores_epochs_before_start():
-    """Better values before start_from_epoch are never selected."""
-    cb, m = _eligible([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 5.0, 4.0, 3.5, 3.9])
-    assert (cb.selected_epoch, cb.selected_value, m.restored) == (8, 3.5, 8)
-    assert [t["eligible"] for t in cb.trace] == [False] * 6 + [True] * 4
+def test_eligible_checkpoint_restores_the_selected_epoch_and_stops():
+    """The adapter snapshots on improvement, stops on the selector's word and restores."""
+    cb = callbacks.EligibleBestCheckpoint("val_m", patience=3, start_from_epoch=2)
+    m = _drive(cb, [0.1, 0.2, 5.0, 4.0, 4.5, 4.6, 4.7, 1.0])
+    assert (cb.selected_epoch, cb.selected_value, m.restored) == (3, 4.0, 3)
+    assert (cb.stopped_epoch, m.stop_training) == (6, True)
+    assert [t["eligible"] for t in cb.trace] == [False, False] + [True] * 5
     assert all(t["alpha"] == 1.0 for t in cb.trace)
 
 
-def test_eligible_checkpoint_skips_nan_and_inf_and_ties_go_to_earliest():
-    """A NaN at the first eligible epoch is not restored; ties keep the earlier epoch."""
-    cb, m = _eligible([1, 1, 1, 1, 1, 1, float("nan"), 3.0, 2.0, 2.0, float("inf")])
-    assert (cb.selected_epoch, m.restored) == (8, 8)
-
-
-def test_eligible_checkpoint_min_delta_requires_a_real_improvement():
-    """An improvement smaller than min_delta does not move the selection."""
-    cb, _ = _eligible([9] * 6 + [3.0, 2.95, 2.5], min_delta=0.1)
-    assert cb.selected_epoch == 8
-
-
-def test_eligible_checkpoint_patience_counts_from_the_first_eligible_epoch():
-    """Patience runs over eligible epochs only, and training stops when it runs out."""
-    cb, m = _eligible([9] * 6 + [3.0, 4.0, 4.0, 4.0, 1.0], patience=3)
-    assert cb.stopped_epoch == 9 and m.restored == 6
-
-
 def test_eligible_checkpoint_raises_when_no_epoch_is_eligible():
-    """No finite value at or after start_from_epoch raises instead of keeping the last weights."""
+    """The selector's error surfaces from on_train_end, and no weights are restored."""
+    cb = callbacks.EligibleBestCheckpoint("val_m", patience=50, start_from_epoch=6)
     with pytest.raises(callbacks.NoEligibleCheckpointError):
-        _eligible([1.0] * 6 + [float("nan")] * 3)
+        _drive(cb, [1.0] * 6 + [float("nan")] * 3)
 
 
-def test_eligible_checkpoint_raises_on_missing_monitor():
-    """A monitor that is not in the logs raises KeyError."""
-    cb = callbacks.EligibleBestCheckpoint("val_missing", patience=2)
-    with pytest.raises(KeyError, match="val_missing"):
-        _drive(cb, [1.0])
+def test_early_stopping_is_an_eligible_checkpoint_from_epoch_zero():
+    """EarlyStopping selects the best epoch of the whole fit."""
+    cb = callbacks.EarlyStopping("val_m", patience=2)
+    m = _drive(cb, [3.0, 2.0, 2.5, 2.6, 0.1])
+    assert (cb.start_from_epoch, cb.selected_epoch, m.restored) == (0, 1, 1)
 
 
-def test_eligible_checkpoint_validates_arguments():
-    """patience < 1 and a negative start_from_epoch raise ValueError."""
-    with pytest.raises(ValueError, match="patience"):
-        callbacks.EligibleBestCheckpoint("val_m", patience=0)
-    with pytest.raises(ValueError, match="start_from_epoch"):
-        callbacks.EligibleBestCheckpoint("val_m", patience=1, start_from_epoch=-1)
+def test_errors_are_the_core_classes():
+    """One exception class each, defined in core and re-exported here."""
+    assert callbacks.NoEligibleCheckpointError is checkpoint.NoEligibleCheckpointError
+    assert callbacks.MidFitResumeError is core_alpha_schedule.MidFitResumeError
+
+
+def test_default_early_stopping_is_the_pypsps_one():
+    """The default early stopping fails fast instead of warning and carrying on."""
+    default = callbacks.get_default_callbacks("val_m", patience=2)[0]
+    assert type(default) is callbacks.EarlyStopping
+    with pytest.raises(KeyError, match="val_m"):
+        _drive(default, [1.0], logs={"loss": 1.0})
+    with pytest.raises(callbacks.NoEligibleCheckpointError):
+        _drive(callbacks.get_default_callbacks("val_m", patience=2)[0], [float("nan")] * 2)
 
 
 def test_lr_plateau_is_inactive_before_start_from_epoch():

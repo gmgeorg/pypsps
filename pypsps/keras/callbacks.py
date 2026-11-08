@@ -1,11 +1,11 @@
 """Module for pypsps training callbacks."""
 
-import math
 from typing import Any, Optional
 
 import numpy as np
 import tensorflow as tf
 
+from pypsps.core import checkpoint
 from pypsps.keras import alpha_schedule, losses
 
 
@@ -120,76 +120,78 @@ class AlphaScheduleCallback(tf.keras.callbacks.Callback):
             ValueError: If steepness is not positive or half_life_epoch is negative
         """
         super().__init__()
-
-        # Validation
-        if steepness <= 0:
-            raise ValueError(f"steepness must be positive, got {steepness}")
-        if half_life_epoch < 0:
-            raise ValueError(f"half_life_epoch must be non-negative, got {half_life_epoch}")
-
-        self.alpha_start = alpha_start
-        self.alpha_end = alpha_end
-        self.half_life_epoch = half_life_epoch
-        self.steepness = steepness
+        self._init_run(
+            alpha_schedule.SigmoidAlphaSchedule(
+                alpha_start=alpha_start,
+                alpha_end=alpha_end,
+                half_life_epoch=half_life_epoch,
+                steepness=steepness,
+                clamp_threshold=clamp_threshold,
+            ),
+            require_start_at_zero=False,
+        )
         self.verbose = verbose
-        self.alpha_history = []
 
-        # Determine direction: decay (start > end), increase (start < end), or constant
-        self._is_constant = alpha_start == alpha_end
-        self._is_decay = alpha_start > alpha_end
-        self._alpha_range = abs(alpha_start - alpha_end)
+    def _init_run(self, schedule: Any, require_start_at_zero: bool) -> None:
+        """Set the schedule and the run that drives it (shared with `GaussianAlphaSchedule`)."""
+        self.schedule = schedule
+        self._run = alpha_schedule.ScheduleRun(schedule, require_start_at_zero)
 
-        # Auto-compute clamp threshold if not provided (10% of range, or 0 if constant)
-        if clamp_threshold is None:
-            self.clamp_threshold = 0.1 * self._alpha_range if self._alpha_range > 0 else 0.0
-        else:
-            if clamp_threshold < 0:
-                raise ValueError(f"clamp_threshold must be non-negative, got {clamp_threshold}")
-            self.clamp_threshold = clamp_threshold
+    @property
+    def alpha_start(self) -> float:
+        """Alpha at the start of the schedule."""
+        return self.schedule.alpha_start
 
-    def _compute_alpha(self, epoch: int):
-        """
-        Compute alpha value for the current epoch using sigmoid schedule.
+    @property
+    def alpha_end(self) -> float:
+        """Alpha the schedule approaches."""
+        return self.schedule.alpha_end
 
-        The sigmoid function provides smooth transition from alpha_start to alpha_end,
-        with the half_life_epoch determining the center of the transition.
-        Works for both decay (start > end) and increase (start < end) schedules.
-        """
-        # Sigmoid factor: 1 / (1 + exp(steepness * (epoch - half_life)))
-        # This gives 1.0 at epoch 0 (for small steepness) and approaches 0.0 as epoch -> inf
-        sigmoid_factor = 1.0 / (1.0 + np.exp(self.steepness * (epoch - self.half_life_epoch)))
+    @property
+    def half_life_epoch(self) -> int:
+        """Epoch at which alpha is midway between start and end."""
+        return self.schedule.half_life_epoch
 
-        # Scale: alpha = alpha_end + (alpha_start - alpha_end) * sigmoid_factor
-        # At epoch 0 (sigmoid_factor ≈ high): alpha ≈ alpha_start
-        # At epoch -> inf (sigmoid_factor ≈ 0): alpha ≈ alpha_end
-        alpha = self.alpha_end + (self.alpha_start - self.alpha_end) * sigmoid_factor
+    @property
+    def steepness(self) -> float:
+        """Steepness of the sigmoid."""
+        return self.schedule.steepness
 
-        # Clamp to alpha_end when close enough (works for both decay and increase)
-        if abs(alpha - self.alpha_end) < self.clamp_threshold:
-            alpha = self.alpha_end
+    @property
+    def clamp_threshold(self) -> float:
+        """Distance from alpha_end below which alpha is set to alpha_end."""
+        return self.schedule.clamp_threshold
 
-        return alpha
+    @property
+    def alpha_history(self) -> list[float]:
+        """The alphas assigned so far."""
+        return self._run.history
+
+    def _compute_alpha(self, epoch: int) -> float:
+        """Alpha for the zero-based ``epoch``."""
+        return self.schedule.alpha(int(epoch))
+
+    def on_train_begin(self, logs: Optional[dict] = None):
+        """Start the run (a Gaussian schedule resets its history here)."""
+        self._run.begin()
 
     def on_epoch_begin(self, epoch: int, logs: Optional[dict] = None):
         """Update alpha at the beginning of each epoch."""
-        # Compute new alpha value
-        new_alpha = self._compute_alpha(epoch)
-
         alpha = _alpha_variable(self.model)
         if alpha is None:
             loss_type = type(getattr(self.model, "loss", None)).__name__
             raise AttributeError(
                 f"model.loss must be a pypsps CausalLoss with an alpha variable; got {loss_type}"
             )
+        new_alpha = self._run.alpha_for(epoch)
         old_alpha = float(alpha.numpy())
         # ASSIGN, do not rebind: the already-traced training graph (model.fit() runs with
         # run_eagerly=False by default) reads the variable, never a rebound Python attribute.
         alpha.assign(new_alpha)
-        self.alpha_history.append(new_alpha)
 
         # Print update if verbose (skip for constant schedules)
-        if self.verbose and not self._is_constant and (epoch % 10 == 0 or epoch < 5):
-            direction = "↓" if self._is_decay else "↑"
+        if self.verbose and not self.is_constant and (epoch % 10 == 0 or epoch < 5):
+            direction = "↓" if self.is_decay else "↑"
             print(f"\n[Epoch {epoch}] Alpha: {old_alpha:.4f} {direction} {new_alpha:.4f}")
 
     def on_train_end(self, logs: Optional[dict] = None):
@@ -208,76 +210,26 @@ class AlphaScheduleCallback(tf.keras.callbacks.Callback):
         Returns:
             matplotlib.figure.Figure: The generated figure
         """
-        import matplotlib.pyplot as plt
-
-        epochs = np.arange(max_epochs)
-        alphas = [self._compute_alpha(epoch) for epoch in epochs]
-
-        fig, ax = plt.subplots(figsize=figsize)
-        ax.plot(epochs, alphas, linewidth=2.5, color="#2E86AB")
-        ax.axhline(
-            y=self.alpha_end,
-            color="red",
-            linestyle="--",
-            linewidth=1.5,
-            alpha=0.7,
-            label=f"Target α = {self.alpha_end}",
-        )
-        ax.axhline(
-            y=self.alpha_start,
-            color="green",
-            linestyle="--",
-            linewidth=1.5,
-            alpha=0.7,
-            label=f"Start α = {self.alpha_start}",
-        )
-        ax.axvline(
-            x=self.half_life_epoch,
-            color="orange",
-            linestyle=":",
-            linewidth=1.5,
-            alpha=0.7,
-            label=f"Half-life (epoch {self.half_life_epoch})",
-        )
-
-        if self._is_constant:
-            schedule_type = "Constant"
-        elif self._is_decay:
-            schedule_type = "Decay"
-        else:
-            schedule_type = "Increase"
-        ax.set_title(f"Alpha {schedule_type} Schedule", fontsize=18, fontweight="bold", pad=15)
-        ax.set_xlabel("Epoch", fontsize=14)
-        ax.set_ylabel("Alpha (Treatment Loss Weight)", fontsize=14)
-        ax.grid(True, alpha=0.3, linestyle="--")
-        ax.legend(fontsize=12)
-        ax.tick_params(axis="both", labelsize=12)
-
-        plt.tight_layout()
-        return fig
+        return alpha_schedule.plot_schedule(self.schedule, max_epochs, figsize)
 
     @property
     def is_constant(self) -> bool:
         """Returns True if this is a constant schedule (alpha_start == alpha_end)."""
-        return self._is_constant
+        return self.schedule.is_constant
 
     @property
     def is_decay(self) -> bool:
         """Returns True if this is a decay schedule (alpha_start > alpha_end)."""
-        return self._is_decay
+        return self.schedule.is_decay
 
     @property
     def is_increase(self) -> bool:
         """Returns True if this is an increase schedule (alpha_start < alpha_end)."""
-        return not self._is_decay and not self._is_constant
+        return self.schedule.is_increase
 
 
-class MidFitResumeError(RuntimeError):
-    """A scheduled fit was started at an epoch other than 0."""
-
-
-class NoEligibleCheckpointError(RuntimeError):
-    """No epoch at or after ``start_from_epoch`` produced a finite monitored value."""
+MidFitResumeError = alpha_schedule.MidFitResumeError
+NoEligibleCheckpointError = checkpoint.NoEligibleCheckpointError
 
 
 class GaussianAlphaSchedule(AlphaScheduleCallback):
@@ -295,44 +247,27 @@ class GaussianAlphaSchedule(AlphaScheduleCallback):
         verbose: bool = True,
     ):
         """Validate the schedule; ``warmup_epochs`` is its first settled epoch."""
-        self.schedule = alpha_schedule.AlphaSchedule(
+        schedule = alpha_schedule.AlphaSchedule(
             alpha_start=alpha_start, alpha_end=alpha_end, decay_const=decay_const, epsilon=epsilon
         )
-        # half_life_epoch only labels plot_schedule: exp(-c * e**2) = 1/2 at sqrt(ln 2 / c).
-        super().__init__(
-            alpha_start=float(alpha_start),
-            alpha_end=float(alpha_end),
-            half_life_epoch=round(math.sqrt(math.log(2.0) / float(decay_const))),
-            clamp_threshold=0.0,
-            verbose=verbose,
-        )
+        super().__init__(verbose=verbose)
+        self._init_run(schedule, require_start_at_zero=True)
         self.decay_const = float(decay_const)
-        self._started = False
+
+    @property
+    def steepness(self) -> None:
+        """Not a sigmoid: None."""
+        return None
+
+    @property
+    def clamp_threshold(self) -> float:
+        """A Gaussian schedule is never clamped."""
+        return 0.0
 
     @property
     def warmup_epochs(self) -> int:
         """First zero-based epoch at which alpha has settled."""
         return self.schedule.warmup_epochs
-
-    def _compute_alpha(self, epoch: int):
-        """Alpha for zero-based ``epoch``."""
-        return self.schedule.alpha(int(epoch))
-
-    def on_train_begin(self, logs: Optional[dict] = None):
-        """Reset the alpha history."""
-        self.alpha_history = []
-        self._started = False
-
-    def on_epoch_begin(self, epoch: int, logs: Optional[dict] = None):
-        """Refuse a fit that does not start at epoch 0, then assign the epoch's alpha."""
-        if not self._started:
-            self._started = True
-            if int(epoch) != 0:
-                raise MidFitResumeError(
-                    f"training starts at epoch {epoch}, not 0; the schedule would skip its "
-                    "warmup. Restart the fit from epoch 0."
-                )
-        super().on_epoch_begin(epoch, logs)
 
 
 def _live_alpha(model: tf.keras.Model) -> float | None:
@@ -344,10 +279,11 @@ def _live_alpha(model: tf.keras.Model) -> float | None:
 class EligibleBestCheckpoint(tf.keras.callbacks.Callback):
     """Early stopping that restores the best epoch at or after ``start_from_epoch``.
 
-    An epoch is eligible if it is at or after ``start_from_epoch`` and its monitored value is
-    finite. Ties go to the earliest epoch. Raises `NoEligibleCheckpointError` at the end of
-    training if no epoch was eligible. ``trace`` records each epoch; ``selected_epoch`` and
-    ``selected_value`` are what was restored.
+    An adapter over `pypsps.core.checkpoint.CheckpointSelector`, which owns the rules: an epoch
+    is eligible if it is at or after ``start_from_epoch`` and its monitored value is finite. Ties
+    go to the earliest epoch. Raises `NoEligibleCheckpointError` at the end of training if no
+    epoch was eligible. ``trace`` records each epoch; ``selected_epoch`` and ``selected_value``
+    are what was restored.
     """
 
     def __init__(
@@ -360,72 +296,58 @@ class EligibleBestCheckpoint(tf.keras.callbacks.Callback):
     ):
         """Minimise ``monitor``; stop after ``patience`` eligible epochs without improvement."""
         super().__init__()
-        if patience < 1:
-            raise ValueError(f"patience must be >= 1, got {patience}")
-        if start_from_epoch < 0:
-            raise ValueError(f"start_from_epoch must be >= 0, got {start_from_epoch}")
-        self.monitor = monitor
-        self.patience = int(patience)
-        self.start_from_epoch = int(start_from_epoch)
-        self.min_delta = abs(float(min_delta))
+        self._selector = checkpoint.CheckpointSelector(
+            monitor, patience, start_from_epoch=start_from_epoch, min_delta=min_delta
+        )
         self.verbose = verbose
-        self._reset()
-
-    def _reset(self):
-        """Clear all per-fit state."""
-        self.trace: list[dict] = []
-        self.wait = 0
-        self.best: float | None = None
-        self.best_epoch: int | None = None
         self.best_weights = None
-        self.stopped_epoch = 0
-        self.selected_epoch: int | None = None
-        self.selected_value: float | None = None
+
+    monitor = property(lambda self: self._selector.monitor)
+    patience = property(lambda self: self._selector.patience)
+    start_from_epoch = property(lambda self: self._selector.start_from_epoch)
+    min_delta = property(lambda self: self._selector.min_delta)
+    trace = property(lambda self: self._selector.trace)
+    wait = property(lambda self: self._selector.wait)
+    best = property(lambda self: self._selector.best)
+    best_epoch = property(lambda self: self._selector.best_epoch)
+    stopped_epoch = property(lambda self: self._selector.stopped_epoch)
+    selected_epoch = property(lambda self: self._selector.selected_epoch)
+    selected_value = property(lambda self: self._selector.selected_value)
 
     def on_train_begin(self, logs: Optional[dict] = None):
         """Reset the per-fit state."""
-        self._reset()
+        self._selector.begin()
+        self.best_weights = None
 
     def on_epoch_end(self, epoch: int, logs: Optional[dict] = None):
-        """Record the epoch and update the best eligible epoch."""
-        logs = logs or {}
-        if self.monitor not in logs:
-            raise KeyError(f"monitor {self.monitor!r} is not in the epoch logs: {sorted(logs)}")
-        current = float(logs[self.monitor])
-        eligible = epoch >= self.start_from_epoch and math.isfinite(current)
-        self.trace.append(
-            {
-                "epoch": int(epoch),
-                "monitored": current,
-                "eligible": bool(eligible),
-                "alpha": _live_alpha(self.model),
-            }
-        )
-        if epoch < self.start_from_epoch:
-            return
-        if eligible and (self.best is None or current < self.best - self.min_delta):
-            self.best = current
-            self.best_epoch = int(epoch)
+        """Record the epoch; snapshot the weights if it improved; stop if patience ran out."""
+        step = self._selector.observe(epoch, logs, alpha=_live_alpha(self.model))
+        if step.improved:
             self.best_weights = self.model.get_weights()
-            self.wait = 0
-            return
-        self.wait += 1
-        if self.wait >= self.patience:
-            self.stopped_epoch = int(epoch)
+        if step.stop:
             self.model.stop_training = True
 
     def on_train_end(self, logs: Optional[dict] = None):
         """Restore the best eligible weights, or raise if no epoch was eligible."""
-        if self.best_weights is None:
-            raise NoEligibleCheckpointError(
-                f"no epoch >= {self.start_from_epoch} produced a finite {self.monitor!r}; "
-                f"monitored values: {[t['monitored'] for t in self.trace]}"
-            )
+        self._selector.finish()
         self.model.set_weights(self.best_weights)
-        self.selected_epoch = self.best_epoch
-        self.selected_value = self.best
         if self.verbose:
-            print(f"\nRestored epoch {self.selected_epoch} ({self.monitor}={self.best:.4f})")
+            print(
+                f"\nRestored epoch {self.selected_epoch} ({self.monitor}={self.selected_value:.4f})"
+            )
+
+
+class EarlyStopping(EligibleBestCheckpoint):
+    """Stops after ``patience`` epochs without improvement of ``monitor`` and restores the best.
+
+    `EligibleBestCheckpoint` with ``start_from_epoch=0``. Unlike
+    ``tf.keras.callbacks.EarlyStopping`` it raises `KeyError` if ``monitor`` is not in the epoch
+    logs and `NoEligibleCheckpointError` if it is never finite.
+    """
+
+    def __init__(self, monitor: str, patience: int, min_delta: float = 0.0, verbose: int = 0):
+        """Minimise ``monitor``."""
+        super().__init__(monitor, patience, 0, min_delta, verbose)
 
 
 class WarmupReduceLROnPlateau(tf.keras.callbacks.ReduceLROnPlateau):
@@ -469,7 +391,10 @@ def get_default_callbacks(
         steepness: Controls steepness of sigmoid curve (default: 0.1)
 
     Returns:
-        List of callbacks
+        ``[EarlyStopping, ReduceLROnPlateau, AlphaScheduleCallback]``. The early stopping is
+        pypsps's own `EarlyStopping`: it raises `KeyError` if ``monitor`` is not in the epoch
+        logs (e.g. a ``val_`` metric without validation data) and `NoEligibleCheckpointError`
+        if it is never finite, instead of carrying on.
 
     The alpha schedule moves the training loss only. ``causal_loss_metric`` is fixed at alpha
     1 and has no penalties, so during the alpha warm-up it can stall, or briefly rise, while
@@ -477,28 +402,17 @@ def get_default_callbacks(
     ``half_life_epoch + 1 / steepness``, 20 epochs at the defaults). A model trained at a
     constant alpha other than 1 is still selected at alpha 1.
     """
-    callbacks = [
-        tf.keras.callbacks.EarlyStopping(
-            monitor=monitor,
-            patience=patience,
-            restore_best_weights=True,
-            mode="min",
-        ),
-        tf.keras.callbacks.ReduceLROnPlateau(
-            monitor=monitor,
-            factor=0.2,
-            patience=int(patience // 2),
-            min_lr=1e-6,
-            mode="min",
-        ),
-    ]
-
-    alpha_schedule = AlphaScheduleCallback(
+    args = checkpoint.default_callback_args(
+        monitor,
+        patience,
+        verbose=verbose,
         alpha_start=alpha_start,
         alpha_end=alpha_end,
         half_life_epoch=half_life_epoch,
         steepness=steepness,
-        verbose=verbose,
     )
-
-    return callbacks + [alpha_schedule]
+    return [
+        EarlyStopping(**args["early_stopping"]),
+        tf.keras.callbacks.ReduceLROnPlateau(mode="min", **args["reduce_lr"]),
+        AlphaScheduleCallback(**args["alpha_schedule"]),
+    ]

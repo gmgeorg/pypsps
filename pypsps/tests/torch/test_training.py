@@ -1,11 +1,14 @@
 """Tests for `pypsps.torch.training`, `metrics`, `callbacks` and `io` (no TensorFlow needed)."""
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
 import torch
 
 from ... import bootstrap, inference
+from ...core import alpha_schedule, checkpoint
 from ...torch import callbacks, families, io, losses, metrics, models, training
 
 _N = 160
@@ -401,3 +404,30 @@ def test_encode_true_keeps_torch_tensors():
     np.testing.assert_array_equal(y.numpy(), [[1, 1, 0], [2, 0, 1], [3, 1, 1]])
     with pytest.raises(ValueError, match=r"outcome has 1 column.*reads 2"):
         layout.encode_true(outcome[:, :1], treatment)
+
+
+def test_steep_schedule_does_not_overflow():
+    """A late epoch of a steep schedule is alpha_end, with no OverflowError and no warning."""
+    schedule = callbacks.AlphaScheduleCallback(
+        alpha_start=10.0, alpha_end=1.0, half_life_epoch=10, steepness=10.0, verbose=False
+    )
+    schedule.set_context(_model(), losses.CausalLoss(_model().mixture), None)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        schedule.on_epoch_begin(100)
+    assert schedule.loss.alpha == 1.0
+
+
+def test_errors_are_the_core_classes():
+    """One exception class each, defined in core and re-exported here."""
+    assert callbacks.NoEligibleCheckpointError is checkpoint.NoEligibleCheckpointError
+    assert callbacks.MidFitResumeError is alpha_schedule.MidFitResumeError
+
+
+def test_default_early_stopping_fails_fast():
+    """A missing monitor raises KeyError and a never-finite one NoEligibleCheckpointError."""
+    x, a, y = _data()
+    with pytest.raises(KeyError, match="val_loss"):
+        training.fit(
+            _model(), x, a, y, epochs=2, callbacks=callbacks.get_default_callbacks("val_loss", 2)
+        )
