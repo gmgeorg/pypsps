@@ -8,6 +8,7 @@ pytest.importorskip("torch")
 
 import torch  # noqa: E402
 
+from ...core.spec import NonPortableActivationWarning  # noqa: E402
 from ...keras import families as kf  # noqa: E402
 from ...keras import models as kmodels  # noqa: E402
 from ...keras import presets as kpresets  # noqa: E402
@@ -122,3 +123,27 @@ def test_loss_family_has_no_torch_counterpart():
     keras_model = kmodels.build_model(2, 3, family, kf.Bernoulli(), compile=False)
     with pytest.raises(NotImplementedError):
         tmodels.PSPSModel.from_keras(keras_model)
+
+
+@pytest.mark.parametrize(
+    "kwargs,field",
+    [
+        ({"predictive_state_hidden_layers": [(4, "relu"), (4, "leaky_relu")]}, "predictive_state"),
+        ({"outcome_hidden_layers": [(4, "leaky_relu")]}, "outcome_hidden_layers"),
+        ({"outcome_heads": {"loc": HeadSpec(hidden_layer=(4, "leaky_relu"))}}, "loc"),
+    ],
+)
+def test_from_keras_rejects_a_non_portable_activation_up_front(monkeypatch, kwargs, field):
+    """A Keras-only activation fails before any torch model is built, naming the field."""
+    with pytest.warns(NonPortableActivationWarning):
+        keras_model = kmodels.build_model(2, 5, kf.Normal(), kf.Bernoulli(), **kwargs)
+
+    def fail(*args, **kwargs):
+        raise AssertionError("torch build_model was called")
+
+    monkeypatch.setattr(tmodels, "build_model", fail)
+    monkeypatch.setattr(tmodels.PSPSModel, "__init__", fail)
+    with pytest.raises(ValueError, match="leaky_relu") as caught:
+        tmodels.PSPSModel.from_keras(keras_model)
+    assert field in str(caught.value)
+    assert "relu" in str(caught.value)

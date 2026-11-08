@@ -5,7 +5,13 @@ import pytest
 
 from ...core import families
 from ...core.mixture import MixtureSpec
-from ...core.spec import HeadSpec, make_spec
+from ...core.spec import (
+    HIDDEN_ACTIVATIONS,
+    HeadSpec,
+    NonPortableActivationWarning,
+    make_spec,
+    require_portable,
+)
 
 F = 4
 _NORMAL, _BERNOULLI = families.Normal(), families.Bernoulli()
@@ -84,3 +90,68 @@ def test_make_spec_accepts_a_survival_max_time_only_within_the_float32_margin():
     with pytest.raises(ValueError, match="overflow"):
         _spec(outcome_family=families.Weibull((-10.0, 5.0), (-1.0, 3.0)), **kwargs)
     _spec(outcome_family=families.Weibull((-3.0, 5.0), (-1.0, 1.0)), **kwargs)
+
+
+@pytest.mark.parametrize(
+    "kwargs,field",
+    [
+        (
+            dict(predictive_state_hidden_layers=[(4, "relu"), (4, "leaky_relu")]),
+            "predictive_state_hidden_layers[1]",
+        ),
+        (dict(outcome_hidden_layers=[(4, "leaky_relu")]), "outcome_hidden_layers[0]"),
+        (
+            dict(outcome_heads={"scale": HeadSpec(hidden_layer=(4, "leaky_relu"))}),
+            "outcome_heads['scale']",
+        ),
+    ],
+)
+def test_make_spec_rejects_a_non_portable_activation(kwargs, field):
+    """An activation outside `HIDDEN_ACTIVATIONS` is rejected, naming the field and the list."""
+    with pytest.raises(ValueError, match="leaky_relu") as caught:
+        _spec(**kwargs)
+    message = str(caught.value)
+    assert field in message
+    for name in HIDDEN_ACTIVATIONS:
+        assert repr(name) in message or name in message
+
+
+def test_every_portable_activation_is_accepted():
+    """Each name of `HIDDEN_ACTIVATIONS` passes the default check."""
+    for name in HIDDEN_ACTIVATIONS:
+        _spec(
+            predictive_state_hidden_layers=[(2, name)],
+            outcome_hidden_layers=[(2, name)],
+            outcome_heads={"loc": HeadSpec(hidden_layer=(2, name))},
+        )
+
+
+def test_a_constant_head_ignores_its_hidden_layer():
+    """A constant head has no hidden layer, so its activation is not checked."""
+    _spec(outcome_heads={"scale": HeadSpec(hidden_layer=(4, "leaky_relu"), constant=True)})
+
+
+def test_make_spec_uses_the_given_activation_check():
+    """A custom check sees every hidden activation exactly once, and replaces the default."""
+    seen = []
+    _spec(
+        predictive_state_hidden_layers=[(4, "relu"), (4, "leaky_relu")],
+        outcome_hidden_layers=[(4, "mish")],
+        outcome_heads={"loc": HeadSpec(hidden_layer=(4, "tanh")), "scale": HeadSpec(None)},
+        check_activation=lambda name, what: seen.append((name, what)),
+    )
+    names = sorted(name for name, _ in seen)
+    assert names == ["leaky_relu", "mish", "relu", "tanh"]
+    assert all(isinstance(what, str) and what for _, what in seen)
+
+
+def test_require_portable_names_what_and_the_portable_names():
+    """`require_portable` is a no-op for a portable name and a ValueError otherwise."""
+    require_portable("relu", "x")
+    with pytest.raises(ValueError, match=r"x\[2\].*'foo'"):
+        require_portable("foo", "x[2]")
+
+
+def test_the_non_portable_warning_is_a_user_warning():
+    """Users can filter `NonPortableActivationWarning` by class."""
+    assert issubclass(NonPortableActivationWarning, UserWarning)

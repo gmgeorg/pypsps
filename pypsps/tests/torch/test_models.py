@@ -115,16 +115,20 @@ def test_invalid_arguments_raise_before_any_layer_is_built(monkeypatch):
             )
 
 
-def test_unknown_activation_in_a_hidden_layer_raises():
-    """An unknown activation name is rejected (while the layer is built, for now)."""
-    with pytest.raises(ValueError, match="nope"):
-        models.build_model(
-            2,
-            5,
-            families.Normal(),
-            families.Bernoulli(),
-            predictive_state_hidden_layers=[(8, "nope")],
-        )
+def test_unknown_activation_raises_before_any_layer(monkeypatch):
+    """An unknown activation name is rejected in the argument check, before any layer exists."""
+
+    def fail(*args, **kwargs):
+        raise AssertionError("a layer was created")
+
+    monkeypatch.setattr(layers.Dense, "__init__", fail)
+    for kwargs in (
+        {"predictive_state_hidden_layers": [(4, "leaky_relu")]},
+        {"outcome_hidden_layers": [(4, "leaky_relu")]},
+        {"outcome_heads": {"loc": HeadSpec(hidden_layer=(4, "leaky_relu"))}},
+    ):
+        with pytest.raises(ValueError, match="leaky_relu"):
+            models.build_model(2, 5, families.Normal(), families.Bernoulli(), **kwargs)
 
 
 def test_unknown_activation_names_the_known_ones():

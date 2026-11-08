@@ -1,6 +1,7 @@
 """Tests for `models.build_model`, `models.compile_model` and `models.default_metrics`."""
 
 import functools
+import warnings
 
 import numpy as np
 import pypress.keras.regularizers
@@ -8,6 +9,7 @@ import pytest
 import tensorflow as tf
 
 from ... import inference
+from ...core.spec import NonPortableActivationWarning
 from ...keras import callbacks, families, layers, losses, mixture, models, presets
 from ...keras.layout import ColumnLayout
 
@@ -385,6 +387,42 @@ def test_build_model_validates_arguments(kwargs, error, match):
     before = tf.keras.backend.get_uid("dense")
     with pytest.raises(error, match=match):
         models.build_model(**args)
+    assert tf.keras.backend.get_uid("dense") == before + 1  # no layer was created
+
+
+def test_keras_only_activation_warns():
+    """A Keras activation without a PyTorch counterpart warns, once per name; the model trains."""
+    args = dict(n_states=2, n_features=F, outcome_family=_NORMAL, treatment_family=_BERNOULLI)
+    with pytest.warns(NonPortableActivationWarning, match="from_keras") as record:
+        model = models.build_model(
+            **args,
+            predictive_state_hidden_layers=[(4, "leaky_relu"), (4, "leaky_relu")],
+            outcome_hidden_layers=[(4, "relu")],
+        )
+    assert len(record) == 1
+    assert "leaky_relu" in str(record[0].message)
+    inputs, y_true = _data("bernoulli", "normal", n=32)
+    assert np.isfinite(model.fit(inputs, y_true, epochs=1, verbose=0).history["loss"][0])
+
+
+def test_portable_activations_do_not_warn():
+    """The names both backends build alike emit no warning."""
+    args = dict(n_states=2, n_features=F, outcome_family=_NORMAL, treatment_family=_BERNOULLI)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", NonPortableActivationWarning)
+        models.build_model(
+            **args,
+            predictive_state_hidden_layers=[(4, "relu"), (4, "swish")],
+            outcome_hidden_layers=[(4, "selu")],
+        )
+
+
+def test_unknown_keras_activation_raises_before_any_layer():
+    """A name Keras does not know fails in the argument check, before any layer is created."""
+    args = dict(n_states=2, n_features=F, outcome_family=_NORMAL, treatment_family=_BERNOULLI)
+    before = tf.keras.backend.get_uid("dense")
+    with pytest.raises(ValueError, match="foo"):
+        models.build_model(**args, outcome_hidden_layers=[(4, "foo")])
     assert tf.keras.backend.get_uid("dense") == before + 1  # no layer was created
 
 

@@ -6,7 +6,7 @@ PyTorch.
 """
 
 import dataclasses
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Literal
 
 import numpy as np
@@ -17,6 +17,42 @@ from .mixture import MixtureSpec
 Architecture = Literal["shared_trunk", "gated"]
 HiddenLayers = Sequence[tuple[int, str]]  # (units, activation) per Dense layer
 ARCHITECTURES = ("shared_trunk", "gated")
+
+# The hidden-layer activations both backends build alike (same function, same name). A model
+# that uses any other activation can't be converted between backends.
+HIDDEN_ACTIVATIONS = (
+    "elu",
+    "gelu",
+    "linear",
+    "relu",
+    "selu",
+    "sigmoid",
+    "silu",
+    "softplus",
+    "swish",
+    "tanh",
+)
+
+
+class NonPortableActivationWarning(UserWarning):
+    """A Keras-only activation: the model can't be converted to PyTorch."""
+
+
+def require_portable(name: str, what: str) -> None:
+    """Raises ValueError unless ``name`` is one of `HIDDEN_ACTIVATIONS`.
+
+    Args:
+      name: the activation name.
+      what: the argument it came from, e.g. ``"predictive_state_hidden_layers[0]"``.
+    """
+    if name not in HIDDEN_ACTIVATIONS:
+        raise ValueError(
+            f"{what}: unknown activation {name!r}; the activations both backends build alike "
+            f"are {list(HIDDEN_ACTIVATIONS)}"
+        )
+
+
+ActivationCheck = Callable[[str, str], None]
 
 
 def check_hidden_layer(entry: Any, what: str) -> tuple[int, str]:
@@ -150,8 +186,15 @@ def make_spec(
     outcome_init: Mapping[str, float] | None,
     treatment_init: Mapping[str, Any] | None,
     max_time: float | None,
+    *,
+    check_activation: ActivationCheck = require_portable,
 ) -> Spec:
-    """Validates every `build_model` argument before any layer is created."""
+    """Validates every `build_model` argument before any layer is created.
+
+    ``check_activation(name, what)`` is called once for every hidden-layer activation (the
+    state network, the outcome trunk and each non-constant `HeadSpec`); it raises to reject a
+    name. The default accepts `HIDDEN_ACTIVATIONS` only.
+    """
     n_states = positive_int(n_states, "n_states")
     n_features = positive_int(n_features, "n_features")
     if architecture not in ARCHITECTURES:
@@ -187,16 +230,28 @@ def make_spec(
     if l1 < 0:
         raise ValueError(f"l1 must be >= 0, got {l1!r}")
 
+    state_layers = check_hidden_layers(
+        predictive_state_hidden_layers, "predictive_state_hidden_layers"
+    )
+    outcome_layers = check_hidden_layers(outcome_hidden_layers, "outcome_hidden_layers")
+    for field, entries in (
+        ("predictive_state_hidden_layers", state_layers),
+        ("outcome_hidden_layers", outcome_layers),
+    ):
+        for i, (_, activation) in enumerate(entries):
+            check_activation(activation, f"{field}[{i}]")
+    for name, head in heads.items():
+        if head.hidden_layer is not None and not head.constant:
+            check_activation(head.hidden_layer[1], f"outcome_heads[{name!r}].hidden_layer")
+
     return Spec(
         mixture=mixture,
         n_features=n_features,
         outcome_params=tuple(outcome_params),
         treatment_init=treatment_init_array(treatment_family, treatment_init, n_states),
         architecture=architecture,
-        predictive_state_hidden_layers=check_hidden_layers(
-            predictive_state_hidden_layers, "predictive_state_hidden_layers"
-        ),
-        outcome_hidden_layers=check_hidden_layers(outcome_hidden_layers, "outcome_hidden_layers"),
+        predictive_state_hidden_layers=state_layers,
+        outcome_hidden_layers=outcome_layers,
         heads=heads,
         treatment_embedding_units=treatment_embedding_units,
         dropout_rate=float(dropout_rate),

@@ -33,8 +33,9 @@ _ACTIVATIONS = {
 def activation(name: str) -> nn.Module:
     """The activation module called ``name``.
 
-    One of ``linear``, ``relu``, ``selu``, ``elu``, ``gelu``, ``tanh``, ``swish`` (``silu``),
-    ``softplus`` and ``sigmoid``.
+    One of `pypsps.core.spec.HIDDEN_ACTIVATIONS`: ``linear``, ``relu``, ``selu``, ``elu``,
+    ``gelu``, ``tanh``, ``swish`` (``silu``), ``softplus`` and ``sigmoid``. ``build_model``
+    checks the names before it creates any layer.
 
     Raises:
       ValueError: for any other name.

@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Tuple
 import numpy as np
 import torch
 
-from ..core.spec import HeadSpec
+from ..core.spec import HeadSpec, require_portable
 from . import families as torch_families
 from . import mixture as torch_mixture
 from . import models
@@ -148,9 +148,26 @@ def _copy_bn(layer: Any, module: torch.nn.BatchNorm1d) -> None:
     module.running_var.copy_(torch.as_tensor(var))
 
 
+def _require_portable_args(args: Dict[str, Any]) -> None:
+    """Raises ValueError for a hidden-layer activation PyTorch can't build, naming the field."""
+    for field in ("predictive_state_hidden_layers", "outcome_hidden_layers"):
+        for i, (_, activation) in enumerate(args[field]):
+            require_portable(activation, f"{field}[{i}]")
+    for name, head in args["outcome_heads"].items():
+        if head.hidden_layer is not None and not head.constant:
+            require_portable(head.hidden_layer[1], f"outcome_heads[{name!r}].hidden_layer")
+
+
 def from_keras(keras_model: Any) -> "models.PSPSModel":
-    """A `PSPSModel` with the architecture and weights of ``keras_model``, in eval mode."""
-    model = models.build_model(**infer_build_args(keras_model))
+    """A `PSPSModel` with the architecture and weights of ``keras_model``, in eval mode.
+
+    Raises:
+      ValueError: before anything is built, if a hidden layer uses an activation that is not
+        in `pypsps.core.spec.HIDDEN_ACTIVATIONS`.
+    """
+    args = infer_build_args(keras_model)
+    _require_portable_args(args)
+    model = models.build_model(**args)
     for layer in keras_model.layers:
         name, kind = layer.name, type(layer).__name__
         weights = layer.get_weights()

@@ -395,7 +395,9 @@ class PSPSModel(nn.Module):
         Raises:
           NotImplementedError: for a model with a `LossFamily` (a callable has no PyTorch
             counterpart).
-          ValueError: if the model is not one `pypsps.keras.models.build_model` makes.
+          ValueError: if the model is not one `pypsps.keras.models.build_model` makes, or (before
+            anything is built) if a hidden layer uses an activation outside
+            `pypsps.core.spec.HIDDEN_ACTIVATIONS`.
         """
         from . import convert  # lazy: needs TensorFlow only when converting
 
