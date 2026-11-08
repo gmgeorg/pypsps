@@ -67,3 +67,17 @@ def test_config_round_trip_through_keras(n_states):
     config = tf.keras.utils.serialize_keras_object(layout)
     assert config["config"]["outcome_params"] == ["log_scale", "log_shape"]
     assert tf.keras.utils.deserialize_keras_object(config) == layout
+
+
+def test_encode_true_keeps_tensors():
+    """A TensorFlow outcome and treatment give a tensor y_true in the same column order."""
+    layout = ColumnLayout(("log_scale", "log_shape"), ("prob",), 2, n_states=2)
+    outcome = tf.constant([[1.0, 1.0], [2.0, 0.0]])
+    treatment = tf.constant([0.0, 1.0])
+
+    y = layout.encode_true(outcome, treatment)
+
+    assert isinstance(y, tf.Tensor) and tuple(y.shape) == (2, 3)
+    np.testing.assert_array_equal(y.numpy(), [[1, 1, 0], [2, 0, 1]])
+    with pytest.raises(ValueError, match="outcome has 1 column"):
+        layout.encode_true(outcome[:, :1], treatment)

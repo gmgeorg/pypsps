@@ -3,6 +3,7 @@
 import itertools
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from ...core import families
@@ -122,3 +123,83 @@ def test_config_round_trip(n_states):
     config = layout.get_config()
     assert config["outcome_params"] == ["log_scale", "log_shape"]
     assert ColumnLayout.from_config(config) == layout
+
+
+# --- encode_true ---
+
+
+@pytest.mark.parametrize("n_true", [1, 2])
+@pytest.mark.parametrize("treatment_shape", ["flat", "column"])
+def test_encode_true_stacks_outcome_then_treatment(n_true, treatment_shape):
+    """y_true is the outcome columns, then the one treatment column, in that order."""
+    layout = ColumnLayout(("loc", "scale"), ("prob",), n_true, n_states=2)
+    outcome = np.arange(5 * n_true, dtype="float64").reshape(5, n_true) + 10
+    if n_true == 1:
+        outcome = outcome[:, 0]  # [N] is accepted when C == 1
+    treatment = np.array([0.0, 1.0, 1.0, 0.0, 1.0])
+    if treatment_shape == "column":
+        treatment = treatment[:, None]
+
+    y = layout.encode_true(outcome, treatment)
+
+    assert isinstance(y, np.ndarray) and y.shape == (5, n_true + 1)
+    np.testing.assert_array_equal(y[:, :n_true], np.reshape(outcome, (5, n_true)))
+    np.testing.assert_array_equal(y[:, n_true], [0.0, 1.0, 1.0, 0.0, 1.0])
+
+
+@pytest.mark.parametrize("n_true", [1, 2])
+def test_encode_true_round_trips_decode_true(n_true):
+    """decode_true(encode_true(o, t)) gives back (o, t)."""
+    layout = ColumnLayout(("loc", "scale"), ("prob",), n_true, n_states=3)
+    rng = np.random.RandomState(0)
+    outcome, treatment = rng.normal(size=(6, n_true)), rng.randint(0, 2, (6, 1)).astype(float)
+
+    parts = layout.decode_true(layout.encode_true(outcome, treatment))
+
+    np.testing.assert_array_equal(parts.outcome, outcome)
+    np.testing.assert_array_equal(parts.treatment, treatment)
+
+
+def test_encode_true_rejects_the_wrong_outcome_width():
+    """The family fixes the outcome width: too few and too many columns both raise.
+
+    Two columns for a Normal outcome is survival data ``[time, event]`` read as ``[outcome,
+    treatment]``; ``decode_true`` alone would train on it silently.
+    """
+    weibull = ColumnLayout.from_families(2, families.Weibull(), families.Bernoulli())
+    with pytest.raises(ValueError, match=r"outcome has 1 column.*reads 2"):
+        weibull.encode_true(np.zeros((4, 1)), np.zeros(4))
+    with pytest.raises(ValueError, match="outcome has 1 column"):
+        weibull.encode_true(np.zeros(4), np.zeros(4))
+
+    normal = ColumnLayout.from_families(2, families.Normal(), families.Bernoulli())
+    with pytest.raises(ValueError, match=r"outcome has 2 column.*reads 1"):
+        normal.encode_true(np.zeros((4, 2)), np.zeros(4))
+    with pytest.raises(ValueError, match="outcome must be"):
+        normal.encode_true(np.zeros((4, 1, 1)), np.zeros(4))
+
+
+def test_encode_true_rejects_a_wide_treatment_or_mismatched_rows():
+    """The treatment is one column and has one row per outcome row."""
+    layout = ColumnLayout.from_families(2, families.Normal(), families.Bernoulli())
+    with pytest.raises(ValueError, match="treatment has 2 column"):
+        layout.encode_true(np.zeros(4), np.zeros((4, 2)))
+    with pytest.raises(ValueError, match="treatment must be"):
+        layout.encode_true(np.zeros(4), np.zeros((4, 1, 1)))
+    with pytest.raises(ValueError, match=r"outcome has 4 rows but treatment has 3"):
+        layout.encode_true(np.zeros(4), np.zeros(3))
+
+
+def test_encode_true_accepts_pandas():
+    """A DataFrame outcome and a Series treatment give a NumPy y_true."""
+    layout = ColumnLayout.from_families(2, families.Weibull(), families.Bernoulli())
+    outcome = pd.DataFrame({"time": [1.0, 2.0, 3.0], "event": [1.0, 0.0, 1.0]}, index=[7, 8, 9])
+    treatment = pd.Series([0, 1, 1], index=[7, 8, 9], name="a")
+
+    y = layout.encode_true(outcome, treatment)
+
+    assert isinstance(y, np.ndarray)
+    np.testing.assert_array_equal(y, [[1.0, 1.0, 0.0], [2.0, 0.0, 1.0], [3.0, 1.0, 1.0]])
+    one_column = pd.DataFrame({"y": [1.0, 2.0, 3.0]})
+    normal = ColumnLayout.from_families(2, families.Normal(), families.Bernoulli())
+    assert normal.encode_true(one_column, treatment.to_frame()).shape == (3, 2)

@@ -5,6 +5,22 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.6.2 - Nov 7, 2026
+
+### Added
+
+* `ColumnLayout.encode_true(outcome, treatment)`, the inverse of `decode_true`. It checks
+  that the outcome has exactly the family's number of columns, so a Normal model is no
+  longer trained silently on `[time, event]` survival data with the event read as the
+  treatment. The PyTorch `training.fit` and `training.evaluate` build `y_true` with it.
+* `CausalDataset.to_keras_inputs_outputs(layout=...)` checks the outcome width when given a
+  layout (`model.mixture.layout`). `utils.prepare_keras_inputs_outputs` takes the same
+  optional `layout=`. Without a layout, both return what they did before.
+
+### Changed
+
+* The framework-free tests live in `pypsps/tests/core` and run in every CI job.
+
 ## pypsps v0.6.1 - Nov 7, 2026
 
 ### Added
