@@ -15,7 +15,6 @@ or ``{param}_trunk_dense_0``, ``{param}_hidden_state_0``, ``{param}_raw_state_0`
 from collections.abc import Mapping, Sequence
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-import numpy as np
 import torch
 from pypress.torch import layers as pr_layers
 from torch import nn
@@ -321,67 +320,17 @@ class PSPSModel(nn.Module):
     # --- configuration ---
 
     def get_config(self) -> dict:
-        """The build arguments as JSON-friendly values; `from_config` inverts it."""
-        spec = self.spec
-        return {
-            "n_features": spec.n_features,
-            "mixture": spec.mixture.get_config(),
-            "architecture": spec.architecture,
-            "predictive_state_hidden_layers": [
-                list(h) for h in spec.predictive_state_hidden_layers
-            ],
-            "outcome_hidden_layers": [list(h) for h in spec.outcome_hidden_layers],
-            "outcome_heads": {
-                name: {
-                    "hidden_layer": None if h.hidden_layer is None else list(h.hidden_layer),
-                    "constant": h.constant,
-                    "per_state": h.per_state,
-                }
-                for name, h in spec.heads.items()
-            },
-            "treatment_embedding_units": spec.treatment_embedding_units,
-            "dropout_rate": spec.dropout_rate,
-            "l1": spec.l1,
-            "outcome_init": {p.name: p.init for p in spec.outcome_params if p.init is not None},
-            "treatment_init": (
-                None if spec.treatment_init is None else np.asarray(spec.treatment_init).tolist()
-            ),
-        }
+        """The build arguments as JSON-friendly values; `from_config` inverts it.
+
+        It is the mixture config plus `pypsps.core.spec.Spec.get_config`.
+        """
+        return {"mixture": self.mixture.get_config(), **self.spec.get_config()}
 
     @classmethod
     def from_config(cls, config: dict) -> "PSPSModel":
         """Rebuilds an untrained model (fresh weights) from `get_config`."""
         mixture = mixture_lib.StateMixture.from_config(config["mixture"])
-        treatment_init = config.get("treatment_init")
-        treatment_family = mixture.treatment_family
-        return build_model(
-            mixture.n_states,
-            config["n_features"],
-            mixture.outcome_family,
-            treatment_family,
-            architecture=config["architecture"],
-            predictive_state_hidden_layers=[
-                tuple(h) for h in config["predictive_state_hidden_layers"]
-            ],
-            outcome_hidden_layers=[tuple(h) for h in config["outcome_hidden_layers"]],
-            outcome_heads={
-                name: HeadSpec(
-                    hidden_layer=None if h["hidden_layer"] is None else tuple(h["hidden_layer"]),
-                    constant=h["constant"],
-                    per_state=h["per_state"],
-                )
-                for name, h in config["outcome_heads"].items()
-            },
-            treatment_embedding_units=config["treatment_embedding_units"],
-            dropout_rate=config["dropout_rate"],
-            l1=config["l1"],
-            outcome_init=config.get("outcome_init") or None,
-            treatment_init=(
-                None
-                if treatment_init is None
-                else dict(zip(treatment_family.param_names, treatment_init))
-            ),
-        )
+        return cls(core_spec.Spec.from_config(config, mixture))
 
     @classmethod
     def from_keras(cls, keras_model: Any) -> "PSPSModel":
@@ -395,7 +344,9 @@ class PSPSModel(nn.Module):
         Raises:
           NotImplementedError: for a model with a `LossFamily` (a callable has no PyTorch
             counterpart).
-          ValueError: if the model is not one `pypsps.keras.models.build_model` makes.
+          ValueError: if the model is not one `pypsps.keras.models.build_model` makes, or (before
+            anything is built) if a hidden layer uses an activation outside
+            `pypsps.core.spec.HIDDEN_ACTIVATIONS`.
         """
         from . import convert  # lazy: needs TensorFlow only when converting
 

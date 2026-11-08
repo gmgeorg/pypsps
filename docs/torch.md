@@ -81,11 +81,16 @@ off). To use another optimizer, pass `optimizer=` (not together with `learning_r
 
 ## Converting a Keras model
 
-`PSPSModel.from_keras(keras_model)` rebuilds the architecture from the Keras layer names
-and copies every weight (including batch-normalization statistics). In eval mode the copy
-predicts the same `y_pred` up to float32 rounding, which is how the cross-backend tests check
-the two implementations against each other. A model with a `LossFamily` has no PyTorch
-counterpart (a Keras loss cannot be converted) and raises `NotImplementedError`.
+`PSPSModel.from_keras(keras_model)` builds the architecture from the `Spec` the Keras model
+carries on its output layer (`pypsps.keras.models.spec_of`) and copies every weight
+(including batch-normalization statistics) by layer name. A model saved before v0.6.3 carries
+no Spec; its architecture is then read from the layer names. Only the activations in
+`pypsps.core.spec.HIDDEN_ACTIVATIONS` convert: a Keras model with another one (say
+`leaky_relu`) raises a `ValueError` naming the build argument before anything is built. In
+eval mode the copy predicts the same `y_pred` up to float32 rounding, which is how the
+cross-backend tests check the two implementations against each other. A model with a
+`LossFamily` has no PyTorch counterpart (a Keras loss cannot be converted) and raises
+`NotImplementedError`.
 
 ```python
 from pypsps.torch import models
@@ -95,7 +100,8 @@ torch_model = models.PSPSModel.from_keras(trained_keras_model)
 
 ## Saving and loading
 
-`io.save(model, path)` writes the build arguments and the `state_dict`; `io.load(path)`
+`io.save(model, path)` writes the build arguments (the mixture and `Spec.get_config`, including
+`max_time`) and the `state_dict`; `io.load(path)`
 rebuilds the model and returns it in eval mode. The file is read with
 `torch.load(weights_only=True)`, so it holds no pickled code. A model with a `LossFamily`
 cannot be saved (it wraps a callable). Save the optimizer state yourself if you want to resume

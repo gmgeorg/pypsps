@@ -115,16 +115,20 @@ def test_invalid_arguments_raise_before_any_layer_is_built(monkeypatch):
             )
 
 
-def test_unknown_activation_in_a_hidden_layer_raises():
-    """An unknown activation name is rejected (while the layer is built, for now)."""
-    with pytest.raises(ValueError, match="nope"):
-        models.build_model(
-            2,
-            5,
-            families.Normal(),
-            families.Bernoulli(),
-            predictive_state_hidden_layers=[(8, "nope")],
-        )
+def test_unknown_activation_raises_before_any_layer(monkeypatch):
+    """An unknown activation name is rejected in the argument check, before any layer exists."""
+
+    def fail(*args, **kwargs):
+        raise AssertionError("a layer was created")
+
+    monkeypatch.setattr(layers.Dense, "__init__", fail)
+    for kwargs in (
+        {"predictive_state_hidden_layers": [(4, "leaky_relu")]},
+        {"outcome_hidden_layers": [(4, "leaky_relu")]},
+        {"outcome_heads": {"loc": HeadSpec(hidden_layer=(4, "leaky_relu"))}},
+    ):
+        with pytest.raises(ValueError, match="leaky_relu"):
+            models.build_model(2, 5, families.Normal(), families.Bernoulli(), **kwargs)
 
 
 def test_unknown_activation_names_the_known_ones():
@@ -195,6 +199,18 @@ def test_config_round_trip():
     rebuilt = models.PSPSModel.from_config(model.get_config())
     assert rebuilt.get_config() == model.get_config()
     assert [k for k in rebuilt.state_dict()] == [k for k in model.state_dict()]
+
+
+def test_get_config_is_the_mixture_plus_the_spec_config():
+    """The model config is the Spec config and the mixture, and keeps ``max_time``."""
+    weibull = families.Weibull(log_scale_bounds=(-2.0, 4.0), log_shape_bounds=(-1.0, 1.0))
+    model = models.build_model(2, 5, weibull, families.Bernoulli(), max_time=50.0)
+    config = model.get_config()
+    assert config == {"mixture": model.mixture.get_config(), **model.spec.get_config()}
+    assert config["max_time"] == 50.0
+    rebuilt = models.PSPSModel.from_config(config)
+    assert rebuilt.spec.max_time == 50.0
+    assert rebuilt.get_config() == config
 
 
 @pytest.mark.parametrize(

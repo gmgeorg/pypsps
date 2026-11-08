@@ -5,6 +5,31 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.6.3 - Nov 7, 2026
+
+### Added
+
+* `pypsps.core.spec.HIDDEN_ACTIVATIONS`: the hidden-layer activation names both backends
+  build alike. `build_model` checks the activations before any layer is created.
+* `core.spec.Spec.get_config` / `Spec.from_config`, and `Spec.max_time`. A Keras model now
+  carries its Spec on `CausalOutput` (`pypsps.keras.models.spec_of(model)`), and a PyTorch
+  model saves it, `max_time` included.
+* `core.spec.NonPortableActivationWarning`.
+
+### Changed
+
+* Keras `build_model` warns (`NonPortableActivationWarning`, once per name) for a Keras
+  activation that `pypsps.torch` can't build; the model still builds and trains. A name
+  Keras does not know now raises before any layer is created.
+* PyTorch `build_model` rejects an unknown activation in the argument check, not while
+  creating layers.
+* `PSPSModel.from_keras` reads the carried Spec instead of inferring it from layer names
+  (models saved before 0.6.3 still convert by layer name), and rejects a non-portable
+  activation before building anything, naming the field.
+* A `.keras` file saved by 0.6.3 has a `spec` entry on its `CausalOutput` layer, which
+  pypsps 0.6.2 and earlier reject as an unknown argument when loading. Saving with 0.6.3 and
+  loading with an older pypsps is not supported.
+
 ## pypsps v0.6.2 - Nov 7, 2026
 
 ### Added

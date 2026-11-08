@@ -1,7 +1,9 @@
 """Copy a trained `pypsps.keras` model into a `pypsps.torch.models.PSPSModel`.
 
-The build arguments are inferred from the Keras model's layer names and configs, which
-`pypsps.keras.models.build_model` fixes; every weight is then copied by layer name:
+The build arguments are read from the `pypsps.core.spec.Spec` the Keras model carries on its
+`CausalOutput` layer (v0.6.3 and later). A model saved before that has no Spec; its build
+arguments are then inferred from the layer names and configs, which
+`pypsps.keras.models.build_model` fixes. Every weight is copied by layer name:
 
 * dense kernels are transposed (Keras ``[in, out]``, torch ``[out, in]``);
 * batch normalization maps ``gamma, beta, moving_mean, moving_variance`` to
@@ -18,7 +20,7 @@ from typing import Any, Dict, List, Tuple
 import numpy as np
 import torch
 
-from ..core.spec import HeadSpec
+from ..core.spec import HeadSpec, Spec
 from . import families as torch_families
 from . import mixture as torch_mixture
 from . import models
@@ -148,9 +150,12 @@ def _copy_bn(layer: Any, module: torch.nn.BatchNorm1d) -> None:
     module.running_var.copy_(torch.as_tensor(var))
 
 
-def from_keras(keras_model: Any) -> "models.PSPSModel":
-    """A `PSPSModel` with the architecture and weights of ``keras_model``, in eval mode."""
-    model = models.build_model(**infer_build_args(keras_model))
+def _copy_weights(keras_model: Any, model: "models.PSPSModel") -> None:
+    """Copies every weight of ``keras_model`` into ``model`` by layer name.
+
+    ``model`` must have the architecture of ``keras_model`` (as `from_keras` builds it, or
+    `pypsps.torch.models.build_model` with the same arguments).
+    """
     for layer in keras_model.layers:
         name, kind = layer.name, type(layer).__name__
         weights = layer.get_weights()
@@ -171,4 +176,25 @@ def from_keras(keras_model: Any) -> "models.PSPSModel":
             )
         else:
             raise ValueError(f"cannot copy the weights of layer {name!r} ({kind})")
+
+
+def from_keras(keras_model: Any) -> "models.PSPSModel":
+    """A `PSPSModel` with the architecture and weights of ``keras_model``, in eval mode.
+
+    The architecture is the model's carried `Spec`; a model without one (saved before v0.6.3)
+    is read from its layer names (`infer_build_args`).
+
+    Raises:
+      NotImplementedError: for a model with a `LossFamily`.
+      ValueError: before anything is built, if a hidden layer uses an activation that is not
+        in `pypsps.core.spec.HIDDEN_ACTIVATIONS`.
+    """
+    from ..keras.models import spec_of
+
+    carried = spec_of(keras_model)
+    if carried is None:
+        model = models.build_model(**infer_build_args(keras_model))
+    else:
+        model = models.PSPSModel(Spec.from_config(carried.get_config(), _mixture(keras_model)))
+    _copy_weights(keras_model, model)
     return model.eval()

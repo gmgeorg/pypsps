@@ -1,6 +1,7 @@
 """Model builders for pypsps: `build_model` and `compile_model`."""
 
 import inspect
+import warnings
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -67,9 +68,55 @@ _check_keys = core_spec.check_keys
 _treatment_init = core_spec.treatment_init_array
 
 
+def _keras_activation_check() -> core_spec.ActivationCheck:
+    """The `make_spec` activation check of this backend, for one build.
+
+    A portable name passes. Any other name must be one Keras knows (``ValueError`` otherwise);
+    it then warns once per name that the model can't be converted to PyTorch.
+    """
+    warned: set[str] = set()
+
+    def check(name: str, what: str) -> None:
+        if name in core_spec.HIDDEN_ACTIVATIONS:
+            return
+        try:
+            tfk.activations.get(name)
+        except (ValueError, TypeError) as error:
+            raise ValueError(f"{what}: unknown Keras activation {name!r}") from error
+        if name not in warned:
+            warned.add(name)
+            warnings.warn(
+                f"{what}: activation {name!r} has no PyTorch counterpart; this model can't be "
+                f"converted with PSPSModel.from_keras (portable activations: "
+                f"{list(core_spec.HIDDEN_ACTIVATIONS)})",
+                core_spec.NonPortableActivationWarning,
+                stacklevel=5,
+            )
+
+    return check
+
+
 def _make_spec(*args: Any, **kwargs: Any) -> _Spec:
-    """`pypsps.core.spec.make_spec` with the Keras state mixture."""
+    """`pypsps.core.spec.make_spec` with the Keras state mixture and activation check."""
+    kwargs.setdefault("check_activation", _keras_activation_check())
     return core_spec.make_spec(mixture_lib.StateMixture, *args, **kwargs)
+
+
+def spec_of(model: tf.keras.Model) -> _Spec | None:
+    """The `pypsps.core.spec.Spec` a model was built from, or None.
+
+    `build_model` stores the Spec config on the model's `layers.CausalOutput`, so the Spec
+    survives ``save`` and ``load_model`` (also with ``compile=False``). The activations were
+    checked when the model was built, so a Keras-only one does not warn here. Models saved
+    before v0.6.3, and networks without a `CausalOutput`, have no Spec and give None.
+    """
+    for layer in model.layers:
+        if isinstance(layer, layers.CausalOutput):
+            config = layer.spec_config
+            if config is None:
+                return None
+            return _Spec.from_config(config, layer.mixture, lambda name, what: None)
+    return None
 
 
 def _treatment_head(spec: _Spec, state_weights: tf.Tensor) -> tf.Tensor:
@@ -211,7 +258,7 @@ def _assemble(spec: _Spec) -> tf.keras.Model:
         name: tfk.layers.Concatenate(name=f"{name}_all_states")(values)
         for name, values in columns.items()
     }
-    output = layers.CausalOutput(spec.mixture, name="output_tensor")(
+    output = layers.CausalOutput(spec.mixture, spec=spec.get_config(), name="output_tensor")(
         {"outcome": outcome, "state_weights": state_weights, "treatment": treatment_params}
     )
     return tfk.models.Model(inputs=[features, treatment], outputs=output)

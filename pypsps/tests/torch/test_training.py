@@ -266,6 +266,36 @@ def test_save_and_load_round_trip(tmp_path):
         io.load(tmp_path / "other.pt")
 
 
+def test_load_reads_a_version_1_file_without_max_time(tmp_path):
+    """A file written before the Spec carried ``max_time`` (no such key) still loads."""
+    x, a, y = _data()
+    model = _model()
+    training.fit(model, x, a, y, epochs=1, seed=0)
+    config = model.get_config()
+    del config["max_time"]
+    path = tmp_path / "old.pt"
+    torch.save(
+        {
+            "format": "pypsps-torch",
+            "version": 1,
+            "config": config,
+            "state_dict": model.state_dict(),
+        },
+        path,
+    )
+    loaded = io.load(path)
+    assert loaded.spec.max_time is None
+    np.testing.assert_array_equal(training.predict(model, x, a), training.predict(loaded, x, a))
+
+
+def test_save_and_load_keeps_max_time(tmp_path):
+    """``max_time`` survives ``io.save`` and ``io.load``."""
+    weibull = families.Weibull(log_scale_bounds=(-2.0, 4.0), log_shape_bounds=(-1.0, 1.0))
+    model = models.build_model(2, 4, weibull, families.Bernoulli(), max_time=50.0)
+    io.save(model, tmp_path / "weibull.pt")
+    assert io.load(tmp_path / "weibull.pt").spec.max_time == 50.0
+
+
 def test_inference_and_bootstrap_run_on_a_torch_model():
     """The shared inference code accepts a PyTorch model and pandas inputs."""
     x, a, y = _data()

@@ -1,5 +1,6 @@
 """Module for models & layers for pypsps."""
 
+import json
 from typing import Any, Optional, Union
 
 import numpy as np
@@ -147,25 +148,40 @@ class CausalOutput(tf.keras.layers.Layer):
     state weights | treatment params]`` (see `pypsps.keras.layout.ColumnLayout.encode`). It has
     no weights. It carries the model's `pypsps.keras.mixture.StateMixture` in its config, so a
     model loaded with ``compile=False`` still knows its families and layout, and
-    `pypsps.inference` runs on it (`StateMixture.from_model`).
+    `pypsps.inference` runs on it (`StateMixture.from_model`). It also carries the build
+    arguments (`pypsps.core.spec.Spec.get_config`; `pypsps.keras.models.spec_of` reads them).
 
     Call it on a dict ``{"outcome": ..., "state_weights": [N, K], "treatment": ...}``, where
     the outcome and treatment entries are ``{param name: [N, K]}`` or a whole parameter block.
     """
 
-    def __init__(self, mixture: Any, **kwargs: Any):
-        """Stores the `StateMixture` (or its serialized config)."""
+    def __init__(self, mixture: Any, spec: dict | None = None, **kwargs: Any):
+        """Stores the `StateMixture` (or its serialized config) and the optional Spec config.
+
+        Args:
+          mixture: the model's `StateMixture`, or its serialized config.
+          spec: optional `pypsps.core.spec.Spec.get_config` of the model's build arguments
+            (JSON values); `pypsps.keras.models.build_model` sets it. Models built before
+            v0.6.3 have none.
+        """
         super().__init__(**kwargs)
         if isinstance(mixture, dict):
             mixture = tf.keras.utils.deserialize_keras_object(mixture)
         if mixture.n_states is None:
             raise ValueError("CausalOutput needs a StateMixture with n_states set")
         self._mixture = mixture
+        # Kept as JSON text so Keras does not track it as a layer attribute.
+        self._spec_json = None if spec is None else json.dumps(spec)
 
     @property
     def mixture(self) -> Any:
         """The model's `pypsps.keras.mixture.StateMixture`."""
         return self._mixture
+
+    @property
+    def spec_config(self) -> dict | None:
+        """The `pypsps.core.spec.Spec.get_config` this layer carries, or None (older models)."""
+        return None if self._spec_json is None else json.loads(self._spec_json)
 
     def call(self, inputs: dict):
         """Returns ``y_pred``, the encoded heads."""
@@ -179,7 +195,9 @@ class CausalOutput(tf.keras.layers.Layer):
         return (batch, self._mixture.layout.y_pred_width())
 
     def get_config(self):
-        """Returns the layer config, including the serialized mixture."""
+        """Returns the layer config, including the serialized mixture and, if set, the Spec."""
         config = super().get_config()
         config.update({"mixture": tf.keras.utils.serialize_keras_object(self._mixture)})
+        if self._spec_json is not None:
+            config["spec"] = self.spec_config
         return config

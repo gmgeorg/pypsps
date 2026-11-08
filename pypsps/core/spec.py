@@ -6,7 +6,7 @@ PyTorch.
 """
 
 import dataclasses
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Literal
 
 import numpy as np
@@ -17,6 +17,42 @@ from .mixture import MixtureSpec
 Architecture = Literal["shared_trunk", "gated"]
 HiddenLayers = Sequence[tuple[int, str]]  # (units, activation) per Dense layer
 ARCHITECTURES = ("shared_trunk", "gated")
+
+# The hidden-layer activations both backends build alike (same function, same name). A model
+# that uses any other activation can't be converted between backends.
+HIDDEN_ACTIVATIONS = (
+    "elu",
+    "gelu",
+    "linear",
+    "relu",
+    "selu",
+    "sigmoid",
+    "silu",
+    "softplus",
+    "swish",
+    "tanh",
+)
+
+
+class NonPortableActivationWarning(UserWarning):
+    """A Keras-only activation: the model can't be converted to PyTorch."""
+
+
+def require_portable(name: str, what: str) -> None:
+    """Raises ValueError unless ``name`` is one of `HIDDEN_ACTIVATIONS`.
+
+    Args:
+      name: the activation name.
+      what: the argument it came from, e.g. ``"predictive_state_hidden_layers[0]"``.
+    """
+    if name not in HIDDEN_ACTIVATIONS:
+        raise ValueError(
+            f"{what}: unknown activation {name!r}; the activations both backends build alike "
+            f"are {list(HIDDEN_ACTIVATIONS)}"
+        )
+
+
+ActivationCheck = Callable[[str, str], None]
 
 
 def check_hidden_layer(entry: Any, what: str) -> tuple[int, str]:
@@ -77,11 +113,97 @@ class Spec:
     treatment_embedding_units: int | None
     dropout_rate: float
     l1: float
+    max_time: float | None = None  # largest time in the data (survival families), or None
 
     @property
     def n_states(self) -> int:
         """K."""
         return self.mixture.n_states
+
+    def get_config(self) -> dict:
+        """The build arguments as JSON-friendly values, without the mixture.
+
+        Each backend serializes its own mixture beside this config (Keras on `CausalOutput`,
+        PyTorch in the model config), so the config is the same dict in both. `from_config`
+        inverts it.
+        """
+        return {
+            "n_features": self.n_features,
+            "architecture": self.architecture,
+            "predictive_state_hidden_layers": [
+                list(h) for h in self.predictive_state_hidden_layers
+            ],
+            "outcome_hidden_layers": [list(h) for h in self.outcome_hidden_layers],
+            "outcome_heads": {
+                name: {
+                    "hidden_layer": None if h.hidden_layer is None else list(h.hidden_layer),
+                    "constant": h.constant,
+                    "per_state": h.per_state,
+                }
+                for name, h in self.heads.items()
+            },
+            "treatment_embedding_units": self.treatment_embedding_units,
+            "dropout_rate": self.dropout_rate,
+            "l1": self.l1,
+            "outcome_init": {
+                p.name: float(p.init) for p in self.outcome_params if p.init is not None
+            },
+            "treatment_init": (
+                None if self.treatment_init is None else np.asarray(self.treatment_init).tolist()
+            ),
+            "max_time": None if self.max_time is None else float(self.max_time),
+        }
+
+    @classmethod
+    def from_config(
+        cls,
+        config: Mapping[str, Any],
+        mixture: MixtureSpec,
+        check_activation: ActivationCheck = require_portable,
+    ) -> "Spec":
+        """Rebuilds a Spec from `get_config` and the model's mixture.
+
+        The config goes through `make_spec`, so it is validated exactly like `build_model`
+        arguments (a hand-edited config can't skip a check). A missing ``max_time`` reads as
+        None. The returned Spec holds ``mixture`` itself.
+
+        Args:
+          config: a `get_config` dict (a missing ``max_time`` key is allowed).
+          mixture: the model's state mixture (its families and K).
+          check_activation: see `make_spec`.
+        """
+        treatment_init = config.get("treatment_init")
+        heads = {
+            name: HeadSpec(
+                hidden_layer=None if h["hidden_layer"] is None else tuple(h["hidden_layer"]),
+                constant=h["constant"],
+                per_state=h["per_state"],
+            )
+            for name, h in config["outcome_heads"].items()
+        }
+        spec = make_spec(
+            type(mixture),
+            mixture.n_states,
+            config["n_features"],
+            mixture.outcome_family,
+            mixture.treatment_family,
+            config["architecture"],
+            [tuple(h) for h in config["predictive_state_hidden_layers"]],
+            [tuple(h) for h in config["outcome_hidden_layers"]],
+            heads,
+            config["treatment_embedding_units"],
+            config["dropout_rate"],
+            config["l1"],
+            config.get("outcome_init") or None,
+            (
+                None
+                if treatment_init is None
+                else dict(zip(mixture.treatment_family.param_names, treatment_init))
+            ),
+            config.get("max_time"),
+            check_activation=check_activation,
+        )
+        return dataclasses.replace(spec, mixture=mixture)
 
 
 def positive_int(value: Any, what: str) -> int:
@@ -150,8 +272,15 @@ def make_spec(
     outcome_init: Mapping[str, float] | None,
     treatment_init: Mapping[str, Any] | None,
     max_time: float | None,
+    *,
+    check_activation: ActivationCheck = require_portable,
 ) -> Spec:
-    """Validates every `build_model` argument before any layer is created."""
+    """Validates every `build_model` argument before any layer is created.
+
+    ``check_activation(name, what)`` is called once for every hidden-layer activation (the
+    state network, the outcome trunk and each non-constant `HeadSpec`); it raises to reject a
+    name. The default accepts `HIDDEN_ACTIVATIONS` only.
+    """
     n_states = positive_int(n_states, "n_states")
     n_features = positive_int(n_features, "n_features")
     if architecture not in ARCHITECTURES:
@@ -187,18 +316,31 @@ def make_spec(
     if l1 < 0:
         raise ValueError(f"l1 must be >= 0, got {l1!r}")
 
+    state_layers = check_hidden_layers(
+        predictive_state_hidden_layers, "predictive_state_hidden_layers"
+    )
+    outcome_layers = check_hidden_layers(outcome_hidden_layers, "outcome_hidden_layers")
+    for field, entries in (
+        ("predictive_state_hidden_layers", state_layers),
+        ("outcome_hidden_layers", outcome_layers),
+    ):
+        for i, (_, activation) in enumerate(entries):
+            check_activation(activation, f"{field}[{i}]")
+    for name, head in heads.items():
+        if head.hidden_layer is not None and not head.constant:
+            check_activation(head.hidden_layer[1], f"outcome_heads[{name!r}].hidden_layer")
+
     return Spec(
         mixture=mixture,
         n_features=n_features,
         outcome_params=tuple(outcome_params),
         treatment_init=treatment_init_array(treatment_family, treatment_init, n_states),
         architecture=architecture,
-        predictive_state_hidden_layers=check_hidden_layers(
-            predictive_state_hidden_layers, "predictive_state_hidden_layers"
-        ),
-        outcome_hidden_layers=check_hidden_layers(outcome_hidden_layers, "outcome_hidden_layers"),
+        predictive_state_hidden_layers=state_layers,
+        outcome_hidden_layers=outcome_layers,
         heads=heads,
         treatment_embedding_units=treatment_embedding_units,
         dropout_rate=float(dropout_rate),
         l1=float(l1),
+        max_time=None if max_time is None else float(max_time),
     )
