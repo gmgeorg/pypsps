@@ -107,6 +107,7 @@ def test_predict_ate_continuous_weibull_end_to_end():
 
 
 def _fitted_continuous_model():
+    """A small continuous Weibull model fitted for a few epochs, with its inputs and y_true."""
     from ._continuous import continuous_model, synthetic_continuous_survival
 
     tf.keras.utils.set_random_seed(0)
@@ -124,6 +125,7 @@ def _manual_curve(model, features, grid, baseline, posterior):
     n = features.shape[0]
 
     def mixed(a):
+        """Per-unit mixed outcome mean at dose ``a``."""
         pred = model.predict([features, np.full((n, 1), a, "float32")], verbose=0)
         means = np.asarray(mixture.outcome_mean(pred, per_state=True))
         if posterior:
@@ -182,6 +184,74 @@ def test_predict_ute_continuous_weights_posterior_shape_and_frame():
 
 
 def test_predict_ate_continuous_rejects_unknown_weights():
+    """An unknown ``weights`` value raises ValueError."""
     model, inputs, _ = _fitted_continuous_model()
     with pytest.raises(ValueError, match="weights must be one of"):
         inference.predict_ate_continuous(model, inputs[0], [0.0, 1.0], weights="marginal")
+
+
+def _fitted_binary_model():
+    """A small binary-treatment toy model fitted for a few epochs, with its inputs."""
+    ks_data = datasets.KangSchafer(true_ate=10, seed=13).sample(n_samples=400)
+    tf.keras.utils.set_random_seed(13)
+    model = models.build_model(
+        **presets.toy(n_states=3, n_features=ks_data.features.shape[1], compile=True)
+    )
+    inputs, outputs = ks_data.to_keras_inputs_outputs()
+    model.fit(inputs, outputs, epochs=3, batch_size=64, verbose=0)
+    return model, inputs
+
+
+def _manual_binary_ute(model, features, posterior):
+    """UTE from the model's own mixture pieces: the reference for the `weights` option."""
+    from ...keras.mixture import StateMixture
+
+    mixture = StateMixture.from_model(model)
+    n = features.shape[0]
+
+    def mixed(a):
+        """Per-unit mixed outcome mean at treatment ``a``."""
+        treatment = np.full(n, a, "float32")  # the binary toy model takes a 1-D treatment
+        pred = model.predict([features, treatment], verbose=0)
+        means = np.asarray(mixture.outcome_mean(pred, per_state=True))
+        if posterior:
+            y_a = np.zeros((n, mixture.layout.n_outcome_true_cols + 1), "float32")
+            y_a[:, -1] = a
+            w = np.asarray(mixture.state_posterior(y_a, pred))
+        else:
+            w = np.asarray(mixture.layout.decode_pred(pred).state_weights)
+        return (w * means).sum(axis=1)
+
+    return mixed(1.0) - mixed(0.0)
+
+
+def test_predict_ute_binary_weights_match_manual_computation():
+    """weights="prior" is the default and the existing behavior; "posterior" follows Bayes' rule."""
+    model, inputs = _fitted_binary_model()
+    default = inference.predict_ute_binary(model, inputs[0])
+    prior = inference.predict_ute_binary(model, inputs[0], weights="prior")
+    np.testing.assert_array_equal(default, prior)
+    np.testing.assert_allclose(
+        prior, _manual_binary_ute(model, inputs[0], posterior=False), rtol=1e-4, atol=1e-6
+    )
+
+    post = inference.predict_ute_binary(model, inputs[0], weights="posterior")
+    np.testing.assert_allclose(
+        post, _manual_binary_ute(model, inputs[0], posterior=True), rtol=1e-4, atol=1e-6
+    )
+    assert np.all(np.isfinite(post))
+    assert not np.allclose(post, prior)  # treatment is informative about the state here
+
+
+def test_predict_ate_binary_weights_passes_through_and_validates():
+    """predict_ate_binary forwards ``weights``; the UTE keeps its index; bad values raise."""
+    model, inputs = _fitted_binary_model()
+    for weights in ("prior", "posterior"):
+        ate = inference.predict_ate_binary(model, inputs[0], weights=weights)
+        ute = inference.predict_ute_binary(model, inputs[0], weights=weights)
+        assert ate == pytest.approx(float(np.mean(ute)))
+    frame = pd.DataFrame(inputs[0], index=range(5, 5 + inputs[0].shape[0]))
+    ute_frame = inference.predict_ute_binary(model, frame, weights="posterior")
+    assert isinstance(ute_frame, pd.Series) and ute_frame.index.equals(frame.index)
+    with pytest.raises(ValueError, match="weights must be one of"):
+        inference.predict_ute_binary(model, inputs[0], weights="marginal")

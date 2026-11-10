@@ -48,7 +48,7 @@ def predict_counterfactual(model: Any, features: Any, treatment: Any) -> pd.Seri
     return _backend.predict(model, features, treatment)
 
 
-def predict_ute_binary(model: Any, features: Any) -> pd.Series | np.ndarray:
+def predict_ute_binary(model: Any, features: Any, weights: str = "prior") -> pd.Series | np.ndarray:
     """Predicts unit-level treatment effect for binary treatment.
 
     The outcome family comes from the model (`StateMixture.from_model`), so this also works
@@ -61,28 +61,47 @@ def predict_ute_binary(model: Any, features: Any) -> pd.Series | np.ndarray:
         pd.DataFrame/np.ndarray, but can also be non-standard
         data structure as long as the pypsps model can use it as
         input to model.predict([features, ...]).
+      weights: which state weights mix the per-state outcome means: ``"prior"`` (default),
+        P(S | X), or ``"posterior"``, P(S | X, A = a) for a = 0 and a = 1. With the posterior
+        weights the effect is the difference of the model's conditional means
+        E[Y | A = 1, x] - E[Y | A = 0, x]. See `predict_ute_continuous` for the details.
 
     Returns:
       A pd.Series (if features is a DataFrame) or a np.ndarray of same number of
       rows as features.
+
+    Raises:
+      ValueError: if ``weights`` is not ``"prior"`` or ``"posterior"``.
     """
-    outcome_mean_pred0, weights = _backend.state_means_and_weights(
-        model, features, np.zeros(shape=features.shape[0])
+    _backend.check_weights(weights)
+    outcome_mean_pred0, weights0 = _backend.state_means_and_weights(
+        model, features, np.zeros(shape=features.shape[0]), weights
     )
-    outcome_mean_pred1, _ = _backend.state_means_and_weights(
-        model, features, np.ones(shape=features.shape[0])
+    outcome_mean_pred1, weights1 = _backend.state_means_and_weights(
+        model, features, np.ones(shape=features.shape[0]), weights
     )
 
-    utes = outcome_mean_pred1 - outcome_mean_pred0
-    weighted_ute = (weights * utes).sum(axis=1)
+    if weights == "prior":
+        # The prior weights do not depend on the treatment: weight the state differences.
+        weighted_ute = (weights0 * (outcome_mean_pred1 - outcome_mean_pred0)).sum(axis=1)
+    else:
+        weighted_ute = (weights1 * outcome_mean_pred1).sum(axis=1) - (
+            weights0 * outcome_mean_pred0
+        ).sum(axis=1)
     if isinstance(features, pd.DataFrame):
         return pd.Series(weighted_ute, index=features.index, name="ute")
     return weighted_ute
 
 
-def predict_ate_binary(model: Any, features: pd.DataFrame) -> float:
-    """Computes average treatment effect as averaging UTE estimates."""
-    return predict_ute_binary(model, features).mean()
+def predict_ate_binary(model: Any, features: pd.DataFrame, weights: str = "prior") -> float:
+    """Computes average treatment effect as averaging UTE estimates.
+
+    Args:
+      model: a trained pypsps model (Keras or PyTorch).
+      features: features (X) for the causal model.
+      weights: ``"prior"`` (default) or ``"posterior"`` state weights; see `predict_ute_binary`.
+    """
+    return predict_ute_binary(model, features, weights=weights).mean()
 
 
 def predict_ute_continuous(

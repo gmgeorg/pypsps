@@ -10,8 +10,8 @@
   They read the outcome family from the model
   (`pypsps.keras.mixture.StateMixture.from_model`), so they also work on a model loaded
   with `compile=False`.
-* **`weights="prior" | "posterior"`** (continuous treatment, on `predict_ate_continuous` and
-  `predict_ute_continuous`): which state weights mix the per-state outcome means. `"prior"`
+* **`weights="prior" | "posterior"`** (on `predict_ate_*` and `predict_ute_*`, binary and
+  continuous treatment): which state weights mix the per-state outcome means. `"prior"`
   (default) uses `P(S | X)`, which does not depend on the treatment; these are the weights the
   `"interventional"` outcome likelihood mixes with in training. `"posterior"` uses
   `P(S | X, A = a)`, by Bayes' rule from the per-state treatment density, so the effect is the

@@ -9,9 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-* `inference.predict_ute_continuous` and `inference.predict_ate_continuous` take
-  `weights="prior" | "posterior"`. `"prior"` (the default, unchanged) mixes the per-state outcome
-  means with `P(S | X)`; `"posterior"` mixes them with `P(S | X, A = a)`, computed from the
+* `inference.predict_ute_binary`, `predict_ate_binary`, `predict_ute_continuous` and
+  `predict_ate_continuous` take `weights="prior" | "posterior"`. `"prior"` (the default,
+  unchanged) mixes the per-state outcome means with `P(S | X)`; `"posterior"` mixes them with
+  `P(S | X, A = a)`, computed from the
   per-state treatment density, for Keras and PyTorch models. The prior and posterior weights are
   the ones the interventional and observational outcome likelihoods mix with in training. An
   unknown value raises `ValueError`.
