@@ -48,7 +48,7 @@ def predict_counterfactual(model: Any, features: Any, treatment: Any) -> pd.Seri
     return _backend.predict(model, features, treatment)
 
 
-def predict_ute_binary(model: Any, features: Any) -> pd.Series | np.ndarray:
+def predict_ute_binary(model: Any, features: Any, weights: str = "prior") -> pd.Series | np.ndarray:
     """Predicts unit-level treatment effect for binary treatment.
 
     The outcome family comes from the model (`StateMixture.from_model`), so this also works
@@ -61,28 +61,47 @@ def predict_ute_binary(model: Any, features: Any) -> pd.Series | np.ndarray:
         pd.DataFrame/np.ndarray, but can also be non-standard
         data structure as long as the pypsps model can use it as
         input to model.predict([features, ...]).
+      weights: which state weights mix the per-state outcome means: ``"prior"`` (default),
+        P(S | X), or ``"posterior"``, P(S | X, A = a) for a = 0 and a = 1. With the posterior
+        weights the effect is the difference of the model's conditional means
+        E[Y | A = 1, x] - E[Y | A = 0, x]. See `predict_ute_continuous` for the details.
 
     Returns:
       A pd.Series (if features is a DataFrame) or a np.ndarray of same number of
       rows as features.
+
+    Raises:
+      ValueError: if ``weights`` is not ``"prior"`` or ``"posterior"``.
     """
-    outcome_mean_pred0, weights = _backend.state_means_and_weights(
-        model, features, np.zeros(shape=features.shape[0])
+    _backend.check_weights(weights)
+    outcome_mean_pred0, weights0 = _backend.state_means_and_weights(
+        model, features, np.zeros(shape=features.shape[0]), weights
     )
-    outcome_mean_pred1, _ = _backend.state_means_and_weights(
-        model, features, np.ones(shape=features.shape[0])
+    outcome_mean_pred1, weights1 = _backend.state_means_and_weights(
+        model, features, np.ones(shape=features.shape[0]), weights
     )
 
-    utes = outcome_mean_pred1 - outcome_mean_pred0
-    weighted_ute = (weights * utes).sum(axis=1)
+    if weights == "prior":
+        # The prior weights do not depend on the treatment: weight the state differences.
+        weighted_ute = (weights0 * (outcome_mean_pred1 - outcome_mean_pred0)).sum(axis=1)
+    else:
+        weighted_ute = (weights1 * outcome_mean_pred1).sum(axis=1) - (
+            weights0 * outcome_mean_pred0
+        ).sum(axis=1)
     if isinstance(features, pd.DataFrame):
         return pd.Series(weighted_ute, index=features.index, name="ute")
     return weighted_ute
 
 
-def predict_ate_binary(model: Any, features: pd.DataFrame) -> float:
-    """Computes average treatment effect as averaging UTE estimates."""
-    return predict_ute_binary(model, features).mean()
+def predict_ate_binary(model: Any, features: pd.DataFrame, weights: str = "prior") -> float:
+    """Computes average treatment effect as averaging UTE estimates.
+
+    Args:
+      model: a trained pypsps model (Keras or PyTorch).
+      features: features (X) for the causal model.
+      weights: ``"prior"`` (default) or ``"posterior"`` state weights; see `predict_ute_binary`.
+    """
+    return predict_ute_binary(model, features, weights=weights).mean()
 
 
 def predict_ute_continuous(
@@ -90,6 +109,7 @@ def predict_ute_continuous(
     features: Any,
     treatment_grid: list[float],
     baseline_treatment: float | None = None,
+    weights: str = "prior",
 ) -> pd.DataFrame | np.ndarray:
     """Predicts unit-level treatment effect for continuous treatment.
 
@@ -106,11 +126,27 @@ def predict_ute_continuous(
       treatment_grid: grid of treatment values to get UTE for.  This will be the number of columns
         in the resulting array / dataframe
       baseline_treatment: what's the baseline treatment value.  If None, uses the avg of the treatment_grid.
+      weights: which state weights mix the per-state outcome means.
+
+        * ``"prior"`` (default): P(S | X) = P(S | X, do(A)), which does not depend on the
+          treatment. The unit effect is ``sum_k P(s_k | x) (m_k(a, x) - m_k(a_0, x))`` with
+          ``m_k = E[Y | a, x, s_k]``. These are the weights the ``"interventional"`` outcome
+          likelihood mixes with in training.
+        * ``"posterior"``: P(S | X, A = a), by Bayes' rule from the per-state treatment density.
+          The effect is ``sum_k P(s_k | x, a) m_k(a, x) - sum_k P(s_k | x, a_0) m_k(a_0, x)``,
+          the difference of the model's conditional means E[Y | a, x]. These are the weights the
+          ``"observational"`` outcome likelihood mixes with in training. Averaged over units it
+          is the g-formula for E[Y | a, X], which is the do(a) effect only if X alone removes
+          the confounding.
 
     Returns:
       A pd.DataFrame (if features is a DataFrame) or a np.ndarray of same number of
       rows as features; number of columns is the number of treatment values on the grid.
+
+    Raises:
+      ValueError: if ``weights`` is not ``"prior"`` or ``"posterior"``.
     """
+    _backend.check_weights(weights)
 
     if baseline_treatment is None:
         baseline_treatment = np.mean(np.array(treatment_grid))
@@ -118,15 +154,20 @@ def predict_ute_continuous(
     n_samples = features.shape[0]
     base_treatment = np.full((n_samples, 1), baseline_treatment)
 
-    mean_base, weights_base = _backend.state_means_and_weights(model, features, base_treatment)
+    mean_base, weights_base = _backend.state_means_and_weights(
+        model, features, base_treatment, weights
+    )
+    base_mixed = (weights_base * mean_base).sum(axis=1)
 
     utes = []
     for c in tqdm.tqdm(treatment_grid):
         c_treatment = np.full((n_samples, 1), c)
-        mean_c, _ = _backend.state_means_and_weights(model, features, c_treatment)
-        c_ute = mean_c - mean_base
-        # Weighted average across states.
-        c_ute_weighted = (weights_base * c_ute).sum(axis=1)
+        mean_c, weights_c = _backend.state_means_and_weights(model, features, c_treatment, weights)
+        if weights == "prior":
+            # The prior weights do not depend on the treatment: weight the state differences.
+            c_ute_weighted = (weights_base * (mean_c - mean_base)).sum(axis=1)
+        else:
+            c_ute_weighted = (weights_c * mean_c).sum(axis=1) - base_mixed
         utes.append(c_ute_weighted)
 
     utes = np.array(utes).transpose()
@@ -140,6 +181,7 @@ def predict_ate_continuous(
     features: Any,
     treatment_grid: list[float],
     baseline_treatment: float | None = None,
+    weights: str = "prior",
 ) -> pd.Series | np.ndarray:
     """Computes the average treatment effect (ATE) for continuous treatment.
 
@@ -152,12 +194,16 @@ def predict_ate_continuous(
       treatment_grid: grid of treatment values to get UTE for.  This will be the number of columns
         in the resulting array / dataframe
       baseline_treatment: what's the baseline treatment value.  If None, uses the avg of the treatment_grid.
+      weights: ``"prior"`` (default) or ``"posterior"`` state weights; see
+        `predict_ute_continuous`.
 
     Returns:
       A pd.Series (if features is a DataFrame) or a np.ndarray of same number of
       rows as the number of values in treatment grid.
     """
-    ute_cont = predict_ute_continuous(model, features, treatment_grid, baseline_treatment)
+    ute_cont = predict_ute_continuous(
+        model, features, treatment_grid, baseline_treatment, weights=weights
+    )
     ate_cont = ute_cont.mean(axis=0)
     if isinstance(ate_cont, pd.Series):
         ate_cont.name = "ate"

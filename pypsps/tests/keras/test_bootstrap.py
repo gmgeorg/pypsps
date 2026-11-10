@@ -2,9 +2,10 @@
 
 import numpy as np
 import pandas as pd
+import pytest
 import tensorflow as tf
 
-from ... import bootstrap, datasets
+from ... import bootstrap, datasets, inference
 from ...keras import models, presets
 
 tfk = tf.keras
@@ -105,3 +106,61 @@ def test_bootstrap_ate_binary_random_state_is_reproducible_and_controllable():
 
     pd.testing.assert_series_equal(same_a, same_b)
     assert not same_a.equals(different)
+
+
+def _record_inference_calls(monkeypatch, name, result):
+    """Replaces ``inference.<name>`` by a recorder that returns ``result``; returns its calls."""
+    calls = []
+
+    def fake(model, features, *args, **kwargs):
+        calls.append({"n_rows": features.shape[0], "args": args, "kwargs": kwargs})
+        return result
+
+    monkeypatch.setattr(inference, name, fake)
+    return calls
+
+
+@pytest.mark.parametrize(
+    "name, call",
+    [
+        (
+            "predict_ute_binary",
+            lambda **kw: bootstrap.bootstrap_ute_binary(
+                None, np.zeros((6, 2)), n_bootstraps=3, **kw
+            ),
+        ),
+        (
+            "predict_ate_binary",
+            lambda **kw: bootstrap.bootstrap_ate_binary(
+                None, np.zeros((6, 2)), n_bootstraps=3, **kw
+            ),
+        ),
+        (
+            "predict_ate_continuous",
+            lambda **kw: bootstrap.bootstrap_ate_continuous(
+                None, np.zeros((6, 2)), [0.0, 1.0], n_bootstraps=3, **kw
+            ),
+        ),
+    ],
+)
+def test_bootstrap_forwards_weights_to_the_inference_function(monkeypatch, name, call):
+    """Every replicate calls the inference function with the given ``weights``; default prior."""
+    result = {
+        "predict_ute_binary": np.zeros(6),
+        "predict_ate_binary": 0.0,
+        "predict_ate_continuous": np.zeros(2),
+    }[name]
+    calls = _record_inference_calls(monkeypatch, name, result)
+
+    call()
+    assert [c["kwargs"]["weights"] for c in calls] == ["prior"] * 3
+
+    calls.clear()
+    call(weights="posterior")
+    assert [c["kwargs"]["weights"] for c in calls] == ["posterior"] * 3
+    assert all(c["n_rows"] == 6 for c in calls)
+
+    calls.clear()
+    with pytest.raises(ValueError, match="weights must be one of"):
+        call(weights="marginal")
+    assert calls == []  # rejected before any replicate runs

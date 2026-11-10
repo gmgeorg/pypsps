@@ -5,6 +5,20 @@ All notable changes to `pypsps` will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## pypsps v0.7.2 - Nov 9, 2026
+
+### Added
+
+* `inference.predict_ute_binary`, `predict_ate_binary`, `predict_ute_continuous` and
+  `predict_ate_continuous` take `weights="prior" | "posterior"`. `"prior"` (the default,
+  unchanged) mixes the per-state outcome means with `P(S | X)`; `"posterior"` mixes them with
+  `P(S | X, A = a)`, computed from the
+  per-state treatment density, for Keras and PyTorch models. The prior and posterior weights are
+  the ones the interventional and observational outcome likelihoods mix with in training. An
+  unknown value raises `ValueError`.
+* `bootstrap.bootstrap_ute_binary`, `bootstrap_ate_binary` and `bootstrap_ate_continuous` take the
+  same `weights` argument (default `"prior"`) and pass it to every replicate.
+
 ## pypsps v0.7.1 - Nov 7, 2026
 
 ### Fixed
