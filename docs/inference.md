@@ -26,7 +26,9 @@
   outcome mean and the marginal propensity. They replace the column-count helpers that
   `pypsps.utils` had until v0.4.x (`split_y_pred`, `agg_outcome_pred`, ...).
 * **`pypsps.bootstrap`**: Offers non-parametric bootstrap estimation methods for
-  measuring uncertainty and generating confidence intervals for ATE estimates.
+  measuring uncertainty and generating confidence intervals for ATE estimates. The bootstrap
+  functions take the same `weights` argument as the inference functions and pass it to every
+  replicate.
 
 ## Example Notebooks
 

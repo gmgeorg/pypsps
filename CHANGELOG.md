@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-state treatment density, for Keras and PyTorch models. The prior and posterior weights are
   the ones the interventional and observational outcome likelihoods mix with in training. An
   unknown value raises `ValueError`.
+* `bootstrap.bootstrap_ute_binary`, `bootstrap_ate_binary` and `bootstrap_ate_continuous` take the
+  same `weights` argument (default `"prior"`) and pass it to every replicate.
 
 ## pypsps v0.7.1 - Nov 7, 2026
 
